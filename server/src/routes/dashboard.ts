@@ -913,6 +913,7 @@ const baseStyles = `
   .nav__links { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
   .nav__account { display: flex; align-items: center; gap: 0.75rem; margin-left: auto; }
   .nav__account-label { font-weight: 600; color: #1f2933; }
+  .nav__logout-form { margin: 0; }
   .nav__logout-button { background: #ef4444; color: #fff; border: none; border-radius: 999px; padding: 0.45rem 0.9rem; font-weight: 600; cursor: pointer; }
   .nav__logout-button:hover { background: #dc2626; }
   .nav a { color: #2563eb; text-decoration: none; font-weight: 500; padding-bottom: 0.25rem; }
@@ -1050,7 +1051,9 @@ const renderNav = (active: NavKey) => {
     <div class="nav__links">${links.join('')}</div>
     <div class="nav__account">
       <span class="nav__account-label">My Profile</span>
-      <button type="button" class="nav__logout-button" onclick="window.location.href='/dashboard/logout'">Log Out</button>
+      <form method="post" action="/dashboard/logout" class="nav__logout-form">
+        <button type="submit" class="nav__logout-button">Log Out</button>
+      </form>
     </div>
   </nav>`;
 };
