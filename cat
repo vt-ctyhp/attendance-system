@@ -1,0 +1,1 @@
+{"error":"Invalid request payload","code":"bad_request","requestId":"5fdad7d7-bf94-4b6f-912f-5ff452491302","details":{"issues":[{"path":"email","message":"Required","code":"invalid_type"},{"path":"deviceId","message":"Required","code":"invalid_type"}]}}

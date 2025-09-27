@@ -1,0 +1,222 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           Int       @id @default(autoincrement())
+  email        String    @unique
+  name         String
+  role         String    @default("employee")
+  passwordHash String
+  active       Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  sessions     Session[]
+  balance      PtoBalance?
+  timeRequests TimeRequest[]
+  approvedRequests TimeRequest[] @relation("TimeRequestApprover")
+  accrualRule  AccrualRule?
+  refreshTokens RefreshToken[]
+  authLogs     AuthAuditLog[]
+  timesheetEditRequests TimesheetEditRequest[]
+  reviewedTimesheetEdits TimesheetEditRequest[] @relation("TimesheetEditReviewer")
+  balanceLedgerEntries BalanceLedger[] @relation("BalanceLedgerUser")
+  createdBalanceLedgerEntries BalanceLedger[] @relation("BalanceLedgerCreatedBy")
+}
+
+model Session {
+  id                 String            @id @default(cuid())
+  userId             Int
+  user               User              @relation(fields: [userId], references: [id])
+  deviceId           String
+  startedAt          DateTime          @default(now())
+  endedAt            DateTime?
+  status             String            @default("active")
+  presencePlanCount  Int               @default(0)
+  presenceChecks     PresencePrompt[]
+  events             Event[]
+  minuteStats        MinuteStat[]
+  pauses             SessionPause[]
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+}
+
+model Event {
+  id        String     @id @default(cuid())
+  sessionId String
+  session   Session    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  ts        DateTime   @default(now())
+  type      String
+  payload   String
+}
+
+model MinuteStat {
+  id          Int       @id @default(autoincrement())
+  sessionId   String
+  session     Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  minuteStart DateTime
+  active      Boolean
+  idle        Boolean
+  keysCount   Int
+  mouseCount  Int
+  fgApp       String?
+  createdAt   DateTime  @default(now())
+
+  @@unique([sessionId, minuteStart])
+}
+
+model PresencePrompt {
+  id          String          @id @default(cuid())
+  sessionId   String
+  session     Session         @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  scheduledAt DateTime
+  triggeredAt DateTime?
+  expiresAt   DateTime?
+  respondedAt DateTime?
+  status      String          @default("scheduled")
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+}
+
+model TimeRequest {
+  id            String    @id @default(cuid())
+  userId        Int
+  user          User      @relation(fields: [userId], references: [id])
+  type          String
+  status        String    @default("pending")
+  startDate     DateTime
+  endDate       DateTime
+  hours         Float
+  reason        String?
+  approverId    Int?
+  approver      User?     @relation("TimeRequestApprover", fields: [approverId], references: [id])
+  approvedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model PtoBalance {
+  id           Int      @id @default(autoincrement())
+  userId       Int      @unique
+  user         User     @relation(fields: [userId], references: [id])
+  basePtoHours     Float    @default(0)
+  baseNonPtoHours  Float    @default(0)
+  baseMakeUpHours  Float    @default(0)
+  ptoHours         Float    @default(0)
+  nonPtoHours      Float    @default(0)
+  makeUpHours      Float    @default(0)
+  lastAccrualMonth String?
+  updatedAt    DateTime @updatedAt
+  createdAt    DateTime @default(now())
+}
+
+model BalanceLedger {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  user        User     @relation("BalanceLedgerUser", fields: [userId], references: [id], onDelete: Cascade)
+  type        String   @default("pto")
+  deltaHours  Float
+  reason      String?
+  createdById Int?
+  createdBy   User?    @relation("BalanceLedgerCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model AccrualRule {
+  id            Int      @id @default(autoincrement())
+  userId        Int?     @unique
+  user          User?    @relation(fields: [userId], references: [id])
+  isDefault     Boolean  @default(false)
+  hoursPerMonth Float
+  startDate     DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model RefreshToken {
+  id               String   @id @default(cuid())
+  userId           Int
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash        String   @unique
+  scope            String
+  deviceId         String?
+  ipAddress        String?
+  userAgent        String?
+  expiresAt        DateTime
+  createdAt        DateTime @default(now())
+  revokedAt        DateTime?
+  revokedReason    String?
+  replacedByTokenId String?
+
+  @@index([userId])
+}
+
+model AuthAuditLog {
+  id        String   @id @default(cuid())
+  email     String
+  userId    Int?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  event     String
+  success   Boolean
+  reason    String?
+  ipAddress String?
+  userAgent String?
+  deviceId  String?
+  createdAt DateTime @default(now())
+
+  @@index([email])
+  @@index([createdAt])
+}
+
+model Config {
+  key       String   @id
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model TimesheetEditRequest {
+  id              String   @id @default(cuid())
+  userId          Int
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  view            String
+  periodStart     DateTime
+  periodEnd       DateTime
+  targetDate      DateTime
+  requestedMinutes Int?
+  reason          String
+  status          String   @default("pending")
+  reviewerId      Int?
+  reviewer        User?    @relation("TimesheetEditReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+  adminNote       String?
+  reviewedAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([periodStart, periodEnd])
+}
+
+
+model SessionPause {
+  id             String     @id @default(cuid())
+  sessionId      String
+  session        Session    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  type           String
+  sequence       Int
+  startedAt      DateTime
+  endedAt        DateTime?
+  durationMinutes Int?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([sessionId, type, sequence])
+}

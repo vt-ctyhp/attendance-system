@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Presence Check</title>
+    <style>
+      :root {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        background: #f7f9fc;
+        color: #0f335e;
+      }
+
+      body {
+        margin: 0;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+      }
+
+      main {
+        width: 320px;
+        background: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 12px 28px rgba(15, 51, 94, 0.2);
+        padding: 24px;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 1.4rem;
+      }
+
+      p {
+        margin: 0 0 18px;
+        line-height: 1.4;
+      }
+
+      .actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 12px;
+      }
+
+      button {
+        border: none;
+        border-radius: 8px;
+        padding: 10px 16px;
+        font-size: 0.95rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.1s ease, box-shadow 0.1s ease;
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.6;
+      }
+
+      .button-secondary {
+        background: transparent;
+        color: #0f335e;
+        border: 1px solid rgba(15, 51, 94, 0.2);
+      }
+
+      .button-primary {
+        background: #1e64d8;
+        color: #ffffff;
+        box-shadow: 0 8px 18px rgba(30, 100, 216, 0.25);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Presence Check</h1>
+      <p id="presence-message">Please confirm your presence.</p>
+      <div class="actions">
+        <button type="button" id="presence-dismiss" class="button-secondary">Dismiss</button>
+        <button type="button" id="presence-confirm" class="button-primary">Confirm</button>
+      </div>
+    </main>
+    <script>
+      window.addEventListener('DOMContentLoaded', () => {
+        window.attendancePresence?.initialize();
+      });
+    </script>
+  </body>
+</html>
