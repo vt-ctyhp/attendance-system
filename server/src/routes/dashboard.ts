@@ -1,6 +1,6 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { randomUUID } from 'crypto';
-import { addDays, endOfDay, endOfMonth, parseISO, startOfDay, startOfMonth, subDays } from 'date-fns';
+import { addDays, endOfDay, endOfMonth, startOfDay, startOfMonth, subDays } from 'date-fns';
 import { formatInTimeZone, utcToZonedTime, zonedTimeToUtc } from 'date-fns-tz';
 import { z } from 'zod';
 import type { Prisma } from '@prisma/client';
@@ -161,33 +161,41 @@ const formatOptionalDate = (value: Date | null) => (value ? formatDateTime(value
 
 const toDateParam = (value: Date) => formatIsoDate(zonedStartOfDay(value));
 
+const parseDateInput = (value: string): Date | undefined => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const parsed = zonedTimeToUtc(`${trimmed}T00:00:00`, DASHBOARD_TIME_ZONE);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+};
+
 const parseDateParam = (value: unknown): Date => {
-  if (typeof value !== 'string' || !value) {
-    return zonedStartOfDay(new Date());
+  if (typeof value === 'string') {
+    const parsed = parseDateInput(value);
+    if (parsed) {
+      return zonedStartOfDay(parsed);
+    }
   }
-  const parsed = parseISO(`${value}T00:00:00`);
-  if (Number.isNaN(parsed.getTime())) {
-    return zonedStartOfDay(new Date());
-  }
-  return zonedStartOfDay(parsed);
+  return zonedStartOfDay(new Date());
 };
 
 const parseMonthParam = (value: unknown): Date => {
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}$/.test(value)) {
-    return zonedStartOfMonth(new Date());
+  if (typeof value === 'string' && /^\d{4}-\d{2}$/.test(value)) {
+    const parsed = parseDateInput(`${value}-01`);
+    if (parsed) {
+      return zonedStartOfMonth(parsed);
+    }
   }
-  return zonedStartOfMonth(parseISO(`${value}-01T00:00:00`));
+  return zonedStartOfMonth(new Date());
 };
 
 const parseDateOnlyParam = (value: unknown): Date | undefined => {
-  if (typeof value !== 'string' || !value) {
+  if (typeof value !== 'string') {
     return undefined;
   }
-  const parsed = parseISO(`${value}T00:00:00`);
-  if (Number.isNaN(parsed.getTime())) {
-    return undefined;
-  }
-  return zonedStartOfDay(parsed);
+  const parsed = parseDateInput(value);
+  return parsed ? zonedStartOfDay(parsed) : undefined;
 };
 
 const escapeCsv = (value: string | number) => {
