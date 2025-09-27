@@ -1223,6 +1223,7 @@ dashboardRouter.get('/today', async (req, res) => {
   const requestedDate = typeof req.query.date === 'string' ? parseDateParam(req.query.date) : zonedStartOfDay(new Date());
   const dailyData = await fetchDailySummaries(requestedDate);
   const { dayStart, dayEnd, dateParam, label, summaries, totals, requestBadges, pauses } = dailyData;
+  const requestedDateParam = typeof req.query.date === 'string' && req.query.date.trim().length > 0 ? req.query.date.trim() : dateParam;
 
   const wantsCsv = typeof req.query.download === 'string' && req.query.download.toLowerCase() === 'csv';
   if (wantsCsv) {
@@ -1281,7 +1282,7 @@ dashboardRouter.get('/today', async (req, res) => {
           <form method="get" action="/dashboard/today" class="filters">
             <label>
               <span>Date</span>
-              <input type="date" name="date" value="${dateParam}" />
+              <input type="date" name="date" value="${escapeHtml(requestedDateParam)}" />
             </label>
             <button type="submit">Apply</button>
           </form>
@@ -2118,6 +2119,11 @@ dashboardRouter.get('/overview', async (req, res) => {
     fetchMonthlyAggregates(monthInput)
   ]);
 
+  const formDateParam = typeof req.query.date === 'string' && req.query.date.trim().length > 0 ? req.query.date.trim() : dailyData.dateParam;
+  const formStartParam = typeof req.query.start === 'string' && req.query.start.trim().length > 0 ? req.query.start.trim() : weeklyData.startParam;
+  const formMonthParam =
+    typeof req.query.month === 'string' && req.query.month.trim().length > 0 ? req.query.month.trim() : monthlyData.monthParam;
+
   const rangeStartForNote =
     activeView === 'today'
       ? dailyData.dayStart
@@ -2172,7 +2178,7 @@ dashboardRouter.get('/overview', async (req, res) => {
           <input type="hidden" name="view" value="today" />
           <label>
             <span>Date</span>
-            <input type="date" name="date" value="${dailyData.dateParam}" />
+            <input type="date" name="date" value="${escapeHtml(formDateParam)}" />
           </label>
           <button type="submit">Apply</button>
         </form>
@@ -2220,7 +2226,7 @@ dashboardRouter.get('/overview', async (req, res) => {
           <input type="hidden" name="view" value="weekly" />
           <label>
             <span>Week starting</span>
-            <input type="date" name="start" value="${weeklyData.startParam}" />
+            <input type="date" name="start" value="${escapeHtml(formStartParam)}" />
           </label>
           <button type="submit">Apply</button>
         </form>
@@ -2268,7 +2274,7 @@ dashboardRouter.get('/overview', async (req, res) => {
           <input type="hidden" name="view" value="monthly" />
           <label>
             <span>Month</span>
-            <input type="month" name="month" value="${monthlyData.monthParam}" />
+            <input type="month" name="month" value="${escapeHtml(formMonthParam)}" />
           </label>
           <button type="submit">Apply</button>
         </form>
