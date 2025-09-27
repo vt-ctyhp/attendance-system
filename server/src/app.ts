@@ -39,6 +39,8 @@ const extractSessionId = (req: express.Request): string | null => {
 export const buildApp = () => {
   const app = express();
 
+  const allowAnonDashboard = process.env.DASHBOARD_ALLOW_ANON === 'true';
+
   app.use(cors());
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: true }));
@@ -100,7 +102,10 @@ export const buildApp = () => {
   });
 
   app.get('/', (_req, res) => {
-    res.type('text/html').send('<h1>Attendance Server</h1><p>API available under /api</p>');
+    if (allowAnonDashboard) {
+      return res.redirect('/dashboard/overview');
+    }
+    return res.redirect('/dashboard/login');
   });
 
   const apiRouter = Router();
