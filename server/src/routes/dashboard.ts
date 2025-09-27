@@ -909,7 +909,12 @@ const baseStyles = `
   tr:hover { background: #f9fafb; }
   .totals th, .totals td { font-weight: 600; background: #e0e7ff; }
   .empty { padding: 2rem; text-align: center; color: #6b7280; background: #fff; border-radius: 6px; margin-top: 1rem; }
-  .nav { display: flex; gap: 0.75rem; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; }
+  .nav { display: flex; justify-content: space-between; gap: 0.75rem; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; }
+  .nav__links { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
+  .nav__account { display: flex; align-items: center; gap: 0.75rem; margin-left: auto; }
+  .nav__account-label { font-weight: 600; color: #1f2933; }
+  .nav__logout-button { background: #ef4444; color: #fff; border: none; border-radius: 999px; padding: 0.45rem 0.9rem; font-weight: 600; cursor: pointer; }
+  .nav__logout-button:hover { background: #dc2626; }
   .nav a { color: #2563eb; text-decoration: none; font-weight: 500; padding-bottom: 0.25rem; }
   .nav a.active { border-bottom: 2px solid #2563eb; }
   .card { background: #fff; padding: 1.25rem; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); margin-top: 1.5rem; max-width: 100%; }
@@ -1030,7 +1035,7 @@ type NavKey =
 const renderNav = (active: NavKey) => {
   const link = (href: string, label: string, key: NavKey) =>
     `<a href="${href}"${active === key ? ' class="active"' : ''}>${label}</a>`;
-  return `<nav class="nav no-print">${[
+  const links = [
     link('/dashboard/overview', 'Overview', 'overview'),
     link('/dashboard/today', 'Today', 'today'),
     link('/dashboard/weekly', 'Weekly', 'weekly'),
@@ -1039,7 +1044,15 @@ const renderNav = (active: NavKey) => {
     link('/dashboard/requests', 'Requests', 'requests'),
     link('/dashboard/balances', 'Balances', 'balances'),
     link('/dashboard/settings', 'Settings', 'settings')
-  ].join('')}</nav>`;
+  ];
+
+  return `<nav class="nav no-print">
+    <div class="nav__links">${links.join('')}</div>
+    <div class="nav__account">
+      <span class="nav__account-label">My Profile</span>
+      <button type="button" class="nav__logout-button" onclick="window.location.href='/dashboard/logout'">Log Out</button>
+    </div>
+  </nav>`;
 };
 
 const setDashboardTokenCookie = (res: Response, token: string) => {
