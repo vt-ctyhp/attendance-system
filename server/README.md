@@ -3,9 +3,21 @@
 ## Tests
 - Install dependencies with `npm install` (once).
 - Ensure Prisma client is generated: `npx prisma generate`.
-- Run the Vitest suite: `npm test`.
+- Start a Postgres instance locally. A quick option is
+  ```bash
+  docker run --rm -d \
+    --name attendance-postgres \
+    -e POSTGRES_USER=attendance \
+    -e POSTGRES_PASSWORD=attendance \
+    -e POSTGRES_DB=attendance_test \
+    -p 5432:5432 \
+    postgres:15-alpine
+  ```
+- Run the suite with `npm test`. The script automatically points `DATABASE_URL` and `TEST_DATABASE_URL` at
+  `postgresql://attendance:attendance@127.0.0.1:5432/attendance_test?schema=public` unless you override them.
 
-Vitest runs against a disposable SQLite database in `tests/test.db`, applying Prisma migrations automatically.
+Vitest runs sequentially, truncates the Postgres schema between tests, and now includes a health check that
+performs a write/read round-trip.
 
 ## Deployment
 
@@ -14,6 +26,16 @@ Vitest runs against a disposable SQLite database in `tests/test.db`, applying Pr
 - Run `npm run cutover:prod` from the workspace root to provision Postgres, build the server image, apply migrations (falling back to `db:push`), and probe `/api/health` and the dashboard overview.
 - After cutover, verify externally with `npm run smoke:prod`; set `ADMIN_TOKEN` and optionally `SMOKE_USER_ID` when you need authenticated probes.
 - If you must return to the legacy SQLite stack, execute `npm run rollback:sqlite`; this restores the pre-cutover compose/env files from `deploy/backup-pre-cutover` and rebuilds the old container.
+
+## Sample data
+
+Populate the dashboard with demo activity by running:
+
+```
+npm run seed:sample
+```
+
+This seeds two employees (`chloe.sanchez@example.com`, `marcus.lee@example.com`) with the password `SamplePass123!`, recent sessions, and a PTO request so dashboard views have realistic information immediately.
 
 ## Smoke Test
 Run the end-to-end smoke script to exercise critical APIs:

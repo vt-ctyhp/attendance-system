@@ -64,6 +64,7 @@ const extractSessionId = (req) => {
 };
 const buildApp = () => {
     const app = (0, express_1.default)();
+    const allowAnonDashboard = process.env.DASHBOARD_ALLOW_ANON === 'true';
     app.use((0, cors_1.default)());
     app.use(express_1.default.json({ limit: '1mb' }));
     app.use(express_1.default.urlencoded({ extended: true }));
@@ -118,7 +119,10 @@ const buildApp = () => {
         res.json({ status: 'ok' });
     });
     app.get('/', (_req, res) => {
-        res.type('text/html').send('<h1>Attendance Server</h1><p>API available under /api</p>');
+        if (allowAnonDashboard) {
+            return res.redirect('/dashboard/overview');
+        }
+        return res.redirect('/dashboard/login');
     });
     const apiRouter = (0, express_1.Router)();
     apiRouter.use('/', health_1.healthRouter);

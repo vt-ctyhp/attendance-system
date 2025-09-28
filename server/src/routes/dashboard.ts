@@ -1,6 +1,6 @@
-import { Router } from 'express';
+import { Router, type Request, type Response, type NextFunction } from 'express';
 import { randomUUID } from 'crypto';
-import { addDays, endOfDay, endOfMonth, parseISO, startOfDay, startOfMonth, subDays } from 'date-fns';
+import { addDays, endOfDay, endOfMonth, startOfDay, startOfMonth, subDays } from 'date-fns';
 import { formatInTimeZone, utcToZonedTime, zonedTimeToUtc } from 'date-fns-tz';
 import { z } from 'zod';
 import type { Prisma } from '@prisma/client';
@@ -16,7 +16,18 @@ import {
   type TimesheetEditStatus
 } from '../types';
 import type { AuthenticatedRequest } from '../auth';
-import { authenticate, requireRole, hashPassword } from '../auth';
+import {
+  authenticate,
+  requireRole,
+  hashPassword,
+  verifyPassword,
+  generateToken,
+  TOKEN_TTL_SECONDS,
+  DASHBOARD_TOKEN_COOKIE_NAME,
+  extractTokenFromRequest,
+  resolveUserFromToken
+} from '../auth';
+import { env } from '../env';
 import { isEmailSessionEnabled, setEmailSessionEnabled } from '../services/featureFlags';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { HttpError } from '../errors';
@@ -126,6 +137,12 @@ const DASHBOARD_TIME_ZONE = process.env.DASHBOARD_TIME_ZONE ?? 'America/Los_Ange
 const ISO_DATE_TIME = "yyyy-MM-dd'T'HH:mm:ssXXX";
 const ISO_DATE = 'yyyy-MM-dd';
 
+const DASHBOARD_COOKIE_PATH = '/dashboard';
+const DEFAULT_DASHBOARD_REDIRECT = '/dashboard/overview';
+const DASHBOARD_LOGIN_ROUTE = '/dashboard/login';
+const DASHBOARD_COOKIE_MAX_AGE_MS = TOKEN_TTL_SECONDS * 1000;
+const IS_PRODUCTION = env.NODE_ENV === 'production';
+
 const zoned = (date: Date) => utcToZonedTime(date, DASHBOARD_TIME_ZONE);
 const zonedStartOfDay = (date: Date) => zonedTimeToUtc(startOfDay(zoned(date)), DASHBOARD_TIME_ZONE);
 const zonedEndOfDay = (date: Date) => zonedTimeToUtc(endOfDay(zoned(date)), DASHBOARD_TIME_ZONE);
@@ -144,33 +161,41 @@ const formatOptionalDate = (value: Date | null) => (value ? formatDateTime(value
 
 const toDateParam = (value: Date) => formatIsoDate(zonedStartOfDay(value));
 
+const parseDateInput = (value: string): Date | undefined => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const parsed = zonedTimeToUtc(`${trimmed}T00:00:00`, DASHBOARD_TIME_ZONE);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+};
+
 const parseDateParam = (value: unknown): Date => {
-  if (typeof value !== 'string' || !value) {
-    return zonedStartOfDay(new Date());
+  if (typeof value === 'string') {
+    const parsed = parseDateInput(value);
+    if (parsed) {
+      return zonedStartOfDay(parsed);
+    }
   }
-  const parsed = parseISO(`${value}T00:00:00`);
-  if (Number.isNaN(parsed.getTime())) {
-    return zonedStartOfDay(new Date());
-  }
-  return zonedStartOfDay(parsed);
+  return zonedStartOfDay(new Date());
 };
 
 const parseMonthParam = (value: unknown): Date => {
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}$/.test(value)) {
-    return zonedStartOfMonth(new Date());
+  if (typeof value === 'string' && /^\d{4}-\d{2}$/.test(value)) {
+    const parsed = parseDateInput(`${value}-01`);
+    if (parsed) {
+      return zonedStartOfMonth(parsed);
+    }
   }
-  return zonedStartOfMonth(parseISO(`${value}-01T00:00:00`));
+  return zonedStartOfMonth(new Date());
 };
 
 const parseDateOnlyParam = (value: unknown): Date | undefined => {
-  if (typeof value !== 'string' || !value) {
+  if (typeof value !== 'string') {
     return undefined;
   }
-  const parsed = parseISO(`${value}T00:00:00`);
-  if (Number.isNaN(parsed.getTime())) {
-    return undefined;
-  }
-  return zonedStartOfDay(parsed);
+  const parsed = parseDateInput(value);
+  return parsed ? zonedStartOfDay(parsed) : undefined;
 };
 
 const escapeCsv = (value: string | number) => {
@@ -188,6 +213,213 @@ const escapeHtml = (value: string) =>
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+
+
+const isDashboardRole = (role: string) => role === 'admin' || role === 'manager';
+
+const sanitizeRedirect = (value: unknown): string => {
+  if (typeof value !== 'string') {
+    return DEFAULT_DASHBOARD_REDIRECT;
+  }
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('/')) {
+    return DEFAULT_DASHBOARD_REDIRECT;
+  }
+  if (trimmed.startsWith('//')) {
+    return DEFAULT_DASHBOARD_REDIRECT;
+  }
+  if (!trimmed.startsWith('/dashboard')) {
+    return DEFAULT_DASHBOARD_REDIRECT;
+  }
+  if (trimmed.startsWith(DASHBOARD_LOGIN_ROUTE)) {
+    return DEFAULT_DASHBOARD_REDIRECT;
+  }
+  return trimmed;
+};
+
+const isHtmlRequest = (req: Request) => {
+  const accept = req.headers.accept;
+  if (typeof accept !== 'string' || accept.trim() === '') {
+    return true;
+  }
+  return accept.includes('text/html') || accept.includes('*/*');
+};
+
+const mapLoginError = (code: string | undefined) => {
+  switch (code) {
+    case 'invalid':
+      return 'Invalid email or password.';
+    case 'forbidden':
+      return 'Your account does not have access to the dashboard.';
+    case 'rate_limited':
+      return 'Too many attempts. Try again in a minute.';
+    default:
+      return undefined;
+  }
+};
+
+const mapLoginMessage = (code: string | undefined) => {
+  switch (code) {
+    case 'logged_out':
+      return 'You are now signed out.';
+    case 'session_expired':
+      return 'Your session has expired. Please sign in again.';
+    default:
+      return undefined;
+  }
+};
+
+const renderLoginPage = (options: {
+  redirectTo: string;
+  email?: string;
+  errorCode?: string;
+  messageCode?: string;
+}) => {
+  const errorMessage = mapLoginError(options.errorCode);
+  const message = mapLoginMessage(options.messageCode);
+  const emailValue = options.email ? escapeHtml(options.email) : '';
+  const redirectValue = escapeHtml(options.redirectTo);
+
+  return `<!doctype html>
+  <html lang="en">
+    <head>
+      <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1" />
+      <title>Attendance Dashboard — Sign In</title>
+      <style>
+        :root {
+          color-scheme: light;
+          font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        }
+        body {
+          margin: 0;
+          min-height: 100vh;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: radial-gradient(circle at top, #1e3a8a 0%, #0f172a 55%, #0b1120 100%);
+          color: #0f172a;
+        }
+        .login-wrapper {
+          width: min(420px, calc(100% - 2rem));
+          padding: 1rem;
+        }
+        .login-card {
+          background: rgba(255, 255, 255, 0.98);
+          border-radius: 14px;
+          box-shadow: 0 20px 55px rgba(15, 23, 42, 0.35);
+          padding: 2.25rem clamp(1.5rem, 4vw, 2.5rem);
+          backdrop-filter: blur(12px);
+        }
+        .login-card h1 {
+          margin: 0 0 0.35rem;
+          font-size: 1.75rem;
+          font-weight: 700;
+          color: #0f172a;
+          letter-spacing: -0.01em;
+        }
+        .login-card p {
+          margin: 0 0 1.5rem;
+          color: #475569;
+          font-size: 0.95rem;
+        }
+        form {
+          display: flex;
+          flex-direction: column;
+          gap: 1rem;
+        }
+        label {
+          font-size: 0.85rem;
+          font-weight: 600;
+          letter-spacing: 0.01em;
+          color: #1f2937;
+        }
+        input[type="email"],
+        input[type="password"] {
+          width: 100%;
+          padding: 0.65rem 0.75rem;
+          border-radius: 10px;
+          border: 1px solid #dbeafe;
+          background: #f8fafc;
+          font-size: 0.95rem;
+          transition: border 0.2s ease, box-shadow 0.2s ease;
+        }
+        input[type="email"]:focus,
+        input[type="password"]:focus {
+          border-color: #2563eb;
+          box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+          outline: none;
+        }
+        button[type="submit"] {
+          margin-top: 0.5rem;
+          display: inline-flex;
+          justify-content: center;
+          align-items: center;
+          padding: 0.7rem 1rem;
+          border-radius: 999px;
+          border: none;
+          font-size: 0.95rem;
+          font-weight: 600;
+          letter-spacing: 0.02em;
+          color: #fff;
+          background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+          cursor: pointer;
+          transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+        button[type="submit"]:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 12px 30px rgba(37, 99, 235, 0.25);
+        }
+        .alert {
+          border-radius: 10px;
+          padding: 0.75rem 0.85rem;
+          font-size: 0.88rem;
+          font-weight: 500;
+          margin-bottom: 0.75rem;
+        }
+        .alert--error {
+          background: rgba(239, 68, 68, 0.12);
+          color: #b91c1c;
+          border: 1px solid rgba(239, 68, 68, 0.18);
+        }
+        .alert--info {
+          background: rgba(37, 99, 235, 0.12);
+          color: #1d4ed8;
+          border: 1px solid rgba(37, 99, 235, 0.2);
+        }
+        @media (max-width: 520px) {
+          .login-card {
+            padding: 2rem 1.5rem;
+          }
+        }
+      </style>
+    </head>
+    <body>
+      <main class="login-wrapper">
+        <section class="login-card">
+          <h1>Attendance Dashboard</h1>
+          <p>Sign in with your administrator credentials to continue.</p>
+          ${message ? `<div class="alert alert--info">${escapeHtml(message)}</div>` : ''}
+          ${errorMessage ? `<div class="alert alert--error">${escapeHtml(errorMessage)}</div>` : ''}
+          <form method="post" action="${DASHBOARD_LOGIN_ROUTE}">
+            <input type="hidden" name="redirect" value="${redirectValue}" />
+            <label for="login-email">Work Email</label>
+            <input id="login-email" type="email" name="email" value="${emailValue}" autocomplete="email" required autofocus />
+            <label for="login-password">Password</label>
+            <input id="login-password" type="password" name="password" autocomplete="current-password" required />
+            <button type="submit">Sign In</button>
+          </form>
+        </section>
+      </main>
+    </body>
+  </html>`;
+};
+
+const loginFormSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(1),
+  redirect: z.string().optional()
+});
 
 
 const relevantRequestTypes: TimeRequestType[] = ['pto', 'non_pto'];
@@ -685,7 +917,13 @@ const baseStyles = `
   tr:hover { background: #f9fafb; }
   .totals th, .totals td { font-weight: 600; background: #e0e7ff; }
   .empty { padding: 2rem; text-align: center; color: #6b7280; background: #fff; border-radius: 6px; margin-top: 1rem; }
-  .nav { display: flex; gap: 0.75rem; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; }
+  .nav { display: flex; justify-content: space-between; gap: 0.75rem; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; }
+  .nav__links { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
+  .nav__account { display: flex; align-items: center; gap: 0.75rem; margin-left: auto; }
+  .nav__account-label { font-weight: 600; color: #1f2933; }
+  .nav__logout-form { margin: 0; }
+  .nav__logout-button { background: #ef4444; color: #fff; border: none; border-radius: 999px; padding: 0.45rem 0.9rem; font-weight: 600; cursor: pointer; }
+  .nav__logout-button:hover { background: #dc2626; }
   .nav a { color: #2563eb; text-decoration: none; font-weight: 500; padding-bottom: 0.25rem; }
   .nav a.active { border-bottom: 2px solid #2563eb; }
   .card { background: #fff; padding: 1.25rem; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); margin-top: 1.5rem; max-width: 100%; }
@@ -806,7 +1044,7 @@ type NavKey =
 const renderNav = (active: NavKey) => {
   const link = (href: string, label: string, key: NavKey) =>
     `<a href="${href}"${active === key ? ' class="active"' : ''}>${label}</a>`;
-  return `<nav class="nav no-print">${[
+  const links = [
     link('/dashboard/overview', 'Overview', 'overview'),
     link('/dashboard/today', 'Today', 'today'),
     link('/dashboard/weekly', 'Weekly', 'weekly'),
@@ -815,7 +1053,81 @@ const renderNav = (active: NavKey) => {
     link('/dashboard/requests', 'Requests', 'requests'),
     link('/dashboard/balances', 'Balances', 'balances'),
     link('/dashboard/settings', 'Settings', 'settings')
-  ].join('')}</nav>`;
+  ];
+
+  return `<nav class="nav no-print">
+    <div class="nav__links">${links.join('')}</div>
+    <div class="nav__account">
+      <span class="nav__account-label">My Profile</span>
+      <form method="post" action="/dashboard/logout" class="nav__logout-form">
+        <button type="submit" class="nav__logout-button">Log Out</button>
+      </form>
+    </div>
+  </nav>`;
+};
+
+const setDashboardTokenCookie = (res: Response, token: string) => {
+  res.cookie(DASHBOARD_TOKEN_COOKIE_NAME, token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: IS_PRODUCTION,
+    maxAge: DASHBOARD_COOKIE_MAX_AGE_MS,
+    path: DASHBOARD_COOKIE_PATH
+  });
+};
+
+const clearDashboardTokenCookie = (res: Response) => {
+  res.cookie(DASHBOARD_TOKEN_COOKIE_NAME, '', {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: IS_PRODUCTION,
+    maxAge: 0,
+    path: DASHBOARD_COOKIE_PATH
+  });
+};
+
+const runMiddleware = (
+  req: AuthenticatedRequest,
+  res: Response,
+  handler: (req: AuthenticatedRequest, res: Response, next: NextFunction) => void
+) =>
+  new Promise<void>((resolve, reject) => {
+    handler(req, res, (err?: unknown) => {
+      if (err) {
+        reject(err);
+      } else {
+        resolve();
+      }
+    });
+  });
+
+const adminRoleMiddleware = requireRole(['admin', 'manager']);
+
+const ensureDashboardAuthenticated = async (req: Request, res: Response, next: NextFunction) => {
+  const authReq = req as AuthenticatedRequest;
+  try {
+    await runMiddleware(authReq, res, authenticate);
+    await runMiddleware(authReq, res, adminRoleMiddleware);
+    return next();
+  } catch (error) {
+    if (error instanceof HttpError && isHtmlRequest(req)) {
+      if (error.statusCode === 401) {
+        clearDashboardTokenCookie(res);
+        const redirectTarget = sanitizeRedirect(req.originalUrl ?? DEFAULT_DASHBOARD_REDIRECT);
+        const params = new URLSearchParams({ message: 'session_expired' });
+        if (redirectTarget && redirectTarget !== DEFAULT_DASHBOARD_REDIRECT) {
+          params.set('redirect', redirectTarget);
+        }
+        return res.redirect(`${DASHBOARD_LOGIN_ROUTE}?${params.toString()}`);
+      }
+      if (error.statusCode === 403) {
+        clearDashboardTokenCookie(res);
+        const params = new URLSearchParams({ error: 'forbidden' });
+        return res.redirect(`${DASHBOARD_LOGIN_ROUTE}?${params.toString()}`);
+      }
+    }
+    return next(error);
+  }
 };
 
 export const dashboardRouter = Router();
@@ -823,15 +1135,103 @@ export const dashboardRouter = Router();
 // Dev-only bypass for local debugging. Set DASHBOARD_ALLOW_ANON=true to skip auth.
 const allowAnonDashboard = process.env.DASHBOARD_ALLOW_ANON === 'true';
 if (!allowAnonDashboard) {
-  dashboardRouter.use(authenticate, requireRole(['admin', 'manager']));
+  dashboardRouter.get(
+    '/login',
+    asyncHandler(async (req, res) => {
+      const redirectTo = sanitizeRedirect(req.query.redirect);
+      const token = extractTokenFromRequest(req);
+
+      if (token) {
+        try {
+          const { user } = await resolveUserFromToken(token);
+          if (isDashboardRole(user.role)) {
+            return res.redirect(redirectTo);
+          }
+          clearDashboardTokenCookie(res);
+        } catch {
+          clearDashboardTokenCookie(res);
+        }
+      }
+
+      const errorCode = typeof req.query.error === 'string' ? req.query.error : undefined;
+      const messageCode = typeof req.query.message === 'string' ? req.query.message : undefined;
+
+      res.type('text/html').send(
+        renderLoginPage({
+          redirectTo,
+          errorCode,
+          messageCode
+        })
+      );
+    })
+  );
+
+  dashboardRouter.post(
+    '/login',
+    asyncHandler(async (req, res) => {
+      const parsed = loginFormSchema.safeParse(req.body ?? {});
+      const redirectTo = sanitizeRedirect(parsed.success ? parsed.data.redirect : req.body?.redirect);
+      const emailInput = typeof req.body?.email === 'string' ? req.body.email.trim() : '';
+
+      if (!parsed.success) {
+        return res
+          .status(400)
+          .type('text/html')
+          .send(renderLoginPage({ redirectTo, email: emailInput, errorCode: 'invalid' }));
+      }
+
+      const normalizedEmail = parsed.data.email.trim();
+      const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+
+      if (!user || !isDashboardRole(user.role)) {
+        return res
+          .status(401)
+          .type('text/html')
+          .send(renderLoginPage({ redirectTo, email: emailInput, errorCode: 'invalid' }));
+      }
+
+      const passwordOk = await verifyPassword(parsed.data.password, user.passwordHash);
+      if (!passwordOk) {
+        return res
+          .status(401)
+          .type('text/html')
+          .send(renderLoginPage({ redirectTo, email: emailInput, errorCode: 'invalid' }));
+      }
+
+      const token = generateToken(user);
+      setDashboardTokenCookie(res, token);
+
+      return res.redirect(redirectTo);
+    })
+  );
+
+  dashboardRouter.post(
+    '/logout',
+    (req, res) => {
+      clearDashboardTokenCookie(res);
+      const redirectTo = sanitizeRedirect(req.body?.redirect ?? req.query.redirect);
+      const params = new URLSearchParams({ message: 'logged_out' });
+      if (redirectTo && redirectTo !== DEFAULT_DASHBOARD_REDIRECT) {
+        params.set('redirect', redirectTo);
+      }
+      res.redirect(`${DASHBOARD_LOGIN_ROUTE}?${params.toString()}`);
+    }
+  );
+
+  dashboardRouter.use((req, res, next) => ensureDashboardAuthenticated(req, res, next));
 } else {
   // no-op auth in dev
   dashboardRouter.use((req, _res, next) => next());
 }
+
+dashboardRouter.get('/', (_req, res) => {
+  res.redirect(DEFAULT_DASHBOARD_REDIRECT);
+});
 dashboardRouter.get('/today', async (req, res) => {
   const requestedDate = typeof req.query.date === 'string' ? parseDateParam(req.query.date) : zonedStartOfDay(new Date());
   const dailyData = await fetchDailySummaries(requestedDate);
   const { dayStart, dayEnd, dateParam, label, summaries, totals, requestBadges, pauses } = dailyData;
+  const requestedDateParam = typeof req.query.date === 'string' && req.query.date.trim().length > 0 ? req.query.date.trim() : dateParam;
 
   const wantsCsv = typeof req.query.download === 'string' && req.query.download.toLowerCase() === 'csv';
   if (wantsCsv) {
@@ -890,7 +1290,7 @@ dashboardRouter.get('/today', async (req, res) => {
           <form method="get" action="/dashboard/today" class="filters">
             <label>
               <span>Date</span>
-              <input type="date" name="date" value="${dateParam}" />
+              <input type="date" name="date" value="${escapeHtml(requestedDateParam)}" />
             </label>
             <button type="submit">Apply</button>
           </form>
@@ -1727,6 +2127,11 @@ dashboardRouter.get('/overview', async (req, res) => {
     fetchMonthlyAggregates(monthInput)
   ]);
 
+  const formDateParam = typeof req.query.date === 'string' && req.query.date.trim().length > 0 ? req.query.date.trim() : dailyData.dateParam;
+  const formStartParam = typeof req.query.start === 'string' && req.query.start.trim().length > 0 ? req.query.start.trim() : weeklyData.startParam;
+  const formMonthParam =
+    typeof req.query.month === 'string' && req.query.month.trim().length > 0 ? req.query.month.trim() : monthlyData.monthParam;
+
   const rangeStartForNote =
     activeView === 'today'
       ? dailyData.dayStart
@@ -1781,7 +2186,7 @@ dashboardRouter.get('/overview', async (req, res) => {
           <input type="hidden" name="view" value="today" />
           <label>
             <span>Date</span>
-            <input type="date" name="date" value="${dailyData.dateParam}" />
+            <input type="date" name="date" value="${escapeHtml(formDateParam)}" />
           </label>
           <button type="submit">Apply</button>
         </form>
@@ -1800,14 +2205,16 @@ dashboardRouter.get('/overview', async (req, res) => {
                   <tr>
                     <th>User</th>
                     <th>Email</th>
-                  <th>Started At</th>
-                  <th>Active Minutes</th>
-                  <th>Idle Minutes</th>
-                  <th>Breaks</th>
-                  <th>Lunches</th>
-                  <th>Presence Misses</th>
-                </tr>
-              </thead>
+                    <th>Started At</th>
+                    <th>Active Minutes</th>
+                    <th>Idle Minutes</th>
+                    <th>Breaks</th>
+                    <th>Break Minutes</th>
+                    <th>Lunches</th>
+                    <th>Lunch Minutes</th>
+                    <th>Presence Misses</th>
+                  </tr>
+                </thead>
                 <tbody>
                   ${todayRows}
                 </tbody>
@@ -1827,7 +2234,7 @@ dashboardRouter.get('/overview', async (req, res) => {
           <input type="hidden" name="view" value="weekly" />
           <label>
             <span>Week starting</span>
-            <input type="date" name="start" value="${weeklyData.startParam}" />
+            <input type="date" name="start" value="${escapeHtml(formStartParam)}" />
           </label>
           <button type="submit">Apply</button>
         </form>
@@ -1846,14 +2253,16 @@ dashboardRouter.get('/overview', async (req, res) => {
                   <tr>
                     <th>#</th>
                     <th>User</th>
-                  <th>Email</th>
-                  <th>Active Minutes</th>
-                  <th>Idle Minutes</th>
-                  <th>Breaks</th>
-                  <th>Lunches</th>
-                  <th>Presence Misses</th>
-                </tr>
-              </thead>
+                    <th>Email</th>
+                    <th>Active Minutes</th>
+                    <th>Idle Minutes</th>
+                    <th>Breaks</th>
+                    <th>Break Minutes</th>
+                    <th>Lunches</th>
+                    <th>Lunch Minutes</th>
+                    <th>Presence Misses</th>
+                  </tr>
+                </thead>
                 <tbody>
                   ${weeklyRows}
                 </tbody>
@@ -1873,7 +2282,7 @@ dashboardRouter.get('/overview', async (req, res) => {
           <input type="hidden" name="view" value="monthly" />
           <label>
             <span>Month</span>
-            <input type="month" name="month" value="${monthlyData.monthParam}" />
+            <input type="month" name="month" value="${escapeHtml(formMonthParam)}" />
           </label>
           <button type="submit">Apply</button>
         </form>
@@ -1892,14 +2301,16 @@ dashboardRouter.get('/overview', async (req, res) => {
                   <tr>
                     <th>#</th>
                     <th>User</th>
-                  <th>Email</th>
-                  <th>Active Minutes</th>
-                  <th>Idle Minutes</th>
-                  <th>Breaks</th>
-                  <th>Lunches</th>
-                  <th>Presence Misses</th>
-                </tr>
-              </thead>
+                    <th>Email</th>
+                    <th>Active Minutes</th>
+                    <th>Idle Minutes</th>
+                    <th>Breaks</th>
+                    <th>Break Minutes</th>
+                    <th>Lunches</th>
+                    <th>Lunch Minutes</th>
+                    <th>Presence Misses</th>
+                  </tr>
+                </thead>
                 <tbody>
                   ${monthlyRows}
                 </tbody>
