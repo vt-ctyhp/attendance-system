@@ -14,6 +14,7 @@ import { balancesRouter } from './routes/balances';
 import { adminSettingsRouter } from './routes/adminSettings';
 import { timesheetsRouter } from './routes/timesheets';
 import { healthRouter } from './routes/health';
+import { appDataRouter } from './routes/appData';
 import type { AuthenticatedRequest } from './auth';
 import { errorHandler } from './middleware/errorHandler';
 
@@ -119,6 +120,7 @@ export const buildApp = () => {
   apiRouter.use('/balances', balancesRouter);
   apiRouter.use('/timesheets', timesheetsRouter);
   apiRouter.use('/admin', adminSettingsRouter);
+  apiRouter.use('/app', appDataRouter);
 
   app.use('/api', apiRouter);
   app.use('/dashboard', dashboardRouter);

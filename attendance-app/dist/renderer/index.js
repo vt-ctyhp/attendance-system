@@ -97,6 +97,110 @@
     presenceMisses: data.presence,
     note: data.note
   });
+  var appContext = {
+    baseUrl: null,
+    deviceId: null,
+    platform: navigator.userAgent.includes("Mac") ? "darwin" : navigator.userAgent,
+    email: null,
+    sessionId: null,
+    accessToken: null,
+    refreshToken: null,
+    tokenExpiresAt: null
+  };
+  var activePromptId = null;
+  var presenceUnsubscribers = [];
+  var clearTokens = () => {
+    appContext.accessToken = null;
+    appContext.refreshToken = null;
+    appContext.tokenExpiresAt = null;
+  };
+  var applyTokens = (tokens) => {
+    appContext.accessToken = tokens.accessToken;
+    appContext.refreshToken = tokens.refreshToken;
+    appContext.tokenExpiresAt = tokens.accessTokenExpiresAt ? new Date(tokens.accessTokenExpiresAt) : null;
+  };
+  var hasValidToken = () => {
+    if (!appContext.accessToken) {
+      return false;
+    }
+    if (!appContext.tokenExpiresAt) {
+      return true;
+    }
+    const expiresInMs = appContext.tokenExpiresAt.getTime() - Date.now();
+    return expiresInMs > 6e4;
+  };
+  var authInFlight = null;
+  var authenticate = async () => {
+    if (hasValidToken()) {
+      return true;
+    }
+    if (authInFlight) {
+      return authInFlight;
+    }
+    if (!appContext.baseUrl || !appContext.deviceId) {
+      showToast("Configure the server connection before syncing with the cloud.", "warning");
+      return false;
+    }
+    if (!appContext.email) {
+      showToast("Add your work email in Settings to sync with the server.", "warning");
+      return false;
+    }
+    authInFlight = (async () => {
+      try {
+        const tokens = await postJson(
+          "/api/sessions/start",
+          {
+            flow: "email_only",
+            email: appContext.email,
+            deviceId: appContext.deviceId
+          },
+          { requiresAuth: false }
+        );
+        applyTokens(tokens);
+        return true;
+      } catch (error) {
+        console.error("Authentication failed", error);
+        showToast("Unable to authenticate with the attendance server.", "danger");
+        clearTokens();
+        return false;
+      } finally {
+        authInFlight = null;
+      }
+    })();
+    return authInFlight;
+  };
+  var registerPresenceListeners = () => {
+    presenceUnsubscribers.splice(0).forEach((unsub) => {
+      try {
+        unsub();
+      } catch (error) {
+        console.warn("Failed to remove presence listener", error);
+      }
+    });
+    if (window.attendance?.onPresenceWindowConfirm) {
+      const unsubscribe = window.attendance.onPresenceWindowConfirm(async (promptId) => {
+        activePromptId = promptId;
+        const confirmed = await confirmPresencePrompt(promptId);
+        if (confirmed) {
+          pushActivity("Presence confirmed.", "presence");
+          showToast("Presence confirmed.", "success");
+          logAction("presence_confirm");
+          await hydrateFromServer();
+        }
+      });
+      presenceUnsubscribers.push(unsubscribe);
+    }
+    if (window.attendance?.onPresenceWindowDismiss) {
+      const unsubscribe = window.attendance.onPresenceWindowDismiss((promptId) => {
+        if (!activePromptId || activePromptId === promptId) {
+          activePromptId = null;
+        }
+        pushActivity("Presence prompt dismissed.", "presence");
+        showToast("Presence prompt dismissed.", "info");
+      });
+      presenceUnsubscribers.push(unsubscribe);
+    }
+  };
   var recomputeTotals = (days) => days.reduce(
     (totals, day) => {
       totals.activeHours += day.activeHours;
@@ -160,6 +264,162 @@
       window.attendance?.logAction(action);
     } catch (error) {
       console.warn("logAction failed", error);
+    }
+  };
+  var requireServerContext = () => {
+    if (!appContext.baseUrl) {
+      throw new Error("Server URL is not configured. Update Settings with a server address.");
+    }
+    if (!appContext.deviceId) {
+      throw new Error("Device identity missing. Relaunch the application.");
+    }
+  };
+  var postJson = async (path, body, options = {}) => {
+    requireServerContext();
+    const {
+      method = "POST",
+      expectJson = true,
+      requiresAuth = true,
+      retryOnAuthFailure = true
+    } = options;
+    if (requiresAuth) {
+      const authed = await authenticate();
+      if (!authed) {
+        throw new Error("Authentication required");
+      }
+    }
+    const url = new URL(path, appContext.baseUrl);
+    const headers = {
+      "Content-Type": "application/json"
+    };
+    if (requiresAuth && appContext.accessToken) {
+      headers.Authorization = `Bearer ${appContext.accessToken}`;
+    }
+    let response;
+    try {
+      response = await fetch(url.toString(), {
+        method,
+        headers,
+        body: JSON.stringify(body)
+      });
+    } catch (error) {
+      throw new Error(`Network request failed: ${error.message}`);
+    }
+    if (response.status === 401 && requiresAuth) {
+      clearTokens();
+      if (retryOnAuthFailure && await authenticate()) {
+        return postJson(path, body, { method, expectJson, requiresAuth, retryOnAuthFailure: false });
+      }
+      throw new Error("Authentication failed");
+    }
+    if (!response.ok) {
+      const text2 = await response.text().catch(() => "");
+      const snippet = text2.slice(0, 200);
+      throw new Error(`Request failed (${response.status}): ${snippet || response.statusText}`);
+    }
+    if (!expectJson || response.status === 204) {
+      return void 0;
+    }
+    const text = await response.text();
+    if (!text) {
+      return void 0;
+    }
+    return JSON.parse(text);
+  };
+  var startSessionOnServer = async () => {
+    if (!appContext.baseUrl) {
+      await hydrateFromServer().catch(() => void 0);
+    }
+    requireServerContext();
+    if (!appContext.email) {
+      showToast("Add a work email in Settings before clocking in.", "warning");
+      return false;
+    }
+    try {
+      const result = await postJson(
+        "/api/sessions/start",
+        {
+          email: appContext.email,
+          deviceId: appContext.deviceId,
+          platform: appContext.platform
+        },
+        { requiresAuth: false }
+      );
+      const sessionId = result?.sessionId ?? result?.id ?? null;
+      if (!sessionId) {
+        throw new Error("Missing session identifier in response.");
+      }
+      appContext.sessionId = sessionId;
+      await authenticate();
+      return true;
+    } catch (error) {
+      console.error("Failed to start session", error);
+      showToast("Unable to start session on the server.", "danger");
+      return false;
+    }
+  };
+  var ensureActiveSession = async () => {
+    if (appContext.sessionId) {
+      return appContext.sessionId;
+    }
+    const started = await startSessionOnServer();
+    return started ? appContext.sessionId : null;
+  };
+  var endSessionOnServer = async () => {
+    if (!appContext.sessionId) {
+      return true;
+    }
+    try {
+      await postJson("/api/sessions/end", { sessionId: appContext.sessionId }, { expectJson: true });
+      appContext.sessionId = null;
+      return true;
+    } catch (error) {
+      console.error("Failed to end session", error);
+      showToast("Unable to end session on the server.", "danger");
+      return false;
+    }
+  };
+  var sendSimpleEvent = async (path) => {
+    const sessionId = await ensureActiveSession();
+    if (!sessionId) {
+      return false;
+    }
+    try {
+      await postJson(
+        `/api/events/${path}`,
+        {
+          sessionId,
+          timestamp: (/* @__PURE__ */ new Date()).toISOString()
+        },
+        { expectJson: false }
+      );
+      return true;
+    } catch (error) {
+      console.error(`Failed to send event ${path}`, error);
+      showToast("Unable to communicate with the attendance server.", "danger");
+      return false;
+    }
+  };
+  var confirmPresencePrompt = async (promptId) => {
+    const sessionId = await ensureActiveSession();
+    if (!sessionId) {
+      return false;
+    }
+    try {
+      await postJson(
+        "/api/events/presence/confirm",
+        {
+          sessionId,
+          promptId,
+          timestamp: (/* @__PURE__ */ new Date()).toISOString()
+        },
+        { expectJson: false }
+      );
+      return true;
+    } catch (error) {
+      console.error("Failed to confirm presence prompt", error);
+      showToast("Unable to confirm presence with the server.", "danger");
+      return false;
     }
   };
   var showToast = (message, variant = "success") => {
@@ -412,6 +672,8 @@
     requestForm: document.getElementById("request-form"),
     requestType: document.getElementById("request-type"),
     requestHours: document.getElementById("request-hours"),
+    requestStartDate: document.getElementById("request-start-date"),
+    requestEndDate: document.getElementById("request-end-date"),
     requestReason: document.getElementById("request-reason"),
     requestHint: document.getElementById("request-hint"),
     scheduleList: document.getElementById("schedule-list"),
@@ -622,8 +884,12 @@
       logAction("lunch_end");
     }
   };
-  var handleClockToggle = () => {
+  var handleClockToggle = async () => {
     if (state.session.status === "clocked_out") {
+      const started = await startSessionOnServer();
+      if (!started) {
+        return;
+      }
       state.session.status = "working";
       state.session.startedAt = /* @__PURE__ */ new Date();
       state.session.lastClockedInAt = state.session.startedAt;
@@ -632,11 +898,27 @@
       showToast("Clocked in. Have a great shift!", "success");
       logAction("clock_in");
     } else {
-      completeBreakIfNeeded();
-      completeLunchIfNeeded();
+      if (state.session.status === "break") {
+        const ended2 = await sendSimpleEvent("break/end");
+        if (!ended2) {
+          return;
+        }
+        completeBreakIfNeeded();
+      }
+      if (state.session.status === "lunch") {
+        const ended2 = await sendSimpleEvent("lunch/end");
+        if (!ended2) {
+          return;
+        }
+        completeLunchIfNeeded();
+      }
       const minutes = minutesBetween(state.session.startedAt);
       if (minutes > 0) {
         state.today.activeMinutes += minutes;
+      }
+      const ended = await endSessionOnServer();
+      if (!ended) {
+        return;
       }
       state.session.status = "clocked_out";
       state.session.lastClockedOutAt = /* @__PURE__ */ new Date();
@@ -647,17 +929,35 @@
     }
     updateTimesheetFromToday();
     render();
+    void hydrateFromServer();
   };
-  var handleBreakToggle = () => {
+  var handleBreakToggle = async () => {
     if (state.session.status === "clocked_out") {
       showToast("Clock in before starting a break.", "warning");
       return;
     }
     if (state.session.status === "break") {
+      const ended = await sendSimpleEvent("break/end");
+      if (!ended) {
+        return;
+      }
       completeBreakIfNeeded();
       state.session.status = "working";
     } else {
-      completeLunchIfNeeded();
+      if (!await ensureActiveSession()) {
+        return;
+      }
+      if (state.session.status === "lunch") {
+        const lunchEnded = await sendSimpleEvent("lunch/end");
+        if (!lunchEnded) {
+          return;
+        }
+        completeLunchIfNeeded();
+      }
+      const started = await sendSimpleEvent("break/start");
+      if (!started) {
+        return;
+      }
       state.session.status = "break";
       state.session.breakStartedAt = /* @__PURE__ */ new Date();
       pushActivity("Break started", "break");
@@ -666,17 +966,35 @@
     }
     updateTimesheetFromToday();
     render();
+    void hydrateFromServer();
   };
-  var handleLunchToggle = () => {
+  var handleLunchToggle = async () => {
     if (state.session.status === "clocked_out") {
       showToast("Clock in before starting lunch.", "warning");
       return;
     }
     if (state.session.status === "lunch") {
+      const ended = await sendSimpleEvent("lunch/end");
+      if (!ended) {
+        return;
+      }
       completeLunchIfNeeded();
       state.session.status = "working";
     } else {
-      completeBreakIfNeeded();
+      if (!await ensureActiveSession()) {
+        return;
+      }
+      if (state.session.status === "break") {
+        const breakEnded = await sendSimpleEvent("break/end");
+        if (!breakEnded) {
+          return;
+        }
+        completeBreakIfNeeded();
+      }
+      const started = await sendSimpleEvent("lunch/start");
+      if (!started) {
+        return;
+      }
       state.session.status = "lunch";
       state.session.lunchStartedAt = /* @__PURE__ */ new Date();
       pushActivity("Lunch started", "lunch");
@@ -685,11 +1003,19 @@
     }
     updateTimesheetFromToday();
     render();
+    void hydrateFromServer();
   };
-  var handlePresence = () => {
+  var handlePresence = async () => {
     if (state.session.status === "clocked_out") {
       showToast("Start a session before confirming presence.", "warning");
       return;
+    }
+    if (activePromptId) {
+      const confirmed = await confirmPresencePrompt(activePromptId);
+      if (!confirmed) {
+        return;
+      }
+      activePromptId = null;
     }
     state.session.lastPresenceCheck = /* @__PURE__ */ new Date();
     state.session.nextPresenceCheck = addMinutes(state.session.lastPresenceCheck, 45);
@@ -699,24 +1025,63 @@
     logAction("presence_confirm");
     updateTimesheetFromToday();
     render();
+    void hydrateFromServer();
   };
-  var handleRequestSubmit = (event) => {
+  var handleRequestSubmit = async (event) => {
     event.preventDefault();
     const type = dom.requestType.value;
     const hours = Number(dom.requestHours.value) || 0;
+    if (hours <= 0) {
+      showToast("Enter a positive number of hours.", "warning");
+      return;
+    }
+    const startDateValue = dom.requestStartDate.value;
+    const endDateValue = dom.requestEndDate.value;
     const reason = dom.requestReason.value.trim();
     if (!reason) {
       showToast("Share a short reason for the request.", "warning");
       return;
     }
+    if (!startDateValue) {
+      showToast("Choose a start date for the request.", "warning");
+      return;
+    }
+    if (endDateValue && endDateValue < startDateValue) {
+      showToast("End date cannot be before start date.", "warning");
+      return;
+    }
+    if (!appContext.email || !appContext.deviceId) {
+      showToast("Update Settings with your work email before submitting requests.", "warning");
+      return;
+    }
     const submittedAt = /* @__PURE__ */ new Date();
-    const defaultEnd = type === "time_off" ? addDays(submittedAt, 1) : submittedAt;
+    if (!await authenticate()) {
+      return;
+    }
+    try {
+      await postJson(
+        "/api/time-requests",
+        {
+          type,
+          startDate: startDateValue,
+          endDate: endDateValue || void 0,
+          hours,
+          reason,
+          email: appContext.email,
+          deviceId: appContext.deviceId
+        }
+      );
+    } catch (error) {
+      console.error("Failed to submit request", error);
+      showToast("Unable to submit request right now.", "danger");
+      return;
+    }
     const request = {
       id: `req-${Date.now()}`,
       type,
       status: "pending",
-      startDate: submittedAt.toISOString(),
-      endDate: defaultEnd.toISOString(),
+      startDate: new Date(startDateValue).toISOString(),
+      endDate: endDateValue ? new Date(endDateValue).toISOString() : null,
       hours,
       reason,
       submittedAt: submittedAt.toISOString()
@@ -732,6 +1097,7 @@
     renderRequests();
     renderSnapshot();
     logAction("request_submit");
+    void hydrateFromServer();
   };
   var handleTimesheetChange = () => {
     state.timesheet.view = dom.timesheetView.value;
@@ -762,6 +1128,125 @@
     URL.revokeObjectURL(url);
     showToast("Timesheet exported.", "info");
   };
+  var parseDateOrNull = (value) => value ? new Date(value) : null;
+  var mapOverviewPeriod = (period) => ({
+    label: period.label,
+    range: period.range,
+    days: period.days.map((day) => ({
+      date: day.date,
+      label: day.label,
+      activeHours: day.activeHours,
+      idleHours: day.idleHours,
+      breaks: day.breaks,
+      lunches: day.lunches,
+      presenceMisses: day.presenceMisses,
+      note: void 0
+    })),
+    totals: {
+      activeHours: period.totals.activeHours,
+      idleHours: period.totals.idleHours,
+      breaks: period.totals.breaks,
+      lunches: period.totals.lunches,
+      presenceMisses: period.totals.presenceMisses
+    }
+  });
+  var applyOverview = (overview) => {
+    const previousView = state.timesheet.view;
+    const periods = {
+      weekly: mapOverviewPeriod(overview.timesheet.periods.weekly),
+      pay_period: mapOverviewPeriod(overview.timesheet.periods.pay_period),
+      monthly: mapOverviewPeriod(overview.timesheet.periods.monthly)
+    };
+    const resolvedView = periods[previousView] ? previousView : overview.timesheet.view;
+    const startedAt = parseDateOrNull(overview.session.startedAt);
+    const breakStartedAt = parseDateOrNull(overview.session.breakStartedAt);
+    const lunchStartedAt = parseDateOrNull(overview.session.lunchStartedAt);
+    const lastPresenceCheck = parseDateOrNull(overview.session.lastPresenceCheck);
+    const lastClockedInAt = parseDateOrNull(overview.session.lastClockedInAt);
+    const lastClockedOutAt = parseDateOrNull(overview.session.lastClockedOutAt);
+    const nextPresenceRaw = parseDateOrNull(overview.session.nextPresenceCheck);
+    const presenceAnchor = lastPresenceCheck ?? startedAt ?? lastClockedInAt;
+    const nextPresenceCheck = nextPresenceRaw ?? (presenceAnchor ? addMinutes(presenceAnchor, 45) : addMinutes(/* @__PURE__ */ new Date(), 45));
+    state = {
+      user: {
+        name: overview.user.name,
+        role: overview.user.role,
+        location: overview.user.location
+      },
+      session: {
+        status: overview.session.status,
+        startedAt,
+        breakStartedAt,
+        lunchStartedAt,
+        lastPresenceCheck,
+        nextPresenceCheck,
+        lastClockedInAt,
+        lastClockedOutAt
+      },
+      today: { ...overview.today },
+      timesheet: {
+        view: resolvedView,
+        periods
+      },
+      requests: overview.requests.map((request) => ({
+        id: request.id,
+        type: request.type,
+        status: request.status,
+        startDate: request.startDate,
+        endDate: request.endDate ?? null,
+        hours: request.hours,
+        reason: request.reason,
+        submittedAt: request.submittedAt
+      })),
+      schedule: {
+        defaults: overview.schedule.defaults.slice(),
+        upcoming: overview.schedule.upcoming.slice()
+      },
+      activity: overview.activity.slice(),
+      makeUpCap: { ...overview.makeUpCap }
+    };
+    appContext.sessionId = overview.session.id;
+    dom.timesheetView.value = state.timesheet.view;
+    updateTimesheetFromToday();
+    render();
+    showToast("Synced with attendance server.", "info");
+  };
+  var fetchOverview = async (baseUrl, email) => {
+    const url = new URL("/api/app/overview", baseUrl);
+    url.searchParams.set("email", email);
+    const response = await fetch(url.toString(), { method: "GET" });
+    if (!response.ok) {
+      throw new Error(`Overview request failed with status ${response.status}`);
+    }
+    return await response.json();
+  };
+  var hydrateFromServer = async () => {
+    try {
+      const [bootstrap, settings] = await Promise.all([
+        window.attendance.getBootstrap(),
+        window.attendance.getSettings()
+      ]);
+      const email = settings.workEmail;
+      if (!email) {
+        showToast("Add your work email in Settings to load live data.", "warning");
+        return;
+      }
+      const baseUrl = settings.serverBaseUrl || bootstrap.baseUrl;
+      appContext = {
+        baseUrl,
+        deviceId: bootstrap.deviceId,
+        platform: bootstrap.platform ?? appContext.platform,
+        email,
+        sessionId: appContext.sessionId
+      };
+      await authenticate();
+      const overview = await fetchOverview(baseUrl, email);
+      applyOverview(overview);
+    } catch (error) {
+      console.error("Failed to hydrate from server", error);
+      showToast("Unable to load the latest data from the server.", "danger");
+    }
+  };
   var initialize = () => {
     updateTimesheetFromToday();
     render();
@@ -772,8 +1257,10 @@
     dom.requestForm.addEventListener("submit", handleRequestSubmit);
     dom.timesheetView.addEventListener("change", handleTimesheetChange);
     dom.downloadButton.addEventListener("click", handleDownload);
+    registerPresenceListeners();
     window.setInterval(renderHero, 3e4);
     window.addEventListener("focus", renderHero);
+    void hydrateFromServer();
   };
   initialize();
 })();
