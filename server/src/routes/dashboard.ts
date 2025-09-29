@@ -1022,6 +1022,65 @@ const baseStyles = `
     table { box-shadow: none; }
     .no-print { display: none !important; }
   }
+
+  /* modern dashboard refresh */
+    body.dashboard { font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%); color: #0f172a; }
+    body.dashboard main.page-shell { max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: clamp(1.25rem, 3vw, 2rem); }
+    body.dashboard .nav { background: rgba(255,255,255,0.85); backdrop-filter: blur(12px); padding: 0.6rem 1rem; border-radius: 999px; box-shadow: 0 16px 32px rgba(15,23,42,0.08); position: sticky; top: clamp(0.75rem,2vw,1.25rem); z-index: 20; }
+    body.dashboard .nav a { padding: 0.35rem 0.85rem; border-radius: 999px; font-weight: 600; color: #64748b; }
+    body.dashboard .nav a.active { background: #2563eb; color: #fff; box-shadow: 0 12px 24px rgba(37,99,235,0.22); border-bottom: none; }
+    body.dashboard .nav__account-label { color: #0f172a; }
+    body.dashboard .nav__logout-button { background: #dc2626; border-radius: 999px; padding: 0.45rem 1rem; }
+    body.dashboard .nav__logout-button:hover { box-shadow: 0 12px 24px rgba(220,38,38,0.25); }
+    body.dashboard button,
+    body.dashboard .button { border-radius: 999px; padding: 0.55rem 1.3rem; font-weight: 600; }
+    body.dashboard button:hover,
+    body.dashboard .button:hover { transform: translateY(-1px); box-shadow: 0 12px 24px rgba(37,99,235,0.24); }
+    body.dashboard .button-secondary { background: rgba(15,23,42,0.08); color: #0f172a; }
+    body.dashboard .button-danger { background: #dc2626; }
+    body.dashboard .page-header { background: #fff; border-radius: 22px; box-shadow: 0 24px 45px rgba(15,23,42,0.12); padding: clamp(1.5rem,3vw,2.5rem); display: flex; align-items: flex-start; justify-content: space-between; gap: clamp(1rem,3vw,2rem); flex-wrap: wrap; }
+    body.dashboard .page-header__eyebrow { text-transform: uppercase; letter-spacing: 0.12em; color: #64748b; }
+    body.dashboard .page-header__content { display: flex; flex-direction: column; gap: 0.65rem; }
+    body.dashboard .page-header__title { margin: 0; font-size: clamp(1.75rem, 3.5vw, 2.3rem); color: #0f172a; }
+    body.dashboard .page-header__subtitle { margin: 0; color: #475569; max-width: 46ch; font-size: 0.95rem; line-height: 1.5; }
+    body.dashboard .page-header__meta { display: grid; gap: 0.35rem; text-align: right; color: #64748b; justify-items: end; }
+    body.dashboard .page-header__meta strong { color: #0f172a; }
+    body.dashboard .tz-note { font-size: 0.85rem; color: #64748b; display: inline-flex; align-items: center; gap: 0.45rem; margin: 0; }
+    body.dashboard .tz-note::before { content: '🕒'; }
+    body.dashboard .page-controls { display: flex; justify-content: center; }
+    body.dashboard .page-controls .tab-bar { margin: 0 auto; }
+    body.dashboard .tab-bar { display: inline-flex; gap: 0.5rem; background: rgba(37,99,235,0.08); padding: 0.4rem; border-radius: 999px; }
+    body.dashboard .tab-bar a { padding: 0.45rem 1rem; border-radius: 999px; font-weight: 600; color: #64748b; background: transparent; }
+    body.dashboard .tab-bar a.active { background: #fff; color: #2563eb; box-shadow: 0 10px 20px rgba(37,99,235,0.22); }
+    body.dashboard .cards-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px,1fr)); gap: clamp(1rem,3vw,1.75rem); align-items: stretch; }
+    body.dashboard .card { background: #fff; border-radius: 20px; box-shadow: 0 24px 45px rgba(15,23,42,0.12); padding: clamp(1.25rem,2.5vw,1.75rem); display: flex; flex-direction: column; gap: 1.25rem; }
+    body.dashboard .card__header { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-start; justify-content: space-between; }
+    body.dashboard .card__title { color: #0f172a; font-size: 1.15rem; margin: 0; }
+    body.dashboard .card__subtitle { color: #64748b; font-size: 0.9rem; max-width: 36ch; margin: 0; }
+    body.dashboard .card__actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; justify-content: flex-end; }
+    body.dashboard .card__body { display: flex; flex-direction: column; gap: 1rem; }
+    body.dashboard .summary-card { background: rgba(37,99,235,0.1); color: #2563eb; border-radius: 16px; box-shadow: none; }
+    body.dashboard .summary-title { letter-spacing: 0.08em; color: rgba(37,99,235,0.75); }
+    body.dashboard .summary-meta { color: rgba(37,99,235,0.75); }
+    body.dashboard .table-scroll { background: rgba(15,23,42,0.03); padding: 0.5rem; border-radius: 18px; }
+    body.dashboard .table-scroll table { background: #fff; border-radius: 16px; }
+    body.dashboard .table-scroll table tbody tr:hover { background: rgba(37,99,235,0.08); }
+    body.dashboard .alert { border-radius: 14px; }
+    body.dashboard .alert.success { background: rgba(22,163,74,0.14); color: #16a34a; }
+    body.dashboard .alert.error { background: rgba(220,38,38,0.14); color: #dc2626; }
+    body.dashboard .empty { background: rgba(15,23,42,0.03); color: #64748b; border-radius: 16px; }
+    @media (max-width: 960px) {
+      body.dashboard .page-header { text-align: center; flex-direction: column; align-items: stretch; }
+      body.dashboard .page-header__meta { text-align: center; justify-items: center; }
+    }
+    @media (max-width: 720px) {
+      body.dashboard .cards-grid { grid-template-columns: 1fr; }
+      body.dashboard .filters { flex-direction: column; align-items: stretch; }
+      body.dashboard .filters label { width: 100%; }
+      body.dashboard button,
+      body.dashboard .button { width: 100%; justify-content: center; }
+      body.dashboard .table-scroll table { min-width: 520px; }
+    }
 `;
 
 const formatRangeLabel = (start: Date, end?: Date) =>
@@ -2172,177 +2231,217 @@ dashboardRouter.get('/overview', async (req, res) => {
   const tabLink = (key: 'today' | 'weekly' | 'monthly', label: string, href: string) =>
     `<a href="${href}"${activeView === key ? ' class="active"' : ''}>${label}</a>`;
 
-  const tabBar = `<div class="tab-bar no-print">
-    ${tabLink('today', 'Today', `/dashboard/overview?view=today&date=${dailyData.dateParam}`)}
-    ${tabLink('weekly', 'Weekly', `/dashboard/overview?view=weekly&start=${weeklyData.startParam}`)}
-    ${tabLink('monthly', 'Monthly', `/dashboard/overview?view=monthly&month=${monthlyData.monthParam}`)}
-  </div>`;
+    const tabBar = `<div class="tab-bar no-print">
+      ${tabLink('today', 'Today', `/dashboard/overview?view=today&date=${dailyData.dateParam}`)}
+      ${tabLink('weekly', 'Weekly', `/dashboard/overview?view=weekly&start=${weeklyData.startParam}`)}
+      ${tabLink('monthly', 'Monthly', `/dashboard/overview?view=monthly&month=${monthlyData.monthParam}`)}
+    </div>`;
 
-  const todaySection = `
-    <section class="tab-content${activeView === 'today' ? '' : ' hidden'}" id="tab-today">
-      <h2>Today – ${dailyData.label}</h2>
-      <div class="actions no-print">
-        <form method="get" action="/dashboard/overview" class="filters">
-          <input type="hidden" name="view" value="today" />
-          <label>
-            <span>Date</span>
-            <input type="date" name="date" value="${escapeHtml(formDateParam)}" />
-          </label>
-          <button type="submit">Apply</button>
-        </form>
-        <form method="get" action="/dashboard/today">
-          <input type="hidden" name="date" value="${dailyData.dateParam}" />
-          <input type="hidden" name="download" value="csv" />
-          <button type="submit">Download CSV</button>
-        </form>
-        <button type="button" class="print-button" onclick="window.print()">Print</button>
-      </div>
-      ${
-        todayRows
-          ? `<div class="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th>User</th>
-                    <th>Email</th>
-                    <th>Started At</th>
-                    <th>Active Minutes</th>
-                    <th>Idle Minutes</th>
-                    <th>Breaks</th>
-                    <th>Break Minutes</th>
-                    <th>Lunches</th>
-                    <th>Lunch Minutes</th>
-                    <th>Presence Misses</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${todayRows}
-                </tbody>
-                ${todayTotals}
-              </table>
-            </div>`
-          : '<div class="empty">No sessions recorded for this date.</div>'
-      }
-    </section>
-  `;
+    const timezoneNote = renderTimezoneNote(rangeStartForNote, rangeEndForNote);
 
-  const weeklySection = `
-    <section class="tab-content${activeView === 'weekly' ? '' : ' hidden'}" id="tab-weekly">
-      <h2>Weekly – ${weeklyData.label}</h2>
-      <div class="actions no-print">
-        <form method="get" action="/dashboard/overview" class="filters">
-          <input type="hidden" name="view" value="weekly" />
-          <label>
-            <span>Week starting</span>
-            <input type="date" name="start" value="${escapeHtml(formStartParam)}" />
-          </label>
-          <button type="submit">Apply</button>
-        </form>
-        <form method="get" action="/dashboard/weekly">
-          <input type="hidden" name="start" value="${weeklyData.startParam}" />
-          <input type="hidden" name="download" value="csv" />
-          <button type="submit">Download CSV</button>
-        </form>
-        <button type="button" class="print-button" onclick="window.print()">Print</button>
-      </div>
-      ${
-        weeklyRows
-          ? `<div class="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>User</th>
-                    <th>Email</th>
-                    <th>Active Minutes</th>
-                    <th>Idle Minutes</th>
-                    <th>Breaks</th>
-                    <th>Break Minutes</th>
-                    <th>Lunches</th>
-                    <th>Lunch Minutes</th>
-                    <th>Presence Misses</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${weeklyRows}
-                </tbody>
-                ${weeklyTotals}
-              </table>
-            </div>`
-          : '<div class="empty">No activity recorded for this range.</div>'
-      }
-    </section>
-  `;
+    const todaySection = `
+      <section class="tab-content card${activeView === 'today' ? '' : ' hidden'}" id="tab-today">
+        <div class="card__header">
+          <div>
+            <h2 class="card__title">Today</h2>
+            <p class="card__subtitle">${dailyData.label}</p>
+          </div>
+          <div class="card__actions no-print">
+            <form method="get" action="/dashboard/overview" class="filters">
+              <input type="hidden" name="view" value="today" />
+              <label>
+                <span>Date</span>
+                <input type="date" name="date" value="${escapeHtml(formDateParam)}" />
+              </label>
+              <button type="submit">Apply</button>
+            </form>
+            <form method="get" action="/dashboard/today">
+              <input type="hidden" name="date" value="${dailyData.dateParam}" />
+              <input type="hidden" name="download" value="csv" />
+              <button type="submit">Download CSV</button>
+            </form>
+            <button type="button" class="print-button" onclick="window.print()">Print</button>
+          </div>
+        </div>
+        <div class="card__body">
+          ${
+            todayRows
+              ? `<div class="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>User</th>
+                        <th>Email</th>
+                        <th>Started At</th>
+                        <th>Active Minutes</th>
+                        <th>Idle Minutes</th>
+                        <th>Breaks</th>
+                        <th>Break Minutes</th>
+                        <th>Lunches</th>
+                        <th>Lunch Minutes</th>
+                        <th>Presence Misses</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${todayRows}
+                    </tbody>
+                    ${todayTotals}
+                  </table>
+                </div>`
+              : '<div class="empty">No sessions recorded for this date.</div>'
+          }
+        </div>
+      </section>
+    `;
 
-  const monthlySection = `
-    <section class="tab-content${activeView === 'monthly' ? '' : ' hidden'}" id="tab-monthly">
-      <h2>Monthly – ${monthlyData.label}</h2>
-      <div class="actions no-print">
-        <form method="get" action="/dashboard/overview" class="filters">
-          <input type="hidden" name="view" value="monthly" />
-          <label>
-            <span>Month</span>
-            <input type="month" name="month" value="${escapeHtml(formMonthParam)}" />
-          </label>
-          <button type="submit">Apply</button>
-        </form>
-        <form method="get" action="/dashboard/monthly">
-          <input type="hidden" name="month" value="${monthlyData.monthParam}" />
-          <input type="hidden" name="download" value="csv" />
-          <button type="submit">Download CSV</button>
-        </form>
-        <button type="button" class="print-button" onclick="window.print()">Print</button>
-      </div>
-      ${
-        monthlyRows
-          ? `<div class="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>User</th>
-                    <th>Email</th>
-                    <th>Active Minutes</th>
-                    <th>Idle Minutes</th>
-                    <th>Breaks</th>
-                    <th>Break Minutes</th>
-                    <th>Lunches</th>
-                    <th>Lunch Minutes</th>
-                    <th>Presence Misses</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${monthlyRows}
-                </tbody>
-                ${monthlyTotals}
-              </table>
-            </div>`
-          : '<div class="empty">No activity recorded for this month.</div>'
-      }
-    </section>
-  `;
+    const weeklySection = `
+      <section class="tab-content card${activeView === 'weekly' ? '' : ' hidden'}" id="tab-weekly">
+        <div class="card__header">
+          <div>
+            <h2 class="card__title">Weekly</h2>
+            <p class="card__subtitle">${weeklyData.label}</p>
+          </div>
+          <div class="card__actions no-print">
+            <form method="get" action="/dashboard/overview" class="filters">
+              <input type="hidden" name="view" value="weekly" />
+              <label>
+                <span>Week starting</span>
+                <input type="date" name="start" value="${escapeHtml(formStartParam)}" />
+              </label>
+              <button type="submit">Apply</button>
+            </form>
+            <form method="get" action="/dashboard/weekly">
+              <input type="hidden" name="start" value="${weeklyData.startParam}" />
+              <input type="hidden" name="download" value="csv" />
+              <button type="submit">Download CSV</button>
+            </form>
+            <button type="button" class="print-button" onclick="window.print()">Print</button>
+          </div>
+        </div>
+        <div class="card__body">
+          ${
+            weeklyRows
+              ? `<div class="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>User</th>
+                        <th>Email</th>
+                        <th>Active Minutes</th>
+                        <th>Idle Minutes</th>
+                        <th>Breaks</th>
+                        <th>Break Minutes</th>
+                        <th>Lunches</th>
+                        <th>Lunch Minutes</th>
+                        <th>Presence Misses</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${weeklyRows}
+                    </tbody>
+                    ${weeklyTotals}
+                  </table>
+                </div>`
+              : '<div class="empty">No activity recorded for this range.</div>'
+          }
+        </div>
+      </section>
+    `;
 
-  const html = `
-    <!doctype html>
-    <html lang="en">
-      <head>
-        <meta charset="utf-8" />
-        <title>Dashboard Overview</title>
-        <style>${baseStyles}</style>
-      </head>
-      <body>
-        ${renderNav('overview')}
-        ${renderTimezoneNote(rangeStartForNote, rangeEndForNote)}
-        <h1>Dashboard Overview</h1>
-        ${tabBar}
-        ${todaySection}
-        ${weeklySection}
-        ${monthlySection}
-      </body>
-    </html>
-  `;
+    const monthlySection = `
+      <section class="tab-content card${activeView === 'monthly' ? '' : ' hidden'}" id="tab-monthly">
+        <div class="card__header">
+          <div>
+            <h2 class="card__title">Monthly</h2>
+            <p class="card__subtitle">${monthlyData.label}</p>
+          </div>
+          <div class="card__actions no-print">
+            <form method="get" action="/dashboard/overview" class="filters">
+              <input type="hidden" name="view" value="monthly" />
+              <label>
+                <span>Month</span>
+                <input type="month" name="month" value="${escapeHtml(formMonthParam)}" />
+              </label>
+              <button type="submit">Apply</button>
+            </form>
+            <form method="get" action="/dashboard/monthly">
+              <input type="hidden" name="month" value="${monthlyData.monthParam}" />
+              <input type="hidden" name="download" value="csv" />
+              <button type="submit">Download CSV</button>
+            </form>
+            <button type="button" class="print-button" onclick="window.print()">Print</button>
+          </div>
+        </div>
+        <div class="card__body">
+          ${
+            monthlyRows
+              ? `<div class="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>User</th>
+                        <th>Email</th>
+                        <th>Active Minutes</th>
+                        <th>Idle Minutes</th>
+                        <th>Breaks</th>
+                        <th>Break Minutes</th>
+                        <th>Lunches</th>
+                        <th>Lunch Minutes</th>
+                        <th>Presence Misses</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${monthlyRows}
+                    </tbody>
+                    ${monthlyTotals}
+                  </table>
+                </div>`
+              : '<div class="empty">No activity recorded for this month.</div>'
+          }
+        </div>
+      </section>
+    `;
 
-  res.type('html').send(html);
+    const html = `
+      <!doctype html>
+      <html lang="en">
+        <head>
+          <meta charset="utf-8" />
+          <title>Dashboard Overview</title>
+          <style>${baseStyles}</style>
+        </head>
+        <body class="dashboard dashboard--overview">
+          ${renderNav('overview')}
+          <main class="page-shell">
+            <header class="page-header">
+              <div class="page-header__content">
+                <p class="page-header__eyebrow">Attendance</p>
+                <h1 class="page-header__title">Dashboard Overview</h1>
+                <p class="page-header__subtitle">Live roster snapshots and trends across today, this week, and the current month.</p>
+              </div>
+              <div class="page-header__meta">
+                <span><strong>${dailyData.label}</strong> (Today)</span>
+                <span>Week of <strong>${weeklyData.label}</strong></span>
+                <span>Month of <strong>${monthlyData.label}</strong></span>
+                ${timezoneNote}
+              </div>
+            </header>
+            <div class="page-controls">
+              ${tabBar}
+            </div>
+            <div class="cards-grid">
+              ${todaySection}
+              ${weeklySection}
+              ${monthlySection}
+            </div>
+          </main>
+        </body>
+      </html>
+    `;
+
+    res.type('html').send(html);
 });
 
 
