@@ -53,6 +53,31 @@ type SessionSummary = {
   presenceMisses: number;
 };
 
+type DailyStatusKind = 'not_logged_in' | 'active' | 'on_break' | 'on_lunch' | 'logged_out' | 'time_off';
+
+type DailyStatus = {
+  kind: DailyStatusKind;
+  label: string;
+  since: Date | null;
+};
+
+type DailyOverviewRow = {
+  userId: number;
+  name: string;
+  email: string;
+  status: DailyStatus;
+  currentIdleMinutes: number | null;
+  currentIdleSince: Date | null;
+  activeMinutes: number;
+  idleMinutes: number;
+  breaks: number;
+  breakMinutes: number;
+  lunches: number;
+  lunchMinutes: number;
+  presenceMisses: number;
+  firstLogin: Date | null;
+};
+
 type UserAggregate = {
   userId: number;
   name: string;
@@ -106,7 +131,7 @@ type SessionRecord = {
   startedAt: Date;
   endedAt: Date | null;
   user: { name: string; email: string };
-  minuteStats: Array<{ active: boolean; idle: boolean }>;
+  minuteStats: Array<{ minuteStart: Date; active: boolean; idle: boolean }>;
   events: Array<{ type: string }>;
   pauses: Array<{ type: string; sequence: number; startedAt: Date; endedAt: Date | null; durationMinutes: number | null }>;
 };
@@ -422,7 +447,7 @@ const loginFormSchema = z.object({
 });
 
 
-const relevantRequestTypes: TimeRequestType[] = ['pto', 'non_pto'];
+const relevantRequestTypes: TimeRequestType[] = ['pto', 'non_pto', 'make_up'];
 const visibleRequestStatuses: TimeRequestStatus[] = ['pending', 'approved'];
 
 const requestTypeLabels: Record<TimeRequestType, string> = {
@@ -578,26 +603,64 @@ const renderTotalsRow = (totals: ActivityTotals, leadingColumns: number) => `
   </tfoot>
 `;
 
+const renderDailyTotalsRow = (totals: ActivityTotals) => `
+  <tfoot>
+    <tr class="totals">
+      <th>Totals</th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th>${minutesFormatter(totals.idle)}</th>
+      <th>${totals.breaks}</th>
+      <th>${minutesFormatter(totals.breakMinutes)}</th>
+      <th>${totals.lunches}</th>
+      <th>${minutesFormatter(totals.lunchMinutes)}</th>
+      <th></th>
+      <th>${totals.presence}</th>
+    </tr>
+  </tfoot>
+`;
+
 const detailLink = (userId: number, dateParam: string, label: string) =>
   `<a href="/dashboard/user/${userId}?date=${dateParam}">${escapeHtml(label)}</a>`;
 
-const buildTodayRow = (row: SessionSummary, dateParam: string, badges: RequestBadge[] = []) => `
+const buildTodayRow = (row: DailyOverviewRow, dateParam: string, badges: RequestBadge[] = []) => {
+  const statusClass = `status-pill status-pill--${row.status.kind}`;
+  const sinceContent = row.status.since
+    ? `<span class="since" data-since="${formatIsoDateTime(row.status.since)}">
+        <time>${formatDateTime(row.status.since)}</time>
+        <span class="meta" data-elapsed></span>
+      </span>`
+    : '—';
+
+  const idleSinceAttr = row.currentIdleSince ? ` data-idle-since="${formatIsoDateTime(row.currentIdleSince)}"` : '';
+  const idleContent =
+    row.currentIdleMinutes === null
+      ? '—'
+      : `<span data-idle-minutes${idleSinceAttr}>${row.currentIdleMinutes}</span>`;
+
+  const firstLogin = row.firstLogin ? formatDateTime(row.firstLogin) : '—';
+
+  return `
   <tr>
     <td>
       ${detailLink(row.userId, dateParam, row.name)}
+      <div class="meta">${detailLink(row.userId, dateParam, row.email)}</div>
       ${renderRequestBadges(badges)}
     </td>
-    <td>${detailLink(row.userId, dateParam, row.email)}</td>
-    <td>${formatDateTime(row.startedAt)}</td>
-    <td>${minutesFormatter(row.activeMinutes)}</td>
+    <td><span class="${statusClass}">${escapeHtml(row.status.label)}</span></td>
+    <td>${sinceContent}</td>
+    <td>${idleContent}</td>
     <td>${minutesFormatter(row.idleMinutes)}</td>
     <td>${row.breaks}</td>
     <td>${minutesFormatter(row.breakMinutes)}</td>
     <td>${row.lunches}</td>
     <td>${minutesFormatter(row.lunchMinutes)}</td>
+    <td>${firstLogin}</td>
     <td>${row.presenceMisses}</td>
   </tr>
 `;
+};
 
 const buildWeeklyRow = (row: UserAggregate, index: number, dateParam: string, badges: RequestBadge[] = []) => `
   <tr>
@@ -690,6 +753,168 @@ const summarizePauses = (
     },
     { breakCount: 0, breakMinutes: 0, lunchCount: 0, lunchMinutes: 0 }
   );
+};
+
+const computeActiveSince = (session: SessionRecord): Date => {
+  const lastPauseEnd = session.pauses
+    .filter((pause) => pause.endedAt)
+    .reduce<Date | null>((latest, pause) => {
+      const endedAt = pause.endedAt ?? null;
+      if (!endedAt) {
+        return latest;
+      }
+      if (!latest || endedAt > latest) {
+        return endedAt;
+      }
+      return latest;
+    }, null);
+
+  if (lastPauseEnd && lastPauseEnd > session.startedAt) {
+    return lastPauseEnd;
+  }
+
+  return session.startedAt;
+};
+
+const computeCurrentIdleData = (session: SessionRecord, now: Date) => {
+  if (!session.minuteStats.length) {
+    return { minutes: 0, since: null as Date | null };
+  }
+
+  const stats = session.minuteStats
+    .slice()
+    .sort((a, b) => a.minuteStart.getTime() - b.minuteStart.getTime());
+
+  for (let index = stats.length - 1; index >= 0; index -= 1) {
+    const stat = stats[index];
+    if (!stat.idle) {
+      return { minutes: 0, since: null as Date | null };
+    }
+
+    let idleSince = stat.minuteStart;
+    let cursor = index - 1;
+    while (cursor >= 0 && stats[cursor].idle) {
+      idleSince = stats[cursor].minuteStart;
+      cursor -= 1;
+    }
+
+    const minutes = Math.max(0, Math.ceil((now.getTime() - idleSince.getTime()) / 60_000));
+    return { minutes, since: idleSince };
+  }
+
+  return { minutes: 0, since: null as Date | null };
+};
+
+const requestStatusPriority: Record<TimeRequestStatus, number> = {
+  pending: 1,
+  approved: 0,
+  denied: 2
+};
+
+const requestTypeStatusLabel: Record<TimeRequestType, string> = {
+  pto: 'PTO',
+  non_pto: 'Day Off',
+  make_up: 'Make-Up Hours'
+};
+
+const pickBadgeStatus = (badges: RequestBadge[], dayStart: Date, dayEnd: Date) => {
+  const overlapping = badges.filter((badge) => badge.startDate <= dayEnd && badge.endDate >= dayStart);
+  if (!overlapping.length) {
+    return null;
+  }
+
+  const selected = overlapping
+    .slice()
+    .sort((a, b) => {
+      if (requestStatusPriority[a.status] !== requestStatusPriority[b.status]) {
+        return requestStatusPriority[a.status] - requestStatusPriority[b.status];
+      }
+      return a.startDate.getTime() - b.startDate.getTime();
+    })[0];
+
+  const baseLabel = requestTypeStatusLabel[selected.type] ?? 'Time Off';
+  const statusLabel = selected.status === 'approved' ? baseLabel : `${baseLabel} (${requestStatusLabels[selected.status]})`;
+  return { label: statusLabel, status: selected.status };
+};
+
+const deriveDailyStatus = (
+  sessions: SessionRecord[],
+  badges: RequestBadge[],
+  dayStart: Date,
+  dayEnd: Date
+): { status: DailyStatus; activeSession: SessionRecord | null } => {
+  const badgeStatus = pickBadgeStatus(badges, dayStart, dayEnd);
+  if (badgeStatus) {
+    return {
+      status: { kind: 'time_off', label: badgeStatus.label, since: null },
+      activeSession: null
+    };
+  }
+
+  const activeSession = sessions.find((session) => session.status === 'active' && session.endedAt === null) ?? null;
+  if (activeSession) {
+    const lunchCount = sessions.reduce(
+      (total, session) => total + session.pauses.filter((pause) => pause.type === 'lunch').length,
+      0
+    );
+    const breakCount = sessions.reduce(
+      (total, session) => total + session.pauses.filter((pause) => pause.type === 'break').length,
+      0
+    );
+
+    const openLunch = activeSession.pauses.find((pause) => pause.type === 'lunch' && pause.endedAt === null);
+    if (openLunch) {
+      return {
+        status: {
+          kind: 'on_lunch',
+          label: `On Lunch${lunchCount >= 2 ? ` (x${lunchCount})` : ''}`,
+          since: openLunch.startedAt
+        },
+        activeSession
+      };
+    }
+
+    const openBreak = activeSession.pauses.find((pause) => pause.type === 'break' && pause.endedAt === null);
+    if (openBreak) {
+      return {
+        status: {
+          kind: 'on_break',
+          label: `On Break (#${breakCount})`,
+          since: openBreak.startedAt
+        },
+        activeSession
+      };
+    }
+
+    return {
+      status: {
+        kind: 'active',
+        label: 'Active',
+        since: computeActiveSince(activeSession)
+      },
+      activeSession
+    };
+  }
+
+  if (sessions.length) {
+    const endedAt = sessions
+      .map((session) => session.endedAt)
+      .filter((value): value is Date => Boolean(value))
+      .sort((a, b) => b.getTime() - a.getTime())[0];
+    return {
+      status: {
+        kind: 'logged_out',
+        label: 'Logged Out',
+        since: endedAt ?? null
+      },
+      activeSession: null
+    };
+  }
+
+  return {
+    status: { kind: 'not_logged_in', label: 'Not Logged In', since: null },
+    activeSession: null
+  };
 };
 
 const toSummary = (session: SessionRecord, now: Date): SessionSummary => {
@@ -785,6 +1010,7 @@ export const fetchDailySummaries = async (referenceDate: Date) => {
   const dayStart = zonedStartOfDay(referenceDate);
   const dayEnd = zonedEndOfDay(referenceDate);
   const now = new Date();
+
   const sessions = (await prisma.session.findMany({
     where: {
       startedAt: {
@@ -795,22 +1021,102 @@ export const fetchDailySummaries = async (referenceDate: Date) => {
     orderBy: { startedAt: 'asc' },
     include: {
       user: true,
-      minuteStats: true,
+      minuteStats: { orderBy: { minuteStart: 'asc' } },
       events: true,
       pauses: true
     }
   })) as SessionRecord[];
 
-  const summaries = sessions
-    .filter((session) => session.status === 'active')
-    .map((session) => toSummary(session, now))
-    .sort((a, b) => b.activeMinutes - a.activeMinutes);
+  const users = await prisma.user.findMany({
+    where: { active: true },
+    orderBy: { name: 'asc' },
+    select: { id: true, name: true, email: true }
+  });
+
+  const userMap = new Map<number, { id: number; name: string; email: string }>();
+  users.forEach((user) => userMap.set(user.id, user));
+  sessions.forEach((session) => {
+    if (!userMap.has(session.userId)) {
+      userMap.set(session.userId, {
+        id: session.userId,
+        name: session.user.name,
+        email: session.user.email
+      });
+    }
+  });
+
+  const orderedUsers = Array.from(userMap.values()).sort((a, b) =>
+    a.name.localeCompare(b.name, 'en', { sensitivity: 'base' })
+  );
 
   const requestBadges = await collectRequestBadges(
-    Array.from(new Set(summaries.map((summary) => summary.userId))),
+    orderedUsers.map((user) => user.id),
     dayStart,
     dayEnd
   );
+
+  const summaries: DailyOverviewRow[] = orderedUsers.map((user) => {
+    const userSessions = sessions
+      .filter((session) => session.userId === user.id)
+      .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime());
+    const sessionSummaries = userSessions.map((session) => toSummary(session, now));
+    const aggregate = sessionSummaries.reduce(
+      (acc, summary) => ({
+        activeMinutes: acc.activeMinutes + summary.activeMinutes,
+        idleMinutes: acc.idleMinutes + summary.idleMinutes,
+        breaks: acc.breaks + summary.breaks,
+        breakMinutes: acc.breakMinutes + summary.breakMinutes,
+        lunches: acc.lunches + summary.lunches,
+        lunchMinutes: acc.lunchMinutes + summary.lunchMinutes,
+        presenceMisses: acc.presenceMisses + summary.presenceMisses
+      }),
+      {
+        activeMinutes: 0,
+        idleMinutes: 0,
+        breaks: 0,
+        breakMinutes: 0,
+        lunches: 0,
+        lunchMinutes: 0,
+        presenceMisses: 0
+      }
+    );
+
+    const { status, activeSession } = deriveDailyStatus(
+      userSessions,
+      requestBadges.get(user.id) ?? [],
+      dayStart,
+      dayEnd
+    );
+
+    const idleData =
+      activeSession && status.kind === 'active'
+        ? computeCurrentIdleData(activeSession, now)
+        : null;
+
+    const firstLogin = userSessions.length
+      ? userSessions.reduce((earliest, session) =>
+          session.startedAt < earliest ? session.startedAt : earliest,
+          userSessions[0].startedAt
+        )
+      : null;
+
+    return {
+      userId: user.id,
+      name: user.name,
+      email: user.email,
+      status,
+      currentIdleMinutes: status.kind === 'active' ? (idleData?.since ? idleData.minutes : 0) : null,
+      currentIdleSince: idleData?.since ?? null,
+      activeMinutes: aggregate.activeMinutes,
+      idleMinutes: aggregate.idleMinutes,
+      breaks: aggregate.breaks,
+      breakMinutes: aggregate.breakMinutes,
+      lunches: aggregate.lunches,
+      lunchMinutes: aggregate.lunchMinutes,
+      presenceMisses: aggregate.presenceMisses,
+      firstLogin
+    };
+  });
 
   const pauses = collectPauseEntries(sessions, now);
 
@@ -1065,6 +1371,15 @@ const baseStyles = `
     body.dashboard .table-scroll { background: rgba(15,23,42,0.03); padding: 0.5rem; border-radius: 18px; }
     body.dashboard .table-scroll table { background: #fff; border-radius: 16px; }
     body.dashboard .table-scroll table tbody tr:hover { background: rgba(37,99,235,0.08); }
+    body.dashboard .status-pill { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.2rem 0.65rem; border-radius: 999px; font-weight: 600; font-size: 0.85rem; background: #e2e8f0; color: #0f172a; }
+    body.dashboard .status-pill--active { background: rgba(22,163,74,0.18); color: #15803d; }
+    body.dashboard .status-pill--on_break { background: rgba(250,204,21,0.24); color: #ca8a04; }
+    body.dashboard .status-pill--on_lunch { background: rgba(236,72,153,0.2); color: #be185d; }
+    body.dashboard .status-pill--logged_out,
+    body.dashboard .status-pill--not_logged_in { background: rgba(148,163,184,0.18); color: #475569; }
+    body.dashboard .status-pill--time_off { background: rgba(129,140,248,0.2); color: #4338ca; }
+    body.dashboard .since { display: inline-flex; flex-direction: column; gap: 0.15rem; align-items: flex-start; }
+    body.dashboard .since .meta { font-size: 0.75rem; color: #64748b; }
     body.dashboard .alert { border-radius: 14px; }
     body.dashboard .alert.success { background: rgba(22,163,74,0.14); color: #16a34a; }
     body.dashboard .alert.error { background: rgba(220,38,38,0.14); color: #dc2626; }
@@ -1124,6 +1439,65 @@ const renderNav = (active: NavKey) => {
     </div>
   </nav>`;
 };
+
+const livePresenceScript = `
+        <script>
+          (() => {
+            const formatDuration = (milliseconds) => {
+              if (!Number.isFinite(milliseconds) || milliseconds < 0) {
+                return '';
+              }
+              const totalSeconds = Math.floor(milliseconds / 1000);
+              const hours = Math.floor(totalSeconds / 3600);
+              const minutes = Math.floor((totalSeconds % 3600) / 60);
+              const seconds = totalSeconds % 60;
+              const parts = [];
+              if (hours > 0) {
+                parts.push(hours + 'h');
+              }
+              const minuteLabel = hours > 0 ? String(minutes).padStart(2, '0') : String(minutes);
+              parts.push(minuteLabel + 'm');
+              parts.push(String(seconds).padStart(2, '0') + 's');
+              return parts.join(' ');
+            };
+            const update = () => {
+              const now = Date.now();
+              document.querySelectorAll('[data-since]').forEach((wrapper) => {
+                const elapsed = wrapper.querySelector('[data-elapsed]');
+                if (!elapsed) return;
+                const sinceValue = wrapper.getAttribute('data-since');
+                if (!sinceValue) {
+                  elapsed.textContent = '';
+                  return;
+                }
+                const startMs = Date.parse(sinceValue);
+                if (!Number.isFinite(startMs)) {
+                  elapsed.textContent = '';
+                  return;
+                }
+                elapsed.textContent = formatDuration(now - startMs);
+              });
+              document.querySelectorAll('[data-idle-minutes]').forEach((node) => {
+                const sinceValue = node.getAttribute('data-idle-since');
+                if (!sinceValue) {
+                  return;
+                }
+                const startMs = Date.parse(sinceValue);
+                if (!Number.isFinite(startMs)) {
+                  return;
+                }
+                const minutes = Math.max(0, Math.floor((now - startMs) / 60000));
+                node.textContent = String(minutes);
+              });
+            };
+            update();
+            setInterval(update, 1000);
+            setInterval(() => {
+              window.location.reload();
+            }, 30000);
+          })();
+        </script>
+`;
 
 const setDashboardTokenCookie = (res: Response, token: string) => {
   res.cookie(DASHBOARD_TOKEN_COOKIE_NAME, token, {
@@ -1297,13 +1671,15 @@ dashboardRouter.get('/today', async (req, res) => {
     const header = [
       'Name',
       'Email',
-      'Started At ISO',
-      'Active Minutes',
-      'Idle Minutes',
-      'Breaks',
-      'Break Minutes',
-      'Lunches',
-      'Lunch Minutes',
+      'Status',
+      'Status Since ISO',
+      'Current Idle Minutes',
+      'Total Idle Minutes',
+      'Break Count',
+      'Total Break Minutes',
+      'Lunch Count',
+      'Total Lunch Minutes',
+      'First Login ISO',
       'Presence Misses',
       'Timezone'
     ];
@@ -1311,13 +1687,15 @@ dashboardRouter.get('/today', async (req, res) => {
       [
         escapeCsv(summary.name),
         escapeCsv(summary.email),
-        escapeCsv(formatIsoDateTime(summary.startedAt)),
-        escapeCsv(summary.activeMinutes),
+        escapeCsv(summary.status.label),
+        escapeCsv(summary.status.since ? formatIsoDateTime(summary.status.since) : ''),
+        escapeCsv(summary.currentIdleMinutes ?? ''),
         escapeCsv(summary.idleMinutes),
         escapeCsv(summary.breaks),
         escapeCsv(summary.breakMinutes),
         escapeCsv(summary.lunches),
         escapeCsv(summary.lunchMinutes),
+        escapeCsv(summary.firstLogin ? formatIsoDateTime(summary.firstLogin) : ''),
         escapeCsv(summary.presenceMisses),
         escapeCsv(DASHBOARD_TIME_ZONE)
       ].join(',')
@@ -1331,7 +1709,7 @@ dashboardRouter.get('/today', async (req, res) => {
   const tableRows = summaries
     .map((summary) => buildTodayRow(summary, dateParam, requestBadges.get(summary.userId) ?? []))
     .join('\n');
-  const totalsRow = renderTotalsRow(totals, 3);
+  const totalsRow = renderDailyTotalsRow(totals);
   const timezoneNote = renderTimezoneNote(dayStart, dayEnd);
 
   const html = `
@@ -1386,14 +1764,15 @@ dashboardRouter.get('/today', async (req, res) => {
                           <thead>
                             <tr>
                               <th>User</th>
-                              <th>Email</th>
-                              <th>Started At</th>
-                              <th>Active Minutes</th>
-                              <th>Idle Minutes</th>
-                              <th>Breaks</th>
-                              <th>Break Minutes</th>
-                              <th>Lunches</th>
-                              <th>Lunch Minutes</th>
+                              <th>Current Status</th>
+                              <th>Since</th>
+                              <th>Current Idle (min)</th>
+                              <th>Total Idle Today (min)</th>
+                              <th>Break # Today</th>
+                              <th>Total Break Minutes</th>
+                              <th>Lunch Count</th>
+                              <th>Total Lunch Minutes</th>
+                              <th>First Login</th>
                               <th>Presence Misses</th>
                             </tr>
                           </thead>
@@ -1420,6 +1799,7 @@ dashboardRouter.get('/today', async (req, res) => {
             </section>
           </div>
         </main>
+        ${livePresenceScript}
       </body>
     </html>
   `;
@@ -2354,7 +2734,7 @@ dashboardRouter.get('/overview', async (req, res) => {
       buildTodayRow(summary, dailyData.dateParam, dailyData.requestBadges.get(summary.userId) ?? [])
     )
     .join('\n');
-  const todayTotals = renderTotalsRow(dailyData.totals, 3);
+  const todayTotals = renderDailyTotalsRow(dailyData.totals);
   const weeklyRows = weeklyData.summaries
     .map((summary, index) =>
       buildWeeklyRow(summary, index, weeklyData.startParam, weeklyData.requestBadges.get(summary.userId) ?? [])
@@ -2416,14 +2796,15 @@ dashboardRouter.get('/overview', async (req, res) => {
                     <thead>
                       <tr>
                         <th>User</th>
-                        <th>Email</th>
-                        <th>Started At</th>
-                        <th>Active Minutes</th>
-                        <th>Idle Minutes</th>
-                        <th>Breaks</th>
-                        <th>Break Minutes</th>
-                        <th>Lunches</th>
-                        <th>Lunch Minutes</th>
+                        <th>Current Status</th>
+                        <th>Since</th>
+                        <th>Current Idle (min)</th>
+                        <th>Total Idle Today (min)</th>
+                        <th>Break # Today</th>
+                        <th>Total Break Minutes</th>
+                        <th>Lunch Count</th>
+                        <th>Total Lunch Minutes</th>
+                        <th>First Login</th>
                         <th>Presence Misses</th>
                       </tr>
                     </thead>
@@ -2582,6 +2963,7 @@ dashboardRouter.get('/overview', async (req, res) => {
               ${monthlySection}
             </div>
           </main>
+          ${livePresenceScript}
         </body>
       </html>
     `;
