@@ -3300,11 +3300,11 @@ dashboardRouter.get('/overview', async (req, res) => {
                     '    ' + buildStat('Current idle', formatMinutesValue(data.idleMinutes), currentIdleMeta),
                     '  </div>',
                     '</div>'
-                  ].join('\n');
+                  ].join('\\n');
 
                   const activitySection = [
                     '<div class="drilldown-section">',
-                    '  <h3>Today\'s activity</h3>',
+                    '  <h3>Today&#39;s activity</h3>',
                     '  <div class="drilldown-grid">',
                     '    ' + buildStat('Idle total', formatMinutesValue(data.idleTotal)),
                     '    ' + buildStat('Breaks', formatCountValue(data.breakCount), data.breakMinutes !== null ? formatMinutesValue(data.breakMinutes) : ''),
@@ -3312,7 +3312,7 @@ dashboardRouter.get('/overview', async (req, res) => {
                     '    ' + buildStat('Presence misses', formatCountValue(data.presenceMisses)),
                     '  </div>',
                     '</div>'
-                  ].join('\n');
+                  ].join('\\n');
 
                   const timelineParts = [
                     '<div class="drilldown-section">',
@@ -3325,9 +3325,9 @@ dashboardRouter.get('/overview', async (req, res) => {
                   }
                   timelineParts.push('  </div>');
                   timelineParts.push('</div>');
-                  const timelineSection = timelineParts.join('\n');
+                  const timelineSection = timelineParts.join('\\n');
 
-                  content.innerHTML = [statusSection, activitySection, timelineSection].join('\n');
+                  content.innerHTML = [statusSection, activitySection, timelineSection].join('\\n');
                   footer.innerHTML = data.detailUrl
                     ? '<a class="button" href="' + escapeHtmlClient(data.detailUrl) + '" data-drilldown-detail>Open timeline</a>'
                     : '';
