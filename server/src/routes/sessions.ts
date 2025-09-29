@@ -133,11 +133,6 @@ const handleEmailOnlyStart = async (req: Request, res: Response) => {
     });
     await logAttempt(true, 'auto_created', user.id);
   } else {
-    if (user.role !== 'employee') {
-      await logAttempt(false, 'user_not_found');
-      throw unauthorizedError();
-    }
-
     if (!user.active) {
       await logAttempt(false, 'user_inactive', user.id);
       throw unauthorizedError();
