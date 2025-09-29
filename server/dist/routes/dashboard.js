@@ -34,34 +34,42 @@ const formatFullDate = (value) => (0, date_fns_tz_1.formatInTimeZone)(value, DAS
 const formatShortDate = (value) => (0, date_fns_tz_1.formatInTimeZone)(value, DASHBOARD_TIME_ZONE, 'MMM d');
 const formatIsoDateTime = (value) => (0, date_fns_tz_1.formatInTimeZone)(value, DASHBOARD_TIME_ZONE, ISO_DATE_TIME);
 const formatIsoDate = (value) => (0, date_fns_tz_1.formatInTimeZone)(value, DASHBOARD_TIME_ZONE, ISO_DATE);
+const formatTimeOfDay = (value) => (0, date_fns_tz_1.formatInTimeZone)(value, DASHBOARD_TIME_ZONE, 'h:mm a');
 const minutesFormatter = (value) => `${value} min`;
 const formatOptionalDate = (value) => (value ? formatDateTime(value) : '—');
 const toDateParam = (value) => formatIsoDate(zonedStartOfDay(value));
+const parseDateInput = (value) => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return undefined;
+    }
+    const parsed = (0, date_fns_tz_1.zonedTimeToUtc)(`${trimmed}T00:00:00`, DASHBOARD_TIME_ZONE);
+    return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+};
 const parseDateParam = (value) => {
-    if (typeof value !== 'string' || !value) {
-        return zonedStartOfDay(new Date());
+    if (typeof value === 'string') {
+        const parsed = parseDateInput(value);
+        if (parsed) {
+            return zonedStartOfDay(parsed);
+        }
     }
-    const parsed = (0, date_fns_1.parseISO)(`${value}T00:00:00`);
-    if (Number.isNaN(parsed.getTime())) {
-        return zonedStartOfDay(new Date());
-    }
-    return zonedStartOfDay(parsed);
+    return zonedStartOfDay(new Date());
 };
 const parseMonthParam = (value) => {
-    if (typeof value !== 'string' || !/^\d{4}-\d{2}$/.test(value)) {
-        return zonedStartOfMonth(new Date());
+    if (typeof value === 'string' && /^\d{4}-\d{2}$/.test(value)) {
+        const parsed = parseDateInput(`${value}-01`);
+        if (parsed) {
+            return zonedStartOfMonth(parsed);
+        }
     }
-    return zonedStartOfMonth((0, date_fns_1.parseISO)(`${value}-01T00:00:00`));
+    return zonedStartOfMonth(new Date());
 };
 const parseDateOnlyParam = (value) => {
-    if (typeof value !== 'string' || !value) {
+    if (typeof value !== 'string') {
         return undefined;
     }
-    const parsed = (0, date_fns_1.parseISO)(`${value}T00:00:00`);
-    if (Number.isNaN(parsed.getTime())) {
-        return undefined;
-    }
-    return zonedStartOfDay(parsed);
+    const parsed = parseDateInput(value);
+    return parsed ? zonedStartOfDay(parsed) : undefined;
 };
 const escapeCsv = (value) => {
     const str = String(value);
@@ -573,16 +581,407 @@ const collectPauseEntries = (sessions, now) => sessions
     durationMinutes: computePauseDuration(pause, now)
 })))
     .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime());
+const MINUTE_MS = 60000;
+const clampIntervalToRange = (start, end, now, rangeStart, rangeEnd) => {
+    const effectiveEnd = end ?? now;
+    const clampedStart = start < rangeStart ? rangeStart : start;
+    const clampedEnd = effectiveEnd > rangeEnd ? rangeEnd : effectiveEnd;
+    if (clampedEnd <= clampedStart) {
+        return null;
+    }
+    return { start: clampedStart, end: clampedEnd };
+};
+const intervalOverlaps = (intervals, start, end) => intervals.some((interval) => start < interval.end && end > interval.start);
+const sumIntervalsInMinutes = (intervals) => intervals.reduce((total, interval) => total + Math.max(0, Math.ceil((interval.end.getTime() - interval.start.getTime()) / MINUTE_MS)), 0);
+const resolveIdleStreak = (session, now, dayStart, exclusionIntervals) => {
+    const sortedStats = session.minuteStats
+        .filter((stat) => stat.minuteStart >= dayStart && stat.minuteStart <= now && stat.active)
+        .sort((a, b) => a.minuteStart.getTime() - b.minuteStart.getTime());
+    let idleStart = null;
+    for (let index = sortedStats.length - 1; index >= 0; index -= 1) {
+        const stat = sortedStats[index];
+        if (!stat.idle) {
+            break;
+        }
+        const minuteStart = stat.minuteStart;
+        const minuteEnd = new Date(minuteStart.getTime() + MINUTE_MS);
+        if (intervalOverlaps(exclusionIntervals, minuteStart, minuteEnd)) {
+            break;
+        }
+        idleStart = minuteStart;
+    }
+    if (!idleStart) {
+        return { minutes: 0, since: null };
+    }
+    const elapsedMinutes = Math.max(0, Math.ceil((now.getTime() - idleStart.getTime()) / MINUTE_MS));
+    return { minutes: elapsedMinutes, since: idleStart };
+};
+const computeIdleMinutes = (sessions, dayStart, dayEnd, now, exclusionIntervals) => {
+    let total = 0;
+    for (const session of sessions) {
+        for (const stat of session.minuteStats) {
+            if (!stat.idle || !stat.active) {
+                continue;
+            }
+            const minuteStart = stat.minuteStart;
+            if (minuteStart < dayStart || minuteStart >= dayEnd) {
+                continue;
+            }
+            const minuteEnd = new Date(minuteStart.getTime() + MINUTE_MS);
+            if (intervalOverlaps(exclusionIntervals, minuteStart, minuteEnd)) {
+                continue;
+            }
+            total += 1;
+        }
+    }
+    return total;
+};
+const resolveTimeAwayStatus = (requests, dayStart) => {
+    const priority = {
+        lunch: 99,
+        break: 98,
+        active: 97,
+        logged_out: 96,
+        not_logged_in: 95,
+        pto: 0,
+        day_off: 1,
+        make_up: 2
+    };
+    const mapped = requests
+        .filter((request) => request.status === 'approved')
+        .map((request) => {
+        if (request.type === 'pto') {
+            return { key: 'pto', startDate: request.startDate };
+        }
+        if (request.type === 'non_pto') {
+            return { key: 'day_off', startDate: request.startDate };
+        }
+        if (request.type === 'make_up') {
+            return { key: 'make_up', startDate: request.startDate };
+        }
+        return null;
+    })
+        .filter((value) => value !== null);
+    if (!mapped.length) {
+        return null;
+    }
+    mapped.sort((a, b) => {
+        const rankA = priority[a.key];
+        const rankB = priority[b.key];
+        if (rankA !== rankB) {
+            return rankA - rankB;
+        }
+        return a.startDate.getTime() - b.startDate.getTime();
+    });
+    const selection = mapped[0];
+    const since = selection.startDate > dayStart ? selection.startDate : dayStart;
+    const label = selection.key === 'pto' ? 'PTO' : selection.key === 'day_off' ? 'Day Off' : 'Make up Hours';
+    return { key: selection.key, label, since };
+};
+const buildRosterRow = (user, sessions, requests, badges, dayStart, dayEnd, now) => {
+    const sortedSessions = sessions
+        .filter((session) => session.userId === user.id)
+        .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime());
+    let presenceMisses = 0;
+    let firstLogin = null;
+    for (const session of sortedSessions) {
+        for (const event of session.events) {
+            if (event.ts < dayStart || event.ts > dayEnd) {
+                continue;
+            }
+            if (event.type === 'presence_miss') {
+                presenceMisses += 1;
+            }
+            if (event.type === 'login') {
+                if (!firstLogin || event.ts < firstLogin) {
+                    firstLogin = event.ts;
+                }
+            }
+        }
+    }
+    if (!firstLogin) {
+        const fallback = sortedSessions
+            .map((session) => session.startedAt)
+            .filter((startedAt) => startedAt >= dayStart && startedAt <= dayEnd)
+            .sort((a, b) => a.getTime() - b.getTime())[0];
+        if (fallback) {
+            firstLogin = fallback;
+        }
+    }
+    const breakIntervals = [];
+    const lunchIntervals = [];
+    let breakCount = 0;
+    let lunchCount = 0;
+    for (const session of sortedSessions) {
+        for (const pause of session.pauses) {
+            if (pause.type !== 'break' && pause.type !== 'lunch') {
+                continue;
+            }
+            if (pause.type === 'break' && pause.startedAt >= dayStart && pause.startedAt <= dayEnd) {
+                breakCount += 1;
+            }
+            if (pause.type === 'lunch' && pause.startedAt >= dayStart && pause.startedAt <= dayEnd) {
+                lunchCount += 1;
+            }
+            const interval = clampIntervalToRange(pause.startedAt, pause.endedAt, now, dayStart, dayEnd);
+            if (!interval) {
+                continue;
+            }
+            if (pause.type === 'break') {
+                breakIntervals.push(interval);
+            }
+            else {
+                lunchIntervals.push(interval);
+            }
+        }
+    }
+    const totalBreakMinutes = sumIntervalsInMinutes(breakIntervals);
+    const totalLunchMinutes = sumIntervalsInMinutes(lunchIntervals);
+    const pauseIntervals = [...breakIntervals, ...lunchIntervals];
+    const totalIdleMinutes = computeIdleMinutes(sortedSessions, dayStart, dayEnd, now, pauseIntervals);
+    const activeSession = sortedSessions
+        .filter((session) => session.status === 'active')
+        .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime())
+        .pop() ?? null;
+    let statusKey = 'not_logged_in';
+    let statusLabel = 'Not Logged In';
+    let statusSince = null;
+    let idleSince = null;
+    let currentIdleMinutes = 0;
+    if (activeSession) {
+        const activeLunch = activeSession.pauses.find((pause) => pause.type === 'lunch' && !pause.endedAt);
+        const activeBreak = activeSession.pauses.find((pause) => pause.type === 'break' && !pause.endedAt);
+        if (activeLunch) {
+            statusKey = 'lunch';
+            const lunchNumber = activeLunch.sequence;
+            statusLabel = lunchNumber >= 2 ? `On Lunch (x${lunchNumber})` : 'On Lunch';
+            statusSince = activeLunch.startedAt;
+        }
+        else if (activeBreak) {
+            statusKey = 'break';
+            statusLabel = `On Break (#${activeBreak.sequence})`;
+            statusSince = activeBreak.startedAt;
+        }
+        else {
+            statusKey = 'active';
+            statusLabel = 'Active';
+            const lastPauseEnd = activeSession.pauses
+                .filter((pause) => pause.endedAt && pause.endedAt <= now)
+                .reduce((latest, pause) => {
+                if (!pause.endedAt) {
+                    return latest;
+                }
+                if (!latest || pause.endedAt > latest) {
+                    return pause.endedAt;
+                }
+                return latest;
+            }, null);
+            statusSince = lastPauseEnd && lastPauseEnd > activeSession.startedAt ? lastPauseEnd : activeSession.startedAt;
+            const idleResult = resolveIdleStreak(activeSession, now, dayStart, pauseIntervals);
+            currentIdleMinutes = idleResult.minutes;
+            idleSince = idleResult.since;
+        }
+    }
+    else {
+        const timeAway = resolveTimeAwayStatus(requests, dayStart);
+        if (timeAway) {
+            statusKey = timeAway.key;
+            statusLabel = timeAway.label;
+            statusSince = timeAway.since;
+        }
+        else {
+            const completedSessions = sortedSessions
+                .filter((session) => session.endedAt && session.endedAt >= dayStart && session.endedAt <= dayEnd)
+                .sort((a, b) => (a.endedAt && b.endedAt ? a.endedAt.getTime() - b.endedAt.getTime() : 0));
+            const latestCompleted = completedSessions[completedSessions.length - 1];
+            if (latestCompleted && latestCompleted.endedAt) {
+                statusKey = 'logged_out';
+                statusLabel = 'Logged Out';
+                statusSince = latestCompleted.endedAt;
+            }
+            else {
+                statusKey = 'not_logged_in';
+                statusLabel = 'Not Logged In';
+                statusSince = null;
+            }
+        }
+    }
+    return {
+        userId: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        statusKey,
+        statusLabel,
+        statusSince,
+        idleSince,
+        currentIdleMinutes,
+        totalIdleMinutes,
+        breakCount,
+        totalBreakMinutes,
+        lunchCount,
+        totalLunchMinutes,
+        firstLogin,
+        presenceMisses,
+        requestBadges: badges
+    };
+};
+const fetchTodayRosterData = async (referenceDate, sessions) => {
+    const dayStart = zonedStartOfDay(referenceDate);
+    const dayEnd = zonedEndOfDay(referenceDate);
+    const now = new Date();
+    const users = await prisma_1.prisma.user.findMany({
+        where: { active: true },
+        orderBy: { name: 'asc' },
+        select: { id: true, name: true, email: true, role: true }
+    });
+    if (!users.length) {
+        return {
+            rows: [],
+            totals: {
+                totalIdleMinutes: 0,
+                breakCount: 0,
+                totalBreakMinutes: 0,
+                lunchCount: 0,
+                totalLunchMinutes: 0,
+                presenceMisses: 0
+            },
+            hasComputedNotice: false
+        };
+    }
+    const userIds = users.map((user) => user.id);
+    const userIdSet = new Set(userIds);
+    const relevantSessions = sessions.filter((session) => userIdSet.has(session.userId));
+    const requests = await prisma_1.prisma.timeRequest.findMany({
+        where: {
+            userId: { in: userIds },
+            status: 'approved',
+            startDate: { lte: dayEnd },
+            endDate: { gte: dayStart }
+        },
+        orderBy: { startDate: 'asc' }
+    });
+    const requestsByUser = new Map();
+    for (const request of requests) {
+        const bucket = requestsByUser.get(request.userId) ?? [];
+        bucket.push(request);
+        requestsByUser.set(request.userId, bucket);
+    }
+    const badgeMap = await collectRequestBadges(userIds, dayStart, dayEnd);
+    const rows = users.map((user) => buildRosterRow(user, relevantSessions, requestsByUser.get(user.id) ?? [], badgeMap.get(user.id) ?? [], dayStart, dayEnd, now));
+    const totals = rows.reduce((acc, row) => ({
+        totalIdleMinutes: acc.totalIdleMinutes + row.totalIdleMinutes,
+        breakCount: acc.breakCount + row.breakCount,
+        totalBreakMinutes: acc.totalBreakMinutes + row.totalBreakMinutes,
+        lunchCount: acc.lunchCount + row.lunchCount,
+        totalLunchMinutes: acc.totalLunchMinutes + row.totalLunchMinutes,
+        presenceMisses: acc.presenceMisses + row.presenceMisses
+    }), {
+        totalIdleMinutes: 0,
+        breakCount: 0,
+        totalBreakMinutes: 0,
+        lunchCount: 0,
+        totalLunchMinutes: 0,
+        presenceMisses: 0
+    });
+    return {
+        rows,
+        totals,
+        hasComputedNotice: rows.length > 0
+    };
+};
+const renderSinceCell = (since) => {
+    if (!since) {
+        return '—';
+    }
+    const iso = formatIsoDateTime(since);
+    const label = formatTimeOfDay(since);
+    const tooltip = formatDateTime(since);
+    return `<span class="since" data-since="${iso}" title="${escapeHtml(tooltip)}"><span class="since__time">${escapeHtml(label)}</span><span class="since__elapsed" data-elapsed></span></span>`;
+};
+const renderIdleCell = (row) => {
+    if (row.statusKey !== 'active') {
+        return '—';
+    }
+    if (!row.idleSince) {
+        return String(row.currentIdleMinutes);
+    }
+    const iso = formatIsoDateTime(row.idleSince);
+    return `<span data-idle-since="${iso}" data-idle-minutes="${row.currentIdleMinutes}">${row.currentIdleMinutes}</span>`;
+};
+const renderTimeCell = (value) => {
+    if (!value) {
+        return '—';
+    }
+    const tooltip = formatDateTime(value);
+    return `<span title="${escapeHtml(tooltip)}">${escapeHtml(formatTimeOfDay(value))}</span>`;
+};
+const escapeAttr = (value) => value === null || value === undefined ? '' : escapeHtml(String(value));
+const buildTodayRosterRowHtml = (row, dateParam) => {
+    const statusClass = `status status--${row.statusKey.replace(/_/g, '-')}`;
+    const statusSince = row.statusSince ? formatIsoDateTime(row.statusSince) : '';
+    const idleSince = row.idleSince ? formatIsoDateTime(row.idleSince) : '';
+    const firstLoginIso = row.firstLogin ? formatIsoDateTime(row.firstLogin) : '';
+    const detailHref = `/dashboard/user/${row.userId}?date=${dateParam}`;
+    return `<tr
+    data-user-id="${row.userId}"
+    data-user-name="${escapeAttr(row.name)}"
+    data-user-email="${escapeAttr(row.email)}"
+    data-user-role="${escapeAttr(row.role)}"
+    data-status-key="${escapeAttr(row.statusKey)}"
+    data-status-label="${escapeAttr(row.statusLabel)}"
+    data-status-detail="${escapeAttr(row.statusDetail ?? '')}"
+    data-status-since="${escapeAttr(statusSince)}"
+    data-idle-since="${escapeAttr(idleSince)}"
+    data-idle-minutes="${row.currentIdleMinutes}"
+    data-idle-total="${row.totalIdleMinutes}"
+    data-break-count="${row.breakCount}"
+    data-break-minutes="${row.totalBreakMinutes}"
+    data-lunch-count="${row.lunchCount}"
+    data-lunch-minutes="${row.totalLunchMinutes}"
+    data-first-login="${escapeAttr(firstLoginIso)}"
+    data-presence-misses="${row.presenceMisses}"
+    data-detail-url="${escapeAttr(detailHref)}"
+  >
+    <td>
+      ${detailLink(row.userId, dateParam, row.name)}
+      ${renderRequestBadges(row.requestBadges)}
+    </td>
+    <td><span class="${statusClass}">${escapeHtml(row.statusLabel)}</span></td>
+    <td>${renderSinceCell(row.statusSince)}</td>
+    <td data-idle-cell>${renderIdleCell(row)}</td>
+    <td>${row.totalIdleMinutes}</td>
+    <td>${row.breakCount}</td>
+    <td>${row.totalBreakMinutes}</td>
+    <td>${row.lunchCount}</td>
+    <td>${row.totalLunchMinutes}</td>
+    <td>${renderTimeCell(row.firstLogin)}</td>
+    <td>${row.presenceMisses}</td>
+  </tr>`;
+};
+const renderTodayRosterRows = (rows, dateParam) => rows.map((row) => buildTodayRosterRowHtml(row, dateParam)).join('\n');
+const renderRosterTotalsRow = (totals) => `
+  <tfoot data-roster-totals>
+    <tr class="totals">
+      <th colspan="4">Totals</th>
+      <th>${totals.totalIdleMinutes}</th>
+      <th>${totals.breakCount}</th>
+      <th>${totals.totalBreakMinutes}</th>
+      <th>${totals.lunchCount}</th>
+      <th>${totals.totalLunchMinutes}</th>
+      <th>—</th>
+      <th>${totals.presenceMisses}</th>
+    </tr>
+  </tfoot>
+`;
 const fetchDailySummaries = async (referenceDate) => {
     const dayStart = zonedStartOfDay(referenceDate);
     const dayEnd = zonedEndOfDay(referenceDate);
     const now = new Date();
     const sessions = (await prisma_1.prisma.session.findMany({
         where: {
-            startedAt: {
-                gte: dayStart,
-                lte: dayEnd
-            }
+            startedAt: { lte: dayEnd },
+            OR: [{ endedAt: null }, { endedAt: { gte: dayStart } }]
         },
         orderBy: { startedAt: 'asc' },
         include: {
@@ -606,7 +1005,8 @@ const fetchDailySummaries = async (referenceDate) => {
         summaries,
         totals: computeTotals(summaries),
         requestBadges,
-        pauses
+        pauses,
+        sessions
     };
 };
 exports.fetchDailySummaries = fetchDailySummaries;
@@ -685,7 +1085,13 @@ const baseStyles = `
   tr:hover { background: #f9fafb; }
   .totals th, .totals td { font-weight: 600; background: #e0e7ff; }
   .empty { padding: 2rem; text-align: center; color: #6b7280; background: #fff; border-radius: 6px; margin-top: 1rem; }
-  .nav { display: flex; gap: 0.75rem; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; }
+  .nav { display: flex; justify-content: space-between; gap: 0.75rem; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; }
+  .nav__links { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
+  .nav__account { display: flex; align-items: center; gap: 0.75rem; margin-left: auto; }
+  .nav__account-label { font-weight: 600; color: #1f2933; }
+  .nav__logout-form { margin: 0; }
+  .nav__logout-button { background: #ef4444; color: #fff; border: none; border-radius: 999px; padding: 0.45rem 0.9rem; font-weight: 600; cursor: pointer; }
+  .nav__logout-button:hover { background: #dc2626; }
   .nav a { color: #2563eb; text-decoration: none; font-weight: 500; padding-bottom: 0.25rem; }
   .nav a.active { border-bottom: 2px solid #2563eb; }
   .card { background: #fff; padding: 1.25rem; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); margin-top: 1.5rem; max-width: 100%; }
@@ -707,6 +1113,8 @@ const baseStyles = `
   .print-button { background: #6b7280; }
   .print-button:hover { background: #4b5563; }
   .meta { color: #4b5563; margin-bottom: 0.75rem; }
+  .meta--admin { font-size: 0.8rem; color: #2563eb; display: inline-flex; align-items: center; gap: 0.35rem; }
+  .meta--admin::before { content: 'ℹ️'; }
   .tz-note { margin: 0.75rem 0 1.25rem; font-size: 0.9rem; color: #4b5563; }
   a { color: #2563eb; }
   a:hover { text-decoration: underline; }
@@ -723,6 +1131,19 @@ const baseStyles = `
   .badge-status-pending { border-style: dashed; border-color: currentColor; }
   .badge-status-approved { border-color: rgba(0,0,0,0.05); }
   .badge-status-denied { opacity: 0.6; text-decoration: line-through; }
+  .status { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.2rem 0.6rem; border-radius: 999px; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; background: rgba(148,163,184,0.18); color: #334155; }
+  .status--active { background: rgba(34,197,94,0.18); color: #047857; }
+  .status--break { background: rgba(251,191,36,0.2); color: #b45309; }
+  .status--lunch { background: rgba(59,130,246,0.18); color: #1d4ed8; }
+  .status--logged-out { background: rgba(148,163,184,0.2); color: #475569; }
+  .status--not-logged-in { background: rgba(148,163,184,0.2); color: #475569; }
+  .status--pto { background: rgba(251,191,36,0.24); color: #92400e; }
+  .status--day-off { background: rgba(203,213,225,0.35); color: #1f2937; }
+  .status--make-up { background: rgba(14,165,233,0.18); color: #0369a1; }
+  .since { display: inline-flex; align-items: baseline; gap: 0.35rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .since__time { font-weight: 600; color: #0f172a; }
+  .since__elapsed { font-size: 0.75rem; color: #64748b; }
+  td[data-idle-cell] { font-variant-numeric: tabular-nums; }
   .action-buttons { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
   .action-buttons form { margin: 0; }
   .inline-form { display: inline; }
@@ -784,12 +1205,98 @@ const baseStyles = `
     table { box-shadow: none; }
     .no-print { display: none !important; }
   }
+
+  /* modern dashboard refresh */
+    body.dashboard { font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%); color: #0f172a; }
+    body.dashboard main.page-shell { max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: clamp(1.25rem, 3vw, 2rem); }
+    body.dashboard .nav { background: rgba(255,255,255,0.85); backdrop-filter: blur(12px); padding: 0.6rem 1rem; border-radius: 999px; box-shadow: 0 16px 32px rgba(15,23,42,0.08); position: sticky; top: clamp(0.75rem,2vw,1.25rem); z-index: 20; }
+    body.dashboard .nav a { padding: 0.35rem 0.85rem; border-radius: 999px; font-weight: 600; color: #64748b; }
+    body.dashboard .nav a.active { background: #2563eb; color: #fff; box-shadow: 0 12px 24px rgba(37,99,235,0.22); border-bottom: none; }
+    body.dashboard .nav__account-label { color: #0f172a; }
+    body.dashboard .nav__logout-button { background: #dc2626; border-radius: 999px; padding: 0.45rem 1rem; }
+    body.dashboard .nav__logout-button:hover { box-shadow: 0 12px 24px rgba(220,38,38,0.25); }
+    body.dashboard button,
+    body.dashboard .button { border-radius: 999px; padding: 0.55rem 1.3rem; font-weight: 600; }
+    body.dashboard button:hover,
+    body.dashboard .button:hover { transform: translateY(-1px); box-shadow: 0 12px 24px rgba(37,99,235,0.24); }
+    body.dashboard .button-secondary { background: rgba(15,23,42,0.08); color: #0f172a; }
+    body.dashboard .button-danger { background: #dc2626; }
+    body.dashboard .page-header { background: #fff; border-radius: 22px; box-shadow: 0 24px 45px rgba(15,23,42,0.12); padding: clamp(1.5rem,3vw,2.5rem); display: flex; align-items: flex-start; justify-content: space-between; gap: clamp(1rem,3vw,2rem); flex-wrap: wrap; }
+    body.dashboard .page-header__eyebrow { text-transform: uppercase; letter-spacing: 0.12em; color: #64748b; }
+    body.dashboard .page-header__content { display: flex; flex-direction: column; gap: 0.65rem; }
+    body.dashboard .page-header__title { margin: 0; font-size: clamp(1.75rem, 3.5vw, 2.3rem); color: #0f172a; }
+    body.dashboard .page-header__subtitle { margin: 0; color: #475569; max-width: 46ch; font-size: 0.95rem; line-height: 1.5; }
+    body.dashboard .page-header__meta { display: grid; gap: 0.35rem; text-align: right; color: #64748b; justify-items: end; }
+    body.dashboard .page-header__meta strong { color: #0f172a; }
+    body.dashboard .tz-note { font-size: 0.85rem; color: #64748b; display: inline-flex; align-items: center; gap: 0.45rem; margin: 0; }
+    body.dashboard .tz-note::before { content: '🕒'; }
+    body.dashboard .page-controls { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
+    body.dashboard .page-controls .tab-bar { margin: 0; }
+    .drilldown-shell { position: fixed; inset: 0; display: flex; justify-content: flex-end; pointer-events: none; z-index: 90; }
+    .drilldown-shell[hidden] { display: none; }
+    .drilldown-shell[data-open="true"] { pointer-events: auto; }
+    .drilldown-backdrop { flex: 1; background: rgba(15,23,42,0.45); opacity: 0; transition: opacity 0.24s ease; }
+    .drilldown-shell[data-open="true"] .drilldown-backdrop { opacity: 1; }
+    .drilldown-panel { width: min(420px, 92vw); background: #fff; box-shadow: -24px 0 48px rgba(15,23,42,0.18); display: flex; flex-direction: column; max-height: 100vh; transform: translateX(100%); transition: transform 0.28s ease; outline: none; }
+    .drilldown-shell[data-open="true"] .drilldown-panel { transform: translateX(0); }
+    .drilldown-panel__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; padding: 1.25rem 1.5rem 0.75rem; border-bottom: 1px solid rgba(15,23,42,0.06); }
+    .drilldown-panel__heading h2 { margin: 0; font-size: 1.25rem; letter-spacing: -0.01em; color: #0f172a; }
+    .drilldown-panel__heading p { margin: 0.35rem 0 0; color: #475569; font-size: 0.9rem; }
+    .drilldown-close { background: transparent; border: none; color: #475569; font-size: 1.5rem; line-height: 1; cursor: pointer; padding: 0.25rem; border-radius: 999px; }
+    .drilldown-close:hover { color: #dc2626; }
+    .drilldown-panel__content { padding: 1.25rem 1.5rem; flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 1.25rem; }
+    .drilldown-panel__footer { padding: 1rem 1.5rem 1.5rem; border-top: 1px solid rgba(15,23,42,0.08); }
+    .drilldown-panel__footer .button { width: 100%; }
+    .drilldown-section { background: rgba(37,99,235,0.08); border-radius: 14px; padding: 0.9rem 1rem; }
+    .drilldown-section h3 { margin: 0 0 0.6rem; font-size: 0.85rem; letter-spacing: 0.08em; text-transform: uppercase; color: #1d4ed8; }
+    .drilldown-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.85rem; }
+    .drilldown-grid dl { margin: 0; }
+    .drilldown-grid dt { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; }
+    .drilldown-grid dd { margin: 0.25rem 0 0; font-weight: 600; color: #1f2933; font-size: 0.95rem; }
+    .drilldown-pill { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.35rem 0.65rem; border-radius: 999px; background: rgba(148,163,184,0.18); color: #1f2933; font-size: 0.8rem; font-weight: 600; }
+    .drilldown-meta { display: block; margin-top: 0.25rem; font-size: 0.75rem; color: #64748b; font-weight: 500; }
+    .drilldown-row-active { background: rgba(37,99,235,0.14) !important; }
+    .drilldown-locked { overflow: hidden; }
+    body.dashboard .tab-bar { display: inline-flex; gap: 0.5rem; background: rgba(37,99,235,0.08); padding: 0.4rem; border-radius: 999px; }
+    body.dashboard .tab-bar a { padding: 0.45rem 1rem; border-radius: 999px; font-weight: 600; color: #64748b; background: transparent; }
+    body.dashboard .tab-bar a.active { background: #fff; color: #2563eb; box-shadow: 0 10px 20px rgba(37,99,235,0.22); }
+    body.dashboard .cards-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px,1fr)); gap: clamp(1rem,3vw,1.75rem); align-items: stretch; }
+    body.dashboard .card { background: #fff; border-radius: 20px; box-shadow: 0 24px 45px rgba(15,23,42,0.12); padding: clamp(1.25rem,2.5vw,1.75rem); display: flex; flex-direction: column; gap: 1.25rem; }
+    body.dashboard .card__header { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-start; justify-content: space-between; }
+    body.dashboard .card__title { color: #0f172a; font-size: 1.15rem; margin: 0; }
+    body.dashboard .card__subtitle { color: #64748b; font-size: 0.9rem; max-width: 36ch; margin: 0; }
+    body.dashboard .card__actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; justify-content: flex-end; }
+    body.dashboard .card__body { display: flex; flex-direction: column; gap: 1rem; }
+    body.dashboard .summary-card { background: rgba(37,99,235,0.1); color: #2563eb; border-radius: 16px; box-shadow: none; }
+    body.dashboard .summary-title { letter-spacing: 0.08em; color: rgba(37,99,235,0.75); }
+    body.dashboard .summary-meta { color: rgba(37,99,235,0.75); }
+    body.dashboard .table-scroll { background: rgba(15,23,42,0.03); padding: 0.5rem; border-radius: 18px; }
+    body.dashboard .table-scroll table { background: #fff; border-radius: 16px; }
+    body.dashboard .table-scroll table tbody tr:hover { background: rgba(37,99,235,0.08); }
+    body.dashboard .alert { border-radius: 14px; }
+    body.dashboard .alert.success { background: rgba(22,163,74,0.14); color: #16a34a; }
+    body.dashboard .alert.error { background: rgba(220,38,38,0.14); color: #dc2626; }
+    body.dashboard .empty { background: rgba(15,23,42,0.03); color: #64748b; border-radius: 16px; }
+    @media (max-width: 960px) {
+      body.dashboard .page-header { text-align: center; flex-direction: column; align-items: stretch; }
+      body.dashboard .page-header__meta { text-align: center; justify-items: center; }
+    }
+    @media (max-width: 720px) {
+      body.dashboard .cards-grid { grid-template-columns: 1fr; }
+      body.dashboard .filters { flex-direction: column; align-items: stretch; }
+      body.dashboard .filters label { width: 100%; }
+      body.dashboard button,
+      body.dashboard .button { width: 100%; justify-content: center; }
+      body.dashboard .page-controls { flex-direction: column; align-items: stretch; }
+      .drilldown-panel__footer .button { width: 100%; }
+      body.dashboard .table-scroll table { min-width: 520px; }
+    }
 `;
 const formatRangeLabel = (start, end) => end && end.getTime() !== start.getTime() ? `${formatFullDate(start)} – ${formatFullDate(end)}` : formatFullDate(start);
 const renderTimezoneNote = (start, end) => `<p class="tz-note">All times shown in ${escapeHtml(DASHBOARD_TIME_ZONE)} (${escapeHtml(formatRangeLabel(start, end))})</p>`;
 const renderNav = (active) => {
     const link = (href, label, key) => `<a href="${href}"${active === key ? ' class="active"' : ''}>${label}</a>`;
-    return `<nav class="nav no-print">${[
+    const links = [
         link('/dashboard/overview', 'Overview', 'overview'),
         link('/dashboard/today', 'Today', 'today'),
         link('/dashboard/weekly', 'Weekly', 'weekly'),
@@ -798,7 +1305,16 @@ const renderNav = (active) => {
         link('/dashboard/requests', 'Requests', 'requests'),
         link('/dashboard/balances', 'Balances', 'balances'),
         link('/dashboard/settings', 'Settings', 'settings')
-    ].join('')}</nav>`;
+    ];
+    return `<nav class="nav no-print">
+    <div class="nav__links">${links.join('')}</div>
+    <div class="nav__account">
+      <span class="nav__account-label">My Profile</span>
+      <form method="post" action="/dashboard/logout" class="nav__logout-form">
+        <button type="submit" class="nav__logout-button">Log Out</button>
+      </form>
+    </div>
+  </nav>`;
 };
 const setDashboardTokenCookie = (res, token) => {
     res.cookie(auth_1.DASHBOARD_TOKEN_COOKIE_NAME, token, {
@@ -934,6 +1450,7 @@ exports.dashboardRouter.get('/today', async (req, res) => {
     const requestedDate = typeof req.query.date === 'string' ? parseDateParam(req.query.date) : zonedStartOfDay(new Date());
     const dailyData = await (0, exports.fetchDailySummaries)(requestedDate);
     const { dayStart, dayEnd, dateParam, label, summaries, totals, requestBadges, pauses } = dailyData;
+    const requestedDateParam = typeof req.query.date === 'string' && req.query.date.trim().length > 0 ? req.query.date.trim() : dateParam;
     const wantsCsv = typeof req.query.download === 'string' && req.query.download.toLowerCase() === 'csv';
     if (wantsCsv) {
         const header = [
@@ -971,61 +1488,91 @@ exports.dashboardRouter.get('/today', async (req, res) => {
         .map((summary) => buildTodayRow(summary, dateParam, requestBadges.get(summary.userId) ?? []))
         .join('\n');
     const totalsRow = renderTotalsRow(totals, 3);
+    const timezoneNote = renderTimezoneNote(dayStart, dayEnd);
     const html = `
-    <!doctype html>
-    <html lang="en">
-      <head>
-        <meta charset="utf-8" />
-        <title>Attendance Dashboard – ${dateParam}</title>
+      <!doctype html>
+      <html lang="en">
+        <head>
+          <meta charset="utf-8" />
+        <title>Attendance Dashboard – ${escapeHtml(label)}</title>
         <style>${baseStyles}</style>
       </head>
-      <body>
+      <body class="dashboard dashboard--today">
         ${renderNav('today')}
-        ${renderTimezoneNote(dayStart, dayEnd)}
-        <h1>Sessions for ${label}</h1>
-        <div class="actions no-print">
-          <form method="get" action="/dashboard/today" class="filters">
-            <label>
-              <span>Date</span>
-              <input type="date" name="date" value="${dateParam}" />
-            </label>
-            <button type="submit">Apply</button>
-          </form>
-          <form method="get" action="/dashboard/today">
-            <input type="hidden" name="date" value="${dateParam}" />
-            <input type="hidden" name="download" value="csv" />
-            <button type="submit">Download CSV</button>
-          </form>
-          <button type="button" class="print-button" onclick="window.print()">Print</button>
-        </div>
-        ${tableRows
+        <main class="page-shell">
+          <header class="page-header">
+            <div class="page-header__content">
+              <p class="page-header__eyebrow">Attendance</p>
+              <h1 class="page-header__title">Daily Sessions</h1>
+              <p class="page-header__subtitle">Detailed activity, pauses, and presence checks for ${escapeHtml(label)}.</p>
+            </div>
+            <div class="page-header__meta">
+              ${timezoneNote}
+            </div>
+          </header>
+          <div class="cards-grid">
+            <section class="card card--table">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Session Metrics</h2>
+                  <p class="card__subtitle">${escapeHtml(label)} • ${summaries.length} ${summaries.length === 1 ? 'record' : 'records'}</p>
+                </div>
+                <div class="card__actions no-print">
+                  <form method="get" action="/dashboard/today" class="filters">
+                    <label>
+                      <span>Date</span>
+                      <input type="date" name="date" value="${escapeHtml(requestedDateParam)}" />
+                    </label>
+                    <button type="submit">Apply</button>
+                  </form>
+                  <form method="get" action="/dashboard/today">
+                    <input type="hidden" name="date" value="${dateParam}" />
+                    <input type="hidden" name="download" value="csv" />
+                    <button type="submit">Download CSV</button>
+                  </form>
+                  <button type="button" class="print-button" onclick="window.print()">Print</button>
+                </div>
+              </div>
+              <div class="card__body">
+                ${tableRows
         ? `<div class="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>User</th>
-                      <th>Email</th>
-                      <th>Started At</th>
-                      <th>Active Minutes</th>
-                      <th>Idle Minutes</th>
-                      <th>Breaks</th>
-                      <th>Break Minutes</th>
-                      <th>Lunches</th>
-                      <th>Lunch Minutes</th>
-                      <th>Presence Misses</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${tableRows}
-                  </tbody>
-                  ${totalsRow}
-                </table>
-              </div>`
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>User</th>
+                              <th>Email</th>
+                              <th>Started At</th>
+                              <th>Active Minutes</th>
+                              <th>Idle Minutes</th>
+                              <th>Breaks</th>
+                              <th>Break Minutes</th>
+                              <th>Lunches</th>
+                              <th>Lunch Minutes</th>
+                              <th>Presence Misses</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            ${tableRows}
+                          </tbody>
+                          ${totalsRow}
+                        </table>
+                      </div>`
         : '<div class="empty">No sessions recorded for this date.</div>'}
-        <section class="card">
-          <h2>Breaks and Lunches</h2>
-          ${renderPauseTable(pauses)}
-        </section>
+              </div>
+            </section>
+            <section class="card card--detail">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Breaks and Lunches</h2>
+                  <p class="card__subtitle">Sequence and duration for recorded pauses.</p>
+                </div>
+              </div>
+              <div class="card__body">
+                ${renderPauseTable(pauses)}
+              </div>
+            </section>
+          </div>
+        </main>
       </body>
     </html>
   `;
@@ -1075,6 +1622,7 @@ exports.dashboardRouter.get('/weekly', async (req, res) => {
         .map((summary, index) => buildWeeklyRow(summary, index, startParam, requestBadges.get(summary.userId) ?? []))
         .join('\n');
     const totalsRow = renderTotalsRow(totals, 3);
+    const timezoneNote = renderTimezoneNote(windowStart, windowEnd);
     const html = `
     <!doctype html>
     <html lang="en">
@@ -1083,50 +1631,71 @@ exports.dashboardRouter.get('/weekly', async (req, res) => {
         <title>Weekly Attendance Summary</title>
         <style>${baseStyles}</style>
       </head>
-      <body>
+      <body class="dashboard dashboard--weekly">
         ${renderNav('weekly')}
-        ${renderTimezoneNote(windowStart, windowEnd)}
-        <h1>Weekly Summary</h1>
-        <div class="actions no-print">
-          <form method="get" action="/dashboard/weekly" class="filters">
-            <label>
-              <span>Week starting</span>
-              <input type="date" name="start" value="${startParam}" />
-            </label>
-            <button type="submit">Apply</button>
-          </form>
-          <form method="get" action="/dashboard/weekly">
-            <input type="hidden" name="start" value="${startParam}" />
-            <input type="hidden" name="download" value="csv" />
-            <button type="submit">Download CSV</button>
-          </form>
-          <button type="button" class="print-button" onclick="window.print()">Print</button>
-        </div>
-        <h2>${label}</h2>
-        ${tableRows
+        <main class="page-shell">
+          <header class="page-header">
+            <div class="page-header__content">
+              <p class="page-header__eyebrow">Attendance</p>
+              <h1 class="page-header__title">Weekly Summary</h1>
+              <p class="page-header__subtitle">Activity, pauses, and presence insights for the week of ${escapeHtml(label)}.</p>
+            </div>
+            <div class="page-header__meta">
+              ${timezoneNote}
+            </div>
+          </header>
+          <div class="cards-grid">
+            <section class="card card--table">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Team Overview</h2>
+                  <p class="card__subtitle">${summaries.length} ${summaries.length === 1 ? 'teammate' : 'teammates'} recorded during this range.</p>
+                </div>
+                <div class="card__actions no-print">
+                  <form method="get" action="/dashboard/weekly" class="filters">
+                    <label>
+                      <span>Week starting</span>
+                      <input type="date" name="start" value="${startParam}" />
+                    </label>
+                    <button type="submit">Apply</button>
+                  </form>
+                  <form method="get" action="/dashboard/weekly">
+                    <input type="hidden" name="start" value="${startParam}" />
+                    <input type="hidden" name="download" value="csv" />
+                    <button type="submit">Download CSV</button>
+                  </form>
+                  <button type="button" class="print-button" onclick="window.print()">Print</button>
+                </div>
+              </div>
+              <div class="card__body">
+                ${tableRows
         ? `<div class="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>#</th>
-                      <th>User</th>
-                    <th>Email</th>
-                    <th>Active Minutes</th>
-                    <th>Idle Minutes</th>
-                    <th>Breaks</th>
-                    <th>Break Minutes</th>
-                    <th>Lunches</th>
-                    <th>Lunch Minutes</th>
-                    <th>Presence Misses</th>
-                  </tr>
-                </thead>
-                  <tbody>
-                    ${tableRows}
-                  </tbody>
-                  ${totalsRow}
-                </table>
-              </div>`
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>#</th>
+                              <th>User</th>
+                              <th>Email</th>
+                              <th>Active Minutes</th>
+                              <th>Idle Minutes</th>
+                              <th>Breaks</th>
+                              <th>Break Minutes</th>
+                              <th>Lunches</th>
+                              <th>Lunch Minutes</th>
+                              <th>Presence Misses</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            ${tableRows}
+                          </tbody>
+                          ${totalsRow}
+                        </table>
+                      </div>`
         : '<div class="empty">No activity recorded for this range.</div>'}
+              </div>
+            </section>
+          </div>
+        </main>
       </body>
     </html>
   `;
@@ -1175,6 +1744,7 @@ exports.dashboardRouter.get('/monthly', async (req, res) => {
         .map((summary, index) => buildWeeklyRow(summary, index, formatIsoDate(monthStart), requestBadges.get(summary.userId) ?? []))
         .join('\n');
     const totalsRow = renderTotalsRow(totals, 3);
+    const timezoneNote = renderTimezoneNote(monthStart, monthEnd);
     const html = `
     <!doctype html>
     <html lang="en">
@@ -1183,49 +1753,71 @@ exports.dashboardRouter.get('/monthly', async (req, res) => {
         <title>${label} Attendance Summary</title>
         <style>${baseStyles}</style>
       </head>
-      <body>
+      <body class="dashboard dashboard--monthly">
         ${renderNav('monthly')}
-        ${renderTimezoneNote(monthStart, monthEnd)}
-        <h1>${label}</h1>
-        <div class="actions no-print">
-          <form method="get" action="/dashboard/monthly" class="filters">
-            <label>
-              <span>Month</span>
-              <input type="month" name="month" value="${monthParam}" />
-            </label>
-            <button type="submit">Apply</button>
-          </form>
-          <form method="get" action="/dashboard/monthly">
-            <input type="hidden" name="month" value="${monthParam}" />
-            <input type="hidden" name="download" value="csv" />
-            <button type="submit">Download CSV</button>
-          </form>
-          <button type="button" class="print-button" onclick="window.print()">Print</button>
-        </div>
-        ${tableRows
+        <main class="page-shell">
+          <header class="page-header">
+            <div class="page-header__content">
+              <p class="page-header__eyebrow">Attendance</p>
+              <h1 class="page-header__title">Monthly Summary</h1>
+              <p class="page-header__subtitle">Comprehensive metrics for ${escapeHtml(label)}.</p>
+            </div>
+            <div class="page-header__meta">
+              ${timezoneNote}
+            </div>
+          </header>
+          <div class="cards-grid">
+            <section class="card card--table">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Team Overview</h2>
+                  <p class="card__subtitle">${summaries.length} ${summaries.length === 1 ? 'teammate' : 'teammates'} recorded this month.</p>
+                </div>
+                <div class="card__actions no-print">
+                  <form method="get" action="/dashboard/monthly" class="filters">
+                    <label>
+                      <span>Month</span>
+                      <input type="month" name="month" value="${monthParam}" />
+                    </label>
+                    <button type="submit">Apply</button>
+                  </form>
+                  <form method="get" action="/dashboard/monthly">
+                    <input type="hidden" name="month" value="${monthParam}" />
+                    <input type="hidden" name="download" value="csv" />
+                    <button type="submit">Download CSV</button>
+                  </form>
+                  <button type="button" class="print-button" onclick="window.print()">Print</button>
+                </div>
+              </div>
+              <div class="card__body">
+                ${tableRows
         ? `<div class="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>#</th>
-                      <th>User</th>
-                      <th>Email</th>
-                      <th>Active Minutes</th>
-                      <th>Idle Minutes</th>
-                      <th>Breaks</th>
-                      <th>Break Minutes</th>
-                      <th>Lunches</th>
-                      <th>Lunch Minutes</th>
-                      <th>Presence Misses</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${tableRows}
-                  </tbody>
-                  ${totalsRow}
-                </table>
-              </div>`
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>#</th>
+                              <th>User</th>
+                              <th>Email</th>
+                              <th>Active Minutes</th>
+                              <th>Idle Minutes</th>
+                              <th>Breaks</th>
+                              <th>Break Minutes</th>
+                              <th>Lunches</th>
+                              <th>Lunch Minutes</th>
+                              <th>Presence Misses</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            ${tableRows}
+                          </tbody>
+                          ${totalsRow}
+                        </table>
+                      </div>`
         : '<div class="empty">No activity recorded for this month.</div>'}
+              </div>
+            </section>
+          </div>
+        </main>
       </body>
     </html>
   `;
@@ -1413,6 +2005,7 @@ exports.dashboardRouter.get('/timesheets', (0, asyncHandler_1.asyncHandler)(asyn
     const viewOptions = types_1.TIMESHEET_VIEWS
         .map((value) => `<option value="${value}"${value === normalizedView ? ' selected' : ''}>${escapeHtml(timesheetViewLabel(value))}</option>`)
         .join('');
+    const timezoneNote = renderTimezoneNote(range.start, range.end);
     const html = `
       <!doctype html>
       <html lang="en">
@@ -1421,54 +2014,87 @@ exports.dashboardRouter.get('/timesheets', (0, asyncHandler_1.asyncHandler)(asyn
           <title>Timesheet Review</title>
           <style>${baseStyles}</style>
         </head>
-        <body>
+        <body class="dashboard dashboard--timesheets">
           ${renderNav('timesheets')}
-          ${renderTimezoneNote(range.start, range.end)}
-          <h1>Timesheet Review</h1>
-          ${message ? `<div class="alert success no-print">${escapeHtml(message)}</div>` : ''}
-          ${error ? `<div class="alert error no-print">${escapeHtml(error)}</div>` : ''}
-          <section class="card no-print">
-            <h2>Filters</h2>
-            <form method="get" class="filters">
-              <label>
-                <span>View</span>
-                <select name="view">${viewOptions}</select>
-              </label>
-              <label>
-                <span>Date (weekly/pay period)</span>
-                <input type="date" name="date" value="${escapeHtml(dateValue)}" />
-              </label>
-              <label>
-                <span>Month (monthly)</span>
-                <input type="month" name="month" value="${escapeHtml(monthValue)}" />
-              </label>
-              <button type="submit">Apply</button>
-            </form>
-            <div class="meta">Viewing ${escapeHtml(currentViewLabel)} • ${escapeHtml(range.label)}</div>
-          </section>
-          ${aggregateCards}
-          ${employeeSections}
-          <section class="card">
-            <h2>Edit Requests</h2>
-            <div class="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Employee</th>
-                    <th>Status</th>
-                    <th>Reason</th>
-                    <th>Requested Hours</th>
-                    <th>Reviewed</th>
-                    <th>Update</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${requestRows}
-                </tbody>
-              </table>
+          <main class="page-shell">
+            <header class="page-header">
+              <div class="page-header__content">
+                <p class="page-header__eyebrow">Attendance</p>
+                <h1 class="page-header__title">Timesheet Review</h1>
+                <p class="page-header__subtitle">Inspect employee activity and edits for ${escapeHtml(range.label)}.</p>
+              </div>
+              <div class="page-header__meta">
+                ${timezoneNote}
+              </div>
+            </header>
+            ${message ? `<div class="alert success no-print">${escapeHtml(message)}</div>` : ''}
+            ${error ? `<div class="alert error no-print">${escapeHtml(error)}</div>` : ''}
+            <div class="cards-grid">
+              <section class="card card--filters no-print">
+                <div class="card__header">
+                  <h2 class="card__title">Filters</h2>
+                </div>
+                <div class="card__body">
+                  <form method="get" class="filters">
+                    <label>
+                      <span>View</span>
+                      <select name="view">${viewOptions}</select>
+                    </label>
+                    <label>
+                      <span>Date (weekly/pay period)</span>
+                      <input type="date" name="date" value="${escapeHtml(dateValue)}" />
+                    </label>
+                    <label>
+                      <span>Month (monthly)</span>
+                      <input type="month" name="month" value="${escapeHtml(monthValue)}" />
+                    </label>
+                    <button type="submit">Apply</button>
+                  </form>
+                  <div class="meta">Viewing ${escapeHtml(currentViewLabel)} • ${escapeHtml(range.label)}</div>
+                </div>
+              </section>
+              ${aggregateCards
+        ? `<section class="card card--summary">
+                      <div class="card__header">
+                        <h2 class="card__title">Team Summary</h2>
+                        <p class="card__subtitle">Aggregate metrics across all employees.</p>
+                      </div>
+                      <div class="card__body">
+                        ${aggregateCards}
+                      </div>
+                    </section>`
+        : ''}
             </div>
-          </section>
+            ${employeeSections}
+            <section class="card card--table">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Edit Requests</h2>
+                  <p class="card__subtitle">Submitted changes for this period.</p>
+                </div>
+              </div>
+              <div class="card__body">
+                <div class="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Employee</th>
+                        <th>Status</th>
+                        <th>Reason</th>
+                        <th>Requested Hours</th>
+                        <th>Reviewed</th>
+                        <th>Update</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${requestRows}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+          </main>
         </body>
       </html>
     `;
@@ -1648,6 +2274,7 @@ exports.dashboardRouter.get('/requests', async (req, res) => {
         .join('\n');
     const rangeStartForNote = fromDate ?? (requests.length ? zonedStartOfDay(requests[requests.length - 1].startDate) : zonedStartOfDay(new Date()));
     const rangeEndForNote = toDate ?? (requests.length ? zonedEndOfDay(requests[0].endDate) : zonedEndOfDay(new Date()));
+    const timezoneNote = renderTimezoneNote(rangeStartForNote, rangeEndForNote);
     const html = `
     <!doctype html>
     <html lang="en">
@@ -1656,66 +2283,96 @@ exports.dashboardRouter.get('/requests', async (req, res) => {
         <title>Time Requests</title>
         <style>${baseStyles}</style>
       </head>
-      <body>
+      <body class="dashboard dashboard--requests">
         ${renderNav('requests')}
-        ${renderTimezoneNote(rangeStartForNote, rangeEndForNote)}
-        <h1>Time Requests</h1>
-        <div class="meta">Showing ${requests.length} ${requests.length === 1 ? 'request' : 'requests'}.</div>
-        <div class="actions no-print">
-          <form method="get" action="/dashboard/requests" class="filters">
-            <label>
-              <span>Status</span>
-              <select name="status">
-                ${buildSelectOptions(statusOptions, statusValue)}
-              </select>
-            </label>
-            <label>
-              <span>Type</span>
-              <select name="type">
-                ${buildSelectOptions(typeOptions, typeValue)}
-              </select>
-            </label>
-            <label>
-              <span>From</span>
-              <input type="date" name="from" value="${fromValue}" />
-            </label>
-            <label>
-              <span>To</span>
-              <input type="date" name="to" value="${toValue}" />
-            </label>
-            <button type="submit">Apply</button>
-          </form>
-          <form method="get" action="/dashboard/requests">
-            <input type="hidden" name="status" value="${statusValue}" />
-            <input type="hidden" name="type" value="${typeValue}" />
-            <input type="hidden" name="from" value="${fromValue}" />
-            <input type="hidden" name="to" value="${toValue}" />
-            <input type="hidden" name="download" value="csv" />
-            <button type="submit">Download CSV</button>
-          </form>
-        </div>
-        ${requests.length
+        <main class="page-shell">
+          <header class="page-header">
+            <div class="page-header__content">
+              <p class="page-header__eyebrow">Attendance</p>
+              <h1 class="page-header__title">Time Requests</h1>
+              <p class="page-header__subtitle">Review submitted PTO, non-PTO, and make-up requests.</p>
+            </div>
+            <div class="page-header__meta">
+              <span>${requests.length} ${requests.length === 1 ? 'request' : 'requests'} listed</span>
+              ${timezoneNote}
+            </div>
+          </header>
+          <div class="cards-grid">
+            <section class="card card--filters no-print">
+              <div class="card__header">
+                <h2 class="card__title">Filters</h2>
+              </div>
+              <div class="card__body">
+                <form method="get" action="/dashboard/requests" class="filters">
+                  <label>
+                    <span>Status</span>
+                    <select name="status">
+                      ${buildSelectOptions(statusOptions, statusValue)}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Type</span>
+                    <select name="type">
+                      ${buildSelectOptions(typeOptions, typeValue)}
+                    </select>
+                  </label>
+                  <label>
+                    <span>From</span>
+                    <input type="date" name="from" value="${escapeHtml(fromValue)}" />
+                  </label>
+                  <label>
+                    <span>To</span>
+                    <input type="date" name="to" value="${escapeHtml(toValue)}" />
+                  </label>
+                  <div class="filters__actions">
+                    <button type="submit">Apply</button>
+                  </div>
+                </form>
+                <form method="get" action="/dashboard/requests" class="filters filters--inline">
+                  <input type="hidden" name="status" value="${escapeHtml(statusValue)}" />
+                  <input type="hidden" name="type" value="${escapeHtml(typeValue)}" />
+                  <input type="hidden" name="from" value="${escapeHtml(fromValue)}" />
+                  <input type="hidden" name="to" value="${escapeHtml(toValue)}" />
+                  <input type="hidden" name="download" value="csv" />
+                  <button type="submit">Download CSV</button>
+                  <button type="button" class="print-button" onclick="window.print()">Print</button>
+                </form>
+              </div>
+            </section>
+          </div>
+          <section class="card card--table">
+            <div class="card__header">
+              <div>
+                <h2 class="card__title">Request Log</h2>
+                <p class="card__subtitle">Sorted newest first.</p>
+              </div>
+            </div>
+            <div class="card__body">
+              ${tableRows
         ? `<div class="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Submitted</th>
-                      <th>Employee</th>
-                      <th>Type</th>
-                    <th>Status</th>
-                    <th>Date Range</th>
-                    <th>Hours</th>
-                    <th>Reason</th>
-                    <th>Approver</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                  <tbody>
-                    ${tableRows}
-                  </tbody>
-                </table>
-              </div>`
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Submitted</th>
+                            <th>Employee</th>
+                            <th>Type</th>
+                            <th>Status</th>
+                            <th>Date Range</th>
+                            <th>Hours</th>
+                            <th>Reason</th>
+                            <th>Approver</th>
+                            <th>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          ${tableRows}
+                        </tbody>
+                      </table>
+                    </div>`
         : '<div class="empty">No requests match the selected filters.</div>'}
+            </div>
+          </section>
+        </main>
       </body>
     </html>
   `;
@@ -1732,6 +2389,9 @@ exports.dashboardRouter.get('/overview', async (req, res) => {
         fetchWeeklyAggregates(weekStartInput),
         fetchMonthlyAggregates(monthInput)
     ]);
+    const formDateParam = typeof req.query.date === 'string' && req.query.date.trim().length > 0 ? req.query.date.trim() : dailyData.dateParam;
+    const formStartParam = typeof req.query.start === 'string' && req.query.start.trim().length > 0 ? req.query.start.trim() : weeklyData.startParam;
+    const formMonthParam = typeof req.query.month === 'string' && req.query.month.trim().length > 0 ? req.query.month.trim() : monthlyData.monthParam;
     const rangeStartForNote = activeView === 'today'
         ? dailyData.dayStart
         : activeView === 'weekly'
@@ -1742,10 +2402,14 @@ exports.dashboardRouter.get('/overview', async (req, res) => {
         : activeView === 'weekly'
             ? weeklyData.windowEnd
             : monthlyData.monthEnd;
-    const todayRows = dailyData.summaries
-        .map((summary) => buildTodayRow(summary, dailyData.dateParam, dailyData.requestBadges.get(summary.userId) ?? []))
-        .join('\n');
-    const todayTotals = renderTotalsRow(dailyData.totals, 3);
+    const rosterData = await fetchTodayRosterData(dateInput, dailyData.sessions);
+    const todayRows = renderTodayRosterRows(rosterData.rows, dailyData.dateParam);
+    const todayTotals = rosterData.rows.length ? renderRosterTotalsRow(rosterData.totals) : '';
+    const computedNotice = rosterData.hasComputedNotice
+        ? '<p class="meta meta--admin">Idle, break, and lunch totals are computed from today\'s activity history.</p>'
+        : '';
+    const hasRosterRows = rosterData.rows.length > 0;
+    const noticeHiddenClass = rosterData.hasComputedNotice ? '' : ' hidden';
     const weeklyRows = weeklyData.summaries
         .map((summary, index) => buildWeeklyRow(summary, index, weeklyData.startParam, weeklyData.requestBadges.get(summary.userId) ?? []))
         .join('\n');
@@ -1756,165 +2420,634 @@ exports.dashboardRouter.get('/overview', async (req, res) => {
     const monthlyTotals = renderTotalsRow(monthlyData.totals, 3);
     const tabLink = (key, label, href) => `<a href="${href}"${activeView === key ? ' class="active"' : ''}>${label}</a>`;
     const tabBar = `<div class="tab-bar no-print">
-    ${tabLink('today', 'Today', `/dashboard/overview?view=today&date=${dailyData.dateParam}`)}
-    ${tabLink('weekly', 'Weekly', `/dashboard/overview?view=weekly&start=${weeklyData.startParam}`)}
-    ${tabLink('monthly', 'Monthly', `/dashboard/overview?view=monthly&month=${monthlyData.monthParam}`)}
-  </div>`;
+      ${tabLink('today', 'Today', `/dashboard/overview?view=today&date=${dailyData.dateParam}`)}
+      ${tabLink('weekly', 'Weekly', `/dashboard/overview?view=weekly&start=${weeklyData.startParam}`)}
+      ${tabLink('monthly', 'Monthly', `/dashboard/overview?view=monthly&month=${monthlyData.monthParam}`)}
+    </div>`;
+    const timezoneNote = renderTimezoneNote(rangeStartForNote, rangeEndForNote);
     const todaySection = `
-    <section class="tab-content${activeView === 'today' ? '' : ' hidden'}" id="tab-today">
-      <h2>Today – ${dailyData.label}</h2>
-      <div class="actions no-print">
-        <form method="get" action="/dashboard/overview" class="filters">
-          <input type="hidden" name="view" value="today" />
-          <label>
-            <span>Date</span>
-            <input type="date" name="date" value="${dailyData.dateParam}" />
-          </label>
-          <button type="submit">Apply</button>
-        </form>
-        <form method="get" action="/dashboard/today">
-          <input type="hidden" name="date" value="${dailyData.dateParam}" />
-          <input type="hidden" name="download" value="csv" />
-          <button type="submit">Download CSV</button>
-        </form>
-        <button type="button" class="print-button" onclick="window.print()">Print</button>
-      </div>
-      ${todayRows
-        ? `<div class="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th>User</th>
-                    <th>Email</th>
-                    <th>Started At</th>
-                    <th>Active Minutes</th>
-                    <th>Idle Minutes</th>
-                    <th>Breaks</th>
-                    <th>Break Minutes</th>
-                    <th>Lunches</th>
-                    <th>Lunch Minutes</th>
-                    <th>Presence Misses</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${todayRows}
-                </tbody>
-                ${todayTotals}
-              </table>
-            </div>`
-        : '<div class="empty">No sessions recorded for this date.</div>'}
-    </section>
-  `;
+      <section class="tab-content card${activeView === 'today' ? '' : ' hidden'}" id="tab-today">
+        <div class="card__header">
+          <div>
+            <h2 class="card__title">Today</h2>
+            <p class="card__subtitle">${dailyData.label}</p>
+          </div>
+          <div class="card__actions no-print">
+            <form method="get" action="/dashboard/overview" class="filters">
+              <input type="hidden" name="view" value="today" />
+              <label>
+                <span>Date</span>
+                <input type="date" name="date" value="${escapeHtml(formDateParam)}" />
+              </label>
+              <button type="submit">Apply</button>
+            </form>
+            <form method="get" action="/dashboard/today">
+              <input type="hidden" name="date" value="${dailyData.dateParam}" />
+              <input type="hidden" name="download" value="csv" />
+              <button type="submit">Download CSV</button>
+            </form>
+            <button type="button" class="print-button" onclick="window.print()">Print</button>
+          </div>
+        </div>
+        <div class="card__body">
+          <div data-roster-notice class="${noticeHiddenClass}">${computedNotice}</div>
+          <div class="table-scroll${hasRosterRows ? '' : ' hidden'}" data-roster-container>
+            <table data-roster-table data-date-param="${dailyData.dateParam}">
+              <thead>
+                <tr>
+                  <th>User</th>
+                  <th>Current Status</th>
+                  <th>Since</th>
+                  <th>Current Idle (min)</th>
+                  <th>Total Idle Today (min)</th>
+                  <th>Break # Today</th>
+                  <th>Total Break Minutes</th>
+                  <th>Lunch Count</th>
+                  <th>Total Lunch Minutes</th>
+                  <th>First Login</th>
+                  <th>Presence Misses</th>
+                </tr>
+              </thead>
+              <tbody data-roster-body>
+                ${todayRows}
+              </tbody>
+              ${todayTotals}
+            </table>
+          </div>
+          <div class="empty${hasRosterRows ? ' hidden' : ''}" data-roster-empty>No users available for this date.</div>
+        </div>
+      </section>
+    `;
     const weeklySection = `
-    <section class="tab-content${activeView === 'weekly' ? '' : ' hidden'}" id="tab-weekly">
-      <h2>Weekly – ${weeklyData.label}</h2>
-      <div class="actions no-print">
-        <form method="get" action="/dashboard/overview" class="filters">
-          <input type="hidden" name="view" value="weekly" />
-          <label>
-            <span>Week starting</span>
-            <input type="date" name="start" value="${weeklyData.startParam}" />
-          </label>
-          <button type="submit">Apply</button>
-        </form>
-        <form method="get" action="/dashboard/weekly">
-          <input type="hidden" name="start" value="${weeklyData.startParam}" />
-          <input type="hidden" name="download" value="csv" />
-          <button type="submit">Download CSV</button>
-        </form>
-        <button type="button" class="print-button" onclick="window.print()">Print</button>
-      </div>
-      ${weeklyRows
+      <section class="tab-content card${activeView === 'weekly' ? '' : ' hidden'}" id="tab-weekly">
+        <div class="card__header">
+          <div>
+            <h2 class="card__title">Weekly</h2>
+            <p class="card__subtitle">${weeklyData.label}</p>
+          </div>
+          <div class="card__actions no-print">
+            <form method="get" action="/dashboard/overview" class="filters">
+              <input type="hidden" name="view" value="weekly" />
+              <label>
+                <span>Week starting</span>
+                <input type="date" name="start" value="${escapeHtml(formStartParam)}" />
+              </label>
+              <button type="submit">Apply</button>
+            </form>
+            <form method="get" action="/dashboard/weekly">
+              <input type="hidden" name="start" value="${weeklyData.startParam}" />
+              <input type="hidden" name="download" value="csv" />
+              <button type="submit">Download CSV</button>
+            </form>
+            <button type="button" class="print-button" onclick="window.print()">Print</button>
+          </div>
+        </div>
+        <div class="card__body">
+          ${weeklyRows
         ? `<div class="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>User</th>
-                    <th>Email</th>
-                    <th>Active Minutes</th>
-                    <th>Idle Minutes</th>
-                    <th>Breaks</th>
-                    <th>Break Minutes</th>
-                    <th>Lunches</th>
-                    <th>Lunch Minutes</th>
-                    <th>Presence Misses</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${weeklyRows}
-                </tbody>
-                ${weeklyTotals}
-              </table>
-            </div>`
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>User</th>
+                        <th>Email</th>
+                        <th>Active Minutes</th>
+                        <th>Idle Minutes</th>
+                        <th>Breaks</th>
+                        <th>Break Minutes</th>
+                        <th>Lunches</th>
+                        <th>Lunch Minutes</th>
+                        <th>Presence Misses</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${weeklyRows}
+                    </tbody>
+                    ${weeklyTotals}
+                  </table>
+                </div>`
         : '<div class="empty">No activity recorded for this range.</div>'}
-    </section>
-  `;
+        </div>
+      </section>
+    `;
     const monthlySection = `
-    <section class="tab-content${activeView === 'monthly' ? '' : ' hidden'}" id="tab-monthly">
-      <h2>Monthly – ${monthlyData.label}</h2>
-      <div class="actions no-print">
-        <form method="get" action="/dashboard/overview" class="filters">
-          <input type="hidden" name="view" value="monthly" />
-          <label>
-            <span>Month</span>
-            <input type="month" name="month" value="${monthlyData.monthParam}" />
-          </label>
-          <button type="submit">Apply</button>
-        </form>
-        <form method="get" action="/dashboard/monthly">
-          <input type="hidden" name="month" value="${monthlyData.monthParam}" />
-          <input type="hidden" name="download" value="csv" />
-          <button type="submit">Download CSV</button>
-        </form>
-        <button type="button" class="print-button" onclick="window.print()">Print</button>
-      </div>
-      ${monthlyRows
+      <section class="tab-content card${activeView === 'monthly' ? '' : ' hidden'}" id="tab-monthly">
+        <div class="card__header">
+          <div>
+            <h2 class="card__title">Monthly</h2>
+            <p class="card__subtitle">${monthlyData.label}</p>
+          </div>
+          <div class="card__actions no-print">
+            <form method="get" action="/dashboard/overview" class="filters">
+              <input type="hidden" name="view" value="monthly" />
+              <label>
+                <span>Month</span>
+                <input type="month" name="month" value="${escapeHtml(formMonthParam)}" />
+              </label>
+              <button type="submit">Apply</button>
+            </form>
+            <form method="get" action="/dashboard/monthly">
+              <input type="hidden" name="month" value="${monthlyData.monthParam}" />
+              <input type="hidden" name="download" value="csv" />
+              <button type="submit">Download CSV</button>
+            </form>
+            <button type="button" class="print-button" onclick="window.print()">Print</button>
+          </div>
+        </div>
+        <div class="card__body">
+          ${monthlyRows
         ? `<div class="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>User</th>
-                    <th>Email</th>
-                    <th>Active Minutes</th>
-                    <th>Idle Minutes</th>
-                    <th>Breaks</th>
-                    <th>Break Minutes</th>
-                    <th>Lunches</th>
-                    <th>Lunch Minutes</th>
-                    <th>Presence Misses</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${monthlyRows}
-                </tbody>
-                ${monthlyTotals}
-              </table>
-            </div>`
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>User</th>
+                        <th>Email</th>
+                        <th>Active Minutes</th>
+                        <th>Idle Minutes</th>
+                        <th>Breaks</th>
+                        <th>Break Minutes</th>
+                        <th>Lunches</th>
+                        <th>Lunch Minutes</th>
+                        <th>Presence Misses</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${monthlyRows}
+                    </tbody>
+                    ${monthlyTotals}
+                  </table>
+                </div>`
         : '<div class="empty">No activity recorded for this month.</div>'}
-    </section>
-  `;
+        </div>
+      </section>
+    `;
     const html = `
-    <!doctype html>
-    <html lang="en">
-      <head>
-        <meta charset="utf-8" />
-        <title>Dashboard Overview</title>
-        <style>${baseStyles}</style>
-      </head>
-      <body>
-        ${renderNav('overview')}
-        ${renderTimezoneNote(rangeStartForNote, rangeEndForNote)}
-        <h1>Dashboard Overview</h1>
-        ${tabBar}
-        ${todaySection}
-        ${weeklySection}
-        ${monthlySection}
-      </body>
-    </html>
-  `;
+      <!doctype html>
+      <html lang="en">
+        <head>
+          <meta charset="utf-8" />
+          <title>Dashboard Overview</title>
+          <style>${baseStyles}</style>
+        </head>
+        <body class="dashboard dashboard--overview">
+          ${renderNav('overview')}
+          <main class="page-shell">
+            <header class="page-header">
+              <div class="page-header__content">
+                <p class="page-header__eyebrow">Attendance</p>
+                <h1 class="page-header__title">Dashboard Overview</h1>
+                <p class="page-header__subtitle">Live roster snapshots and trends across today, this week, and the current month.</p>
+              </div>
+              <div class="page-header__meta">
+                <span><strong>${dailyData.label}</strong> (Today)</span>
+                <span>Week of <strong>${weeklyData.label}</strong></span>
+                <span>Month of <strong>${monthlyData.label}</strong></span>
+                ${timezoneNote}
+              </div>
+            </header>
+            <div class="page-controls">
+              ${tabBar}
+            </div>
+            <div class="cards-grid">
+              ${todaySection}
+              ${weeklySection}
+              ${monthlySection}
+            </div>
+          </main>
+          <div class="drilldown-shell no-print" data-drilldown-shell hidden>
+            <div class="drilldown-backdrop" data-drilldown-backdrop></div>
+            <aside class="drilldown-panel" role="dialog" aria-modal="true" aria-hidden="true" tabindex="-1" data-drilldown-panel>
+              <div class="drilldown-panel__header">
+                <div class="drilldown-panel__heading">
+                  <h2 data-drilldown-title>Team member</h2>
+                  <p data-drilldown-subtitle></p>
+                </div>
+                <button type="button" class="drilldown-close" aria-label="Close panel" data-drilldown-close>&times;</button>
+              </div>
+              <div class="drilldown-panel__content" data-drilldown-content></div>
+              <div class="drilldown-panel__footer" data-drilldown-footer></div>
+            </aside>
+          </div>
+          <script>
+            (() => {
+              const table = document.querySelector('[data-roster-table]');
+              const shell = document.querySelector('[data-drilldown-shell]');
+              const panel = shell ? shell.querySelector('[data-drilldown-panel]') : null;
+              const backdrop = shell ? shell.querySelector('[data-drilldown-backdrop]') : null;
+              const closeButtons = shell ? Array.from(shell.querySelectorAll('[data-drilldown-close]')) : [];
+              const panelContent = panel ? panel.querySelector('[data-drilldown-content]') : null;
+              const panelFooter = panel ? panel.querySelector('[data-drilldown-footer]') : null;
+              const panelTitle = panel ? panel.querySelector('[data-drilldown-title]') : null;
+              const panelSubtitle = panel ? panel.querySelector('[data-drilldown-subtitle]') : null;
+              const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1")]';
+
+              const toNumber = (value) => {
+                const num = Number(value);
+                return Number.isFinite(num) ? num : null;
+              };
+
+              const formatDateTimeSafe = (iso) => {
+                if (!iso) return '—';
+                const date = new Date(iso);
+                if (Number.isNaN(date.getTime())) return '—';
+                return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+              };
+
+              const formatElapsedIso = (iso) => {
+                if (!iso) return '';
+                const ts = Date.parse(iso);
+                if (Number.isNaN(ts)) return '';
+                const diffMs = Date.now() - ts;
+                if (diffMs <= 0) return 'Just now';
+                const minutes = Math.floor(diffMs / 60000);
+                if (minutes < 1) return 'Just now';
+                const hours = Math.floor(minutes / 60);
+                const remainder = minutes % 60;
+                const parts = [];
+                if (hours > 0) parts.push(hours + 'h');
+                if (hours === 0 || remainder > 0) parts.push(remainder + 'm');
+                return parts.join(' ') + ' ago';
+              };
+
+              const formatMinutesValue = (value) => {
+                if (value === null || value === undefined) return '—';
+                return String(value) + ' min';
+              };
+
+              const formatCountValue = (value) => {
+                if (value === null || value === undefined) return '—';
+                return String(value);
+              };
+
+              const escapeHtmlClient = (value) =>
+                String(value)
+                  .replace(/&/g, '&amp;')
+                  .replace(/</g, '&lt;')
+                  .replace(/>/g, '&gt;')
+                  .replace(/"/g, '&quot;')
+                  .replace(/'/g, '&#39;');
+
+              const buildStat = (label, value, meta) => {
+                const safeLabel = escapeHtmlClient(label);
+                const safeValue = escapeHtmlClient(value === undefined || value === null || value === '' ? '—' : value);
+                const metaHtml = meta ? '<span class="drilldown-meta">' + escapeHtmlClient(meta) + '</span>' : '';
+                return '<dl><dt>' + safeLabel + '</dt><dd>' + safeValue + metaHtml + '</dd></dl>';
+              };
+
+              const createPanelController = ({ shell, panel, backdrop, closeButtons, content, footer, titleEl, subtitleEl }) => {
+                if (!shell || !panel || !backdrop || !content || !footer || !titleEl || !subtitleEl) {
+                  return null;
+                }
+
+                let open = false;
+                let activeRow = null;
+                let cleanupTimer = null;
+                let lastFocused = null;
+
+                const highlight = (row, state) => {
+                  if (!row) return;
+                  row.classList.toggle('drilldown-row-active', Boolean(state));
+                };
+
+                const getBadgesHtml = (row) => {
+                  const firstCell = row.cells[0];
+                  const badges = firstCell ? firstCell.querySelector('.badges') : null;
+                  return badges ? badges.outerHTML : '';
+                };
+
+                const getRowData = (row) => {
+                  const ds = row.dataset;
+                  const statusCell = row.cells[1];
+                  return {
+                    name: ds.userName || row.cells[0]?.innerText?.trim() || 'Unknown teammate',
+                    email: ds.userEmail || '',
+                    role: ds.userRole || '',
+                    statusLabel: ds.statusLabel || '',
+                    statusDetail: ds.statusDetail || '',
+                    statusSince: ds.statusSince || '',
+                    idleSince: ds.idleSince || '',
+                    idleMinutes: toNumber(ds.idleMinutes),
+                    idleTotal: toNumber(ds.idleTotal),
+                    breakCount: toNumber(ds.breakCount),
+                    breakMinutes: toNumber(ds.breakMinutes),
+                    lunchCount: toNumber(ds.lunchCount),
+                    lunchMinutes: toNumber(ds.lunchMinutes),
+                    firstLogin: ds.firstLogin || '',
+                    presenceMisses: toNumber(ds.presenceMisses),
+                    detailUrl: ds.detailUrl || '',
+                    statusHtml: statusCell ? statusCell.innerHTML : escapeHtmlClient(ds.statusLabel || ''),
+                    badgesHtml: getBadgesHtml(row)
+                  };
+                };
+
+                const renderContent = (row) => {
+                  const data = getRowData(row);
+                  titleEl.textContent = data.name;
+                  const subtitleParts = [];
+                  if (data.email) subtitleParts.push(data.email);
+                  if (data.role) subtitleParts.push(data.role);
+                  subtitleEl.textContent = subtitleParts.join(' • ');
+
+                  const statusSinceLabel = formatDateTimeSafe(data.statusSince);
+                  const statusSinceMeta = formatElapsedIso(data.statusSince);
+                  const currentIdleMeta = data.idleSince ? formatElapsedIso(data.idleSince) : '';
+                  const firstLoginLabel = formatDateTimeSafe(data.firstLogin);
+                  const firstLoginMeta = data.firstLogin ? formatElapsedIso(data.firstLogin) : '';
+                  const detailStat = data.statusDetail ? buildStat('Notes', data.statusDetail) : '';
+
+                  const statusSection = [
+                    '<div class="drilldown-section">',
+                    '  <h3>Status</h3>',
+                    '  <div class="drilldown-pill">' + data.statusHtml + (data.badgesHtml || '') + '</div>',
+                    '  <div class="drilldown-grid">',
+                    '    ' + buildStat('Status since', statusSinceLabel, statusSinceMeta),
+                    '    ' + buildStat('Current idle', formatMinutesValue(data.idleMinutes), currentIdleMeta),
+                    '  </div>',
+                    '</div>'
+                  ].join('\n');
+
+                  const activitySection = [
+                    '<div class="drilldown-section">',
+                    '  <h3>Today\'s activity</h3>',
+                    '  <div class="drilldown-grid">',
+                    '    ' + buildStat('Idle total', formatMinutesValue(data.idleTotal)),
+                    '    ' + buildStat('Breaks', formatCountValue(data.breakCount), data.breakMinutes !== null ? formatMinutesValue(data.breakMinutes) : ''),
+                    '    ' + buildStat('Lunches', formatCountValue(data.lunchCount), data.lunchMinutes !== null ? formatMinutesValue(data.lunchMinutes) : ''),
+                    '    ' + buildStat('Presence misses', formatCountValue(data.presenceMisses)),
+                    '  </div>',
+                    '</div>'
+                  ].join('\n');
+
+                  const timelineParts = [
+                    '<div class="drilldown-section">',
+                    '  <h3>Session hints</h3>',
+                    '  <div class="drilldown-grid">',
+                    '    ' + buildStat('First login', firstLoginLabel, firstLoginMeta)
+                  ];
+                  if (detailStat) {
+                    timelineParts.push('    ' + detailStat);
+                  }
+                  timelineParts.push('  </div>');
+                  timelineParts.push('</div>');
+                  const timelineSection = timelineParts.join('\n');
+
+                  content.innerHTML = [statusSection, activitySection, timelineSection].join('\n');
+                  footer.innerHTML = data.detailUrl
+                    ? '<a class="button" href="' + escapeHtmlClient(data.detailUrl) + '" data-drilldown-detail>Open timeline</a>'
+                    : '';
+                };
+
+                const focusTrap = (event) => {
+                  if (!open || event.key !== 'Tab') return;
+                  const focusable = panel.querySelectorAll(FOCUSABLE);
+                  if (!focusable.length) return;
+                  const first = focusable[0];
+                  const last = focusable[focusable.length - 1];
+                  const active = document.activeElement;
+                  if (event.shiftKey) {
+                    if (active === first || active === panel) {
+                      event.preventDefault();
+                      last.focus();
+                    }
+                  } else if (active === last) {
+                    event.preventDefault();
+                    first.focus();
+                  }
+                };
+
+                const closePanel = () => {
+                  if (!open) return;
+                  open = false;
+                  highlight(activeRow, false);
+                  shell.dataset.open = 'false';
+                  panel.setAttribute('aria-hidden', 'true');
+                  document.body.classList.remove('drilldown-locked');
+                  if (cleanupTimer) window.clearTimeout(cleanupTimer);
+                  cleanupTimer = window.setTimeout(() => {
+                    if (!open) shell.hidden = true;
+                  }, 280);
+                  if (lastFocused && typeof lastFocused.focus === 'function') {
+                    lastFocused.focus();
+                  }
+                };
+
+                const openPanelInternal = (row) => {
+                  if (cleanupTimer) {
+                    window.clearTimeout(cleanupTimer);
+                    cleanupTimer = null;
+                  }
+                  activeRow = row;
+                  highlight(activeRow, true);
+                  renderContent(row);
+                  shell.hidden = false;
+                  requestAnimationFrame(() => {
+                    shell.dataset.open = 'true';
+                    panel.setAttribute('aria-hidden', 'false');
+                    document.body.classList.add('drilldown-locked');
+                    const target = closeButtons[0] || panel;
+                    if (target && typeof target.focus === 'function') {
+                      target.focus({ preventScroll: true });
+                    }
+                  });
+                  open = true;
+                };
+
+                const onBackdropClick = (event) => {
+                  event.preventDefault();
+                  closePanel();
+                };
+
+                const onKeydown = (event) => {
+                  if (!open) return;
+                  if (event.key === 'Escape') {
+                    event.preventDefault();
+                    closePanel();
+                    return;
+                  }
+                  focusTrap(event);
+                };
+
+                const onCloseClick = () => closePanel();
+
+                closeButtons.forEach((btn) => btn.addEventListener('click', onCloseClick));
+                backdrop.addEventListener('click', onBackdropClick);
+                document.addEventListener('keydown', onKeydown);
+
+                return {
+                  openFromRow(row) {
+                    if (!row) return;
+                    if (open && row === activeRow) {
+                      closePanel();
+                      return;
+                    }
+                    lastFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+                    openPanelInternal(row);
+                  },
+                  destroy() {
+                    closeButtons.forEach((btn) => btn.removeEventListener('click', onCloseClick));
+                    backdrop.removeEventListener('click', onBackdropClick);
+                    document.removeEventListener('keydown', onKeydown);
+                    closePanel();
+                  }
+                };
+              };
+
+              let panelController = null;
+              const ensurePanelController = () => {
+                if (panelController) {
+                  return panelController;
+                }
+                panelController = createPanelController({
+                  shell,
+                  panel,
+                  backdrop,
+                  closeButtons,
+                  content: panelContent,
+                  footer: panelFooter,
+                  titleEl: panelTitle,
+                  subtitleEl: panelSubtitle
+                });
+                return panelController;
+              };
+
+              if (table) {
+                table.addEventListener('click', (event) => {
+                  if (!(event.target instanceof Element)) {
+                    return;
+                  }
+                  const row = event.target.closest('tr[data-user-id]');
+                  if (!row) return;
+                  const controller = ensurePanelController();
+                  if (!controller) return;
+                  const anchor = event.target.closest('a');
+                  if (anchor && anchor.href) {
+                    event.preventDefault();
+                  }
+                  controller.openFromRow(row);
+                });
+              }
+
+              if (!table) {
+                return;
+              }
+              const body = table.querySelector('[data-roster-body]');
+              const notice = document.querySelector('[data-roster-notice]');
+              const scroll = document.querySelector('[data-roster-container]');
+              const empty = document.querySelector('[data-roster-empty]');
+
+              const formatElapsedSeconds = (seconds) => {
+                if (!Number.isFinite(seconds) || seconds <= 0) return '0m';
+                const minutes = Math.floor(seconds / 60);
+                if (minutes <= 0) return '0m';
+                const hours = Math.floor(minutes / 60);
+                const remaining = Math.max(0, minutes % 60);
+                const parts = [];
+                if (hours > 0) parts.push(hours + 'h');
+                parts.push(remaining + 'm');
+                return parts.join(' ');
+              };
+
+              const updateTimers = () => {
+                const now = Date.now();
+                document.querySelectorAll('[data-since]').forEach((el) => {
+                  const iso = el.getAttribute('data-since');
+                  if (!iso) return;
+                  const since = Date.parse(iso);
+                  if (Number.isNaN(since)) return;
+                  const elapsedSeconds = Math.max(0, Math.floor((now - since) / 1000));
+                  const elapsedEl = el.querySelector('.since__elapsed');
+                  if (elapsedEl) {
+                    elapsedEl.textContent = '· ' + formatElapsedSeconds(elapsedSeconds);
+                  }
+                });
+                document.querySelectorAll('[data-idle-since]').forEach((el) => {
+                  const iso = el.getAttribute('data-idle-since');
+                  if (!iso) return;
+                  const since = Date.parse(iso);
+                  if (Number.isNaN(since)) return;
+                  const minutes = Math.max(0, Math.ceil((now - since) / 60000));
+                  el.textContent = String(minutes);
+                });
+              };
+
+              const applyPayload = (payload) => {
+                if (payload && typeof payload.dateParam === 'string') {
+                  table.setAttribute('data-date-param', payload.dateParam);
+                }
+                if (body && payload) {
+                  body.innerHTML = payload.rowsHtml || '';
+                }
+                const totalsHtml = payload ? payload.totalsHtml || '' : '';
+                const existingTotals = table.querySelector('[data-roster-totals]');
+                if (totalsHtml) {
+                  if (existingTotals) {
+                    existingTotals.outerHTML = totalsHtml;
+                  } else {
+                    table.insertAdjacentHTML('beforeend', totalsHtml);
+                  }
+                } else if (existingTotals) {
+                  existingTotals.remove();
+                }
+                if (notice && payload) {
+                  const html = payload.noticeHtml || '';
+                  notice.innerHTML = html;
+                  notice.classList.toggle('hidden', !html.trim().length);
+                }
+                const hasRows = Boolean(payload && payload.rowsHtml && payload.rowsHtml.trim().length);
+                if (scroll) {
+                  scroll.classList.toggle('hidden', !hasRows);
+                }
+                if (empty) {
+                  empty.classList.toggle('hidden', hasRows);
+                }
+                updateTimers();
+              };
+
+              const refresh = async () => {
+                try {
+                  const dateParam = table.getAttribute('data-date-param') || '';
+                  const url = new URL('/dashboard/overview/today.json', window.location.origin);
+                  if (dateParam) {
+                    url.searchParams.set('date', dateParam);
+                  }
+                  const response = await fetch(url.toString(), { headers: { 'Accept': 'application/json' } });
+                  if (!response.ok) return;
+                  const data = await response.json();
+                  applyPayload(data);
+                } catch (error) {
+                  console.error('dashboard.roster.refresh_failed', error);
+                }
+              };
+
+              updateTimers();
+              setInterval(updateTimers, 1000);
+              refresh();
+              setInterval(refresh, 30000);
+            })();
+          </script>
+        </body>
+      </html>
+    `;
     res.type('html').send(html);
+});
+exports.dashboardRouter.get('/overview/today.json', async (req, res) => {
+    const dateInput = typeof req.query.date === 'string' ? parseDateParam(req.query.date) : zonedStartOfDay(new Date());
+    const dailyData = await (0, exports.fetchDailySummaries)(dateInput);
+    const rosterData = await fetchTodayRosterData(dateInput, dailyData.sessions);
+    const rowsHtml = renderTodayRosterRows(rosterData.rows, dailyData.dateParam);
+    const totalsHtml = rosterData.rows.length ? renderRosterTotalsRow(rosterData.totals) : '';
+    const noticeHtml = rosterData.hasComputedNotice
+        ? '<p class="meta meta--admin">Idle, break, and lunch totals are computed from today\'s activity history.</p>'
+        : '';
+    res.json({
+        dateParam: dailyData.dateParam,
+        label: dailyData.label,
+        rowsHtml,
+        totalsHtml,
+        noticeHtml,
+        generatedAt: new Date().toISOString()
+    });
 });
 exports.dashboardRouter.get('/balances', async (req, res) => {
     const users = await prisma_1.prisma.user.findMany({
@@ -2006,7 +3139,11 @@ exports.dashboardRouter.get('/balances', async (req, res) => {
     const balancesRangeEnd = updatedDates.length
         ? zonedEndOfDay(updatedDates.reduce((max, current) => (current > max ? current : max)))
         : zonedEndOfDay(new Date());
-    let detailSection = '<section class="balances-detail"><div class="empty">No users available.</div></section>';
+    let detailSection = `
+      <section class="card balances-detail">
+        <div class="card__body"><div class="empty">No users available.</div></div>
+      </section>
+    `;
     if (selectedUser) {
         const overview = await (0, balances_1.getBalanceOverview)(selectedUser.id, { limit: 200 });
         const { balance, ledger } = overview;
@@ -2090,19 +3227,25 @@ exports.dashboardRouter.get('/balances', async (req, res) => {
       </dialog>
     `;
         detailSection = `
-      <section class="balances-detail" id="balance-detail" data-user-id="${selectedUser.id}">
-        <h2>${escapeHtml(selectedUser.name)}</h2>
-        <div class="meta">${escapeHtml(selectedUser.email)}</div>
-        ${summaryCards}
-        <div class="actions no-print balances-detail-actions">
-          <button type="button" class="button" data-open-adjust>Adjust Balance</button>
-          <a href="/dashboard/requests?type=pto" class="button button-secondary">Review PTO Requests</a>
+      <section class="card balances-detail" id="balance-detail" data-user-id="${selectedUser.id}">
+        <div class="card__header">
+          <div>
+            <h2 class="card__title">${escapeHtml(selectedUser.name)}</h2>
+            <p class="card__subtitle">${escapeHtml(selectedUser.email)}</p>
+          </div>
+          <div class="card__actions no-print balances-detail-actions">
+            <button type="button" class="button" data-open-adjust>Adjust Balance</button>
+            <a href="/dashboard/requests?type=pto" class="button button-secondary">Review PTO Requests</a>
+          </div>
         </div>
-        ${dialogHtml}
-        <h3>PTO Ledger</h3>
-        <div class="meta">Entries are sorted newest first.</div>
-        ${ledgerTable}
-        ${ledgerEmpty}
+        <div class="card__body">
+          ${summaryCards}
+          ${dialogHtml}
+          <h3>PTO Ledger</h3>
+          <p class="meta">Entries are sorted newest first.</p>
+          ${ledgerTable}
+          ${ledgerEmpty}
+        </div>
       </section>
     `;
     }
@@ -2183,6 +3326,7 @@ exports.dashboardRouter.get('/balances', async (req, res) => {
           })();
         </script>
   `;
+    const timezoneNote = renderTimezoneNote(balancesRangeStart, balancesRangeEnd);
     const html = `
     <!doctype html>
     <html lang="en">
@@ -2191,39 +3335,61 @@ exports.dashboardRouter.get('/balances', async (req, res) => {
         <title>Balances</title>
         <style>${baseStyles}</style>
       </head>
-      <body>
+      <body class="dashboard dashboard--balances">
         ${renderNav('balances')}
-        ${renderTimezoneNote(balancesRangeStart, balancesRangeEnd)}
-        <h1>Balances</h1>
-        <div class="meta">Tracking ${rows.length} ${rows.length === 1 ? 'user' : 'users'}. Select a user to view ledger history and make adjustments.</div>
-        <div class="actions no-print">
-          <form method="get" action="/dashboard/balances">
-            <input type="hidden" name="download" value="csv" />
-            <button type="submit">Download CSV</button>
-          </form>
-          <a href="/dashboard/requests" class="button button-secondary">Review Requests</a>
-        </div>
-        ${rows.length
+        <main class="page-shell">
+          <header class="page-header">
+            <div class="page-header__content">
+              <p class="page-header__eyebrow">Attendance</p>
+              <h1 class="page-header__title">Balances</h1>
+              <p class="page-header__subtitle">Track remaining hours and review ledger adjustments.</p>
+            </div>
+            <div class="page-header__meta">
+              <span>${rows.length} ${rows.length === 1 ? 'user' : 'users'} monitored</span>
+              ${timezoneNote}
+            </div>
+          </header>
+          <div class="cards-grid">
+            <section class="card card--table">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Roster Balances</h2>
+                  <p class="card__subtitle">Select an employee to inspect ledger history.</p>
+                </div>
+                <div class="card__actions no-print">
+                  <form method="get" action="/dashboard/balances">
+                    <input type="hidden" name="download" value="csv" />
+                    <button type="submit">Download CSV</button>
+                  </form>
+                  <button type="button" class="print-button" onclick="window.print()">Print</button>
+                </div>
+              </div>
+              <div class="card__body">
+                ${rows.length
         ? `<div class="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>User</th>
-                      <th>Email</th>
-                      <th>PTO</th>
-                      <th>Non-PTO</th>
-                      <th>Make-Up</th>
-                      <th>Updated</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${tableRows}
-                  </tbody>
-                  ${totalsRow}
-                </table>
-              </div>`
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>User</th>
+                              <th>Email</th>
+                              <th>PTO</th>
+                              <th>Non-PTO</th>
+                              <th>Make-Up</th>
+                              <th>Updated</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            ${tableRows}
+                          </tbody>
+                          ${totalsRow}
+                        </table>
+                      </div>`
         : '<div class="empty">No balances recorded yet.</div>'}
-        ${detailSection}
+              </div>
+            </section>
+            ${detailSection}
+          </div>
+        </main>
         ${script}
       </body>
     </html>
@@ -2593,71 +3759,101 @@ const renderSettingsPage = ({ enabled, employees, logs, message, error }) => {
         <title>Settings – Email Sign-In</title>
         <style>${baseStyles}</style>
       </head>
-      <body>
+      <body class="dashboard dashboard--settings">
         ${renderNav('settings')}
-        <h1>Email Sign-In Settings</h1>
-        ${renderAlert()}
-        <section class="card no-print">
-          <h2>Feature Flag</h2>
-          <p>Allow employees to request session access with email only. Current status: <strong>${enabled ? 'Enabled' : 'Disabled'}</strong>.</p>
-          <form method="post" action="/dashboard/settings/toggle-email-signin">
-            <input type="hidden" name="enabled" value="${enabled ? 'false' : 'true'}" />
-            <button type="submit">${enabled ? 'Disable' : 'Enable'} Email Sign-In</button>
-          </form>
-        </section>
-        <section class="card no-print">
-          <h2>Add Employee</h2>
-          <form method="post" action="/dashboard/settings/employees" class="stack-form">
-            <label>
-              <span>Name</span>
-              <input type="text" name="name" required />
-            </label>
-            <label>
-              <span>Email</span>
-              <input type="email" name="email" required />
-            </label>
-            <button type="submit">Add Employee</button>
-          </form>
-        </section>
-        <section class="card">
-          <h2>Employee Roster</h2>
-          <div class="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Status</th>
-                  <th>Created</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${employeeRows}
-              </tbody>
-            </table>
+        <main class="page-shell">
+          <header class="page-header">
+            <div class="page-header__content">
+              <p class="page-header__eyebrow">Administration</p>
+              <h1 class="page-header__title">Email Sign-In Settings</h1>
+              <p class="page-header__subtitle">Enable, manage, and audit employee access via email-only authentication.</p>
+            </div>
+          </header>
+          ${renderAlert()}
+          <div class="cards-grid">
+            <section class="card card--feature">
+              <div class="card__header">
+                <h2 class="card__title">Feature Flag</h2>
+                <p class="card__subtitle">Current status: <strong>${enabled ? 'Enabled' : 'Disabled'}</strong></p>
+              </div>
+              <div class="card__body">
+                <p>Allow employees to request session access with email only.</p>
+                <form method="post" action="/dashboard/settings/toggle-email-signin">
+                  <input type="hidden" name="enabled" value="${enabled ? 'false' : 'true'}" />
+                  <button type="submit">${enabled ? 'Disable' : 'Enable'} Email Sign-In</button>
+                </form>
+              </div>
+            </section>
+            <section class="card card--form no-print">
+              <div class="card__header">
+                <h2 class="card__title">Add Employee</h2>
+                <p class="card__subtitle">New entries default to active status.</p>
+              </div>
+              <div class="card__body">
+                <form method="post" action="/dashboard/settings/employees" class="stack-form">
+                  <label>
+                    <span>Name</span>
+                    <input type="text" name="name" required />
+                  </label>
+                  <label>
+                    <span>Email</span>
+                    <input type="email" name="email" required />
+                  </label>
+                  <button type="submit">Add Employee</button>
+                </form>
+              </div>
+            </section>
           </div>
-        </section>
-        <section class="card">
-          <h2>Sign-In Audit Trail</h2>
-          <div class="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Timestamp</th>
-                  <th>Email</th>
-                  <th>Result</th>
-                  <th>Reason</th>
-                  <th>IP</th>
-                  <th>Device</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${auditRows}
-              </tbody>
-            </table>
-          </div>
-        </section>
+          <section class="card card--table">
+            <div class="card__header">
+              <h2 class="card__title">Employee Roster</h2>
+              <p class="card__subtitle">Activate or deactivate email-only access.</p>
+            </div>
+            <div class="card__body">
+              <div class="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Email</th>
+                      <th>Status</th>
+                      <th>Created</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${employeeRows}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+          <section class="card card--table">
+            <div class="card__header">
+              <h2 class="card__title">Sign-In Audit Trail</h2>
+              <p class="card__subtitle">Last 50 attempts, newest first.</p>
+            </div>
+            <div class="card__body">
+              <div class="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Timestamp</th>
+                      <th>Email</th>
+                      <th>Result</th>
+                      <th>Reason</th>
+                      <th>IP</th>
+                      <th>Device</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${auditRows}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        </main>
       </body>
     </html>
   `;

@@ -1242,9 +1242,35 @@ const renderTimeCell = (value: Date | null) => {
   return `<span title="${escapeHtml(tooltip)}">${escapeHtml(formatTimeOfDay(value))}</span>`;
 };
 
+const escapeAttr = (value: string | number | null | undefined) =>
+  value === null || value === undefined ? '' : escapeHtml(String(value));
+
 const buildTodayRosterRowHtml = (row: TodayRosterRow, dateParam: string): string => {
   const statusClass = `status status--${row.statusKey.replace(/_/g, '-')}`;
-  return `<tr data-user-id="${row.userId}">
+  const statusSince = row.statusSince ? formatIsoDateTime(row.statusSince) : '';
+  const idleSince = row.idleSince ? formatIsoDateTime(row.idleSince) : '';
+  const firstLoginIso = row.firstLogin ? formatIsoDateTime(row.firstLogin) : '';
+  const detailHref = `/dashboard/user/${row.userId}?date=${dateParam}`;
+  return `<tr
+    data-user-id="${row.userId}"
+    data-user-name="${escapeAttr(row.name)}"
+    data-user-email="${escapeAttr(row.email)}"
+    data-user-role="${escapeAttr(row.role)}"
+    data-status-key="${escapeAttr(row.statusKey)}"
+    data-status-label="${escapeAttr(row.statusLabel)}"
+    data-status-detail="${escapeAttr(row.statusDetail ?? '')}"
+    data-status-since="${escapeAttr(statusSince)}"
+    data-idle-since="${escapeAttr(idleSince)}"
+    data-idle-minutes="${row.currentIdleMinutes}"
+    data-idle-total="${row.totalIdleMinutes}"
+    data-break-count="${row.breakCount}"
+    data-break-minutes="${row.totalBreakMinutes}"
+    data-lunch-count="${row.lunchCount}"
+    data-lunch-minutes="${row.totalLunchMinutes}"
+    data-first-login="${escapeAttr(firstLoginIso)}"
+    data-presence-misses="${row.presenceMisses}"
+    data-detail-url="${escapeAttr(detailHref)}"
+  >
     <td>
       ${detailLink(row.userId, dateParam, row.name)}
       ${renderRequestBadges(row.requestBadges)}
@@ -1561,8 +1587,33 @@ const baseStyles = `
     body.dashboard .page-header__meta strong { color: #0f172a; }
     body.dashboard .tz-note { font-size: 0.85rem; color: #64748b; display: inline-flex; align-items: center; gap: 0.45rem; margin: 0; }
     body.dashboard .tz-note::before { content: '🕒'; }
-    body.dashboard .page-controls { display: flex; justify-content: center; }
-    body.dashboard .page-controls .tab-bar { margin: 0 auto; }
+    body.dashboard .page-controls { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
+    body.dashboard .page-controls .tab-bar { margin: 0; }
+    .drilldown-shell { position: fixed; inset: 0; display: flex; justify-content: flex-end; pointer-events: none; z-index: 90; }
+    .drilldown-shell[hidden] { display: none; }
+    .drilldown-shell[data-open="true"] { pointer-events: auto; }
+    .drilldown-backdrop { flex: 1; background: rgba(15,23,42,0.45); opacity: 0; transition: opacity 0.24s ease; }
+    .drilldown-shell[data-open="true"] .drilldown-backdrop { opacity: 1; }
+    .drilldown-panel { width: min(420px, 92vw); background: #fff; box-shadow: -24px 0 48px rgba(15,23,42,0.18); display: flex; flex-direction: column; max-height: 100vh; transform: translateX(100%); transition: transform 0.28s ease; outline: none; }
+    .drilldown-shell[data-open="true"] .drilldown-panel { transform: translateX(0); }
+    .drilldown-panel__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; padding: 1.25rem 1.5rem 0.75rem; border-bottom: 1px solid rgba(15,23,42,0.06); }
+    .drilldown-panel__heading h2 { margin: 0; font-size: 1.25rem; letter-spacing: -0.01em; color: #0f172a; }
+    .drilldown-panel__heading p { margin: 0.35rem 0 0; color: #475569; font-size: 0.9rem; }
+    .drilldown-close { background: transparent; border: none; color: #475569; font-size: 1.5rem; line-height: 1; cursor: pointer; padding: 0.25rem; border-radius: 999px; }
+    .drilldown-close:hover { color: #dc2626; }
+    .drilldown-panel__content { padding: 1.25rem 1.5rem; flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 1.25rem; }
+    .drilldown-panel__footer { padding: 1rem 1.5rem 1.5rem; border-top: 1px solid rgba(15,23,42,0.08); }
+    .drilldown-panel__footer .button { width: 100%; }
+    .drilldown-section { background: rgba(37,99,235,0.08); border-radius: 14px; padding: 0.9rem 1rem; }
+    .drilldown-section h3 { margin: 0 0 0.6rem; font-size: 0.85rem; letter-spacing: 0.08em; text-transform: uppercase; color: #1d4ed8; }
+    .drilldown-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.85rem; }
+    .drilldown-grid dl { margin: 0; }
+    .drilldown-grid dt { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; }
+    .drilldown-grid dd { margin: 0.25rem 0 0; font-weight: 600; color: #1f2933; font-size: 0.95rem; }
+    .drilldown-pill { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.35rem 0.65rem; border-radius: 999px; background: rgba(148,163,184,0.18); color: #1f2933; font-size: 0.8rem; font-weight: 600; }
+    .drilldown-meta { display: block; margin-top: 0.25rem; font-size: 0.75rem; color: #64748b; font-weight: 500; }
+    .drilldown-row-active { background: rgba(37,99,235,0.14) !important; }
+    .drilldown-locked { overflow: hidden; }
     body.dashboard .tab-bar { display: inline-flex; gap: 0.5rem; background: rgba(37,99,235,0.08); padding: 0.4rem; border-radius: 999px; }
     body.dashboard .tab-bar a { padding: 0.45rem 1rem; border-radius: 999px; font-weight: 600; color: #64748b; background: transparent; }
     body.dashboard .tab-bar a.active { background: #fff; color: #2563eb; box-shadow: 0 10px 20px rgba(37,99,235,0.22); }
@@ -1593,6 +1644,8 @@ const baseStyles = `
       body.dashboard .filters label { width: 100%; }
       body.dashboard button,
       body.dashboard .button { width: 100%; justify-content: center; }
+      body.dashboard .page-controls { flex-direction: column; align-items: stretch; }
+      .drilldown-panel__footer .button { width: 100%; }
       body.dashboard .table-scroll table { min-width: 520px; }
     }
 `;
@@ -3097,16 +3150,328 @@ dashboardRouter.get('/overview', async (req, res) => {
               ${monthlySection}
             </div>
           </main>
+          <div class="drilldown-shell no-print" data-drilldown-shell hidden>
+            <div class="drilldown-backdrop" data-drilldown-backdrop></div>
+            <aside class="drilldown-panel" role="dialog" aria-modal="true" aria-hidden="true" tabindex="-1" data-drilldown-panel>
+              <div class="drilldown-panel__header">
+                <div class="drilldown-panel__heading">
+                  <h2 data-drilldown-title>Team member</h2>
+                  <p data-drilldown-subtitle></p>
+                </div>
+                <button type="button" class="drilldown-close" aria-label="Close panel" data-drilldown-close>&times;</button>
+              </div>
+              <div class="drilldown-panel__content" data-drilldown-content></div>
+              <div class="drilldown-panel__footer" data-drilldown-footer></div>
+            </aside>
+          </div>
           <script>
             (() => {
               const table = document.querySelector('[data-roster-table]');
-              if (!table) return;
+              const shell = document.querySelector('[data-drilldown-shell]');
+              const panel = shell ? shell.querySelector('[data-drilldown-panel]') : null;
+              const backdrop = shell ? shell.querySelector('[data-drilldown-backdrop]') : null;
+              const closeButtons = shell ? Array.from(shell.querySelectorAll('[data-drilldown-close]')) : [];
+              const panelContent = panel ? panel.querySelector('[data-drilldown-content]') : null;
+              const panelFooter = panel ? panel.querySelector('[data-drilldown-footer]') : null;
+              const panelTitle = panel ? panel.querySelector('[data-drilldown-title]') : null;
+              const panelSubtitle = panel ? panel.querySelector('[data-drilldown-subtitle]') : null;
+              const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1")]';
+
+              const toNumber = (value) => {
+                const num = Number(value);
+                return Number.isFinite(num) ? num : null;
+              };
+
+              const formatDateTimeSafe = (iso) => {
+                if (!iso) return '—';
+                const date = new Date(iso);
+                if (Number.isNaN(date.getTime())) return '—';
+                return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+              };
+
+              const formatElapsedIso = (iso) => {
+                if (!iso) return '';
+                const ts = Date.parse(iso);
+                if (Number.isNaN(ts)) return '';
+                const diffMs = Date.now() - ts;
+                if (diffMs <= 0) return 'Just now';
+                const minutes = Math.floor(diffMs / 60000);
+                if (minutes < 1) return 'Just now';
+                const hours = Math.floor(minutes / 60);
+                const remainder = minutes % 60;
+                const parts = [];
+                if (hours > 0) parts.push(hours + 'h');
+                if (hours === 0 || remainder > 0) parts.push(remainder + 'm');
+                return parts.join(' ') + ' ago';
+              };
+
+              const formatMinutesValue = (value) => {
+                if (value === null || value === undefined) return '—';
+                return String(value) + ' min';
+              };
+
+              const formatCountValue = (value) => {
+                if (value === null || value === undefined) return '—';
+                return String(value);
+              };
+
+              const escapeHtmlClient = (value) =>
+                String(value)
+                  .replace(/&/g, '&amp;')
+                  .replace(/</g, '&lt;')
+                  .replace(/>/g, '&gt;')
+                  .replace(/"/g, '&quot;')
+                  .replace(/'/g, '&#39;');
+
+              const buildStat = (label, value, meta) => {
+                const safeLabel = escapeHtmlClient(label);
+                const safeValue = escapeHtmlClient(value === undefined || value === null || value === '' ? '—' : value);
+                const metaHtml = meta ? '<span class="drilldown-meta">' + escapeHtmlClient(meta) + '</span>' : '';
+                return '<dl><dt>' + safeLabel + '</dt><dd>' + safeValue + metaHtml + '</dd></dl>';
+              };
+
+              const createPanelController = ({ shell, panel, backdrop, closeButtons, content, footer, titleEl, subtitleEl }) => {
+                if (!shell || !panel || !backdrop || !content || !footer || !titleEl || !subtitleEl) {
+                  return null;
+                }
+
+                let open = false;
+                let activeRow = null;
+                let cleanupTimer = null;
+                let lastFocused = null;
+
+                const highlight = (row, state) => {
+                  if (!row) return;
+                  row.classList.toggle('drilldown-row-active', Boolean(state));
+                };
+
+                const getBadgesHtml = (row) => {
+                  const firstCell = row.cells[0];
+                  const badges = firstCell ? firstCell.querySelector('.badges') : null;
+                  return badges ? badges.outerHTML : '';
+                };
+
+                const getRowData = (row) => {
+                  const ds = row.dataset;
+                  const statusCell = row.cells[1];
+                  return {
+                    name: ds.userName || row.cells[0]?.innerText?.trim() || 'Unknown teammate',
+                    email: ds.userEmail || '',
+                    role: ds.userRole || '',
+                    statusLabel: ds.statusLabel || '',
+                    statusDetail: ds.statusDetail || '',
+                    statusSince: ds.statusSince || '',
+                    idleSince: ds.idleSince || '',
+                    idleMinutes: toNumber(ds.idleMinutes),
+                    idleTotal: toNumber(ds.idleTotal),
+                    breakCount: toNumber(ds.breakCount),
+                    breakMinutes: toNumber(ds.breakMinutes),
+                    lunchCount: toNumber(ds.lunchCount),
+                    lunchMinutes: toNumber(ds.lunchMinutes),
+                    firstLogin: ds.firstLogin || '',
+                    presenceMisses: toNumber(ds.presenceMisses),
+                    detailUrl: ds.detailUrl || '',
+                    statusHtml: statusCell ? statusCell.innerHTML : escapeHtmlClient(ds.statusLabel || ''),
+                    badgesHtml: getBadgesHtml(row)
+                  };
+                };
+
+                const renderContent = (row) => {
+                  const data = getRowData(row);
+                  titleEl.textContent = data.name;
+                  const subtitleParts = [];
+                  if (data.email) subtitleParts.push(data.email);
+                  if (data.role) subtitleParts.push(data.role);
+                  subtitleEl.textContent = subtitleParts.join(' • ');
+
+                  const statusSinceLabel = formatDateTimeSafe(data.statusSince);
+                  const statusSinceMeta = formatElapsedIso(data.statusSince);
+                  const currentIdleMeta = data.idleSince ? formatElapsedIso(data.idleSince) : '';
+                  const firstLoginLabel = formatDateTimeSafe(data.firstLogin);
+                  const firstLoginMeta = data.firstLogin ? formatElapsedIso(data.firstLogin) : '';
+                  const detailStat = data.statusDetail ? buildStat('Notes', data.statusDetail) : '';
+
+                  const statusSection = [
+                    '<div class="drilldown-section">',
+                    '  <h3>Status</h3>',
+                    '  <div class="drilldown-pill">' + data.statusHtml + (data.badgesHtml || '') + '</div>',
+                    '  <div class="drilldown-grid">',
+                    '    ' + buildStat('Status since', statusSinceLabel, statusSinceMeta),
+                    '    ' + buildStat('Current idle', formatMinutesValue(data.idleMinutes), currentIdleMeta),
+                    '  </div>',
+                    '</div>'
+                  ].join('\n');
+
+                  const activitySection = [
+                    '<div class="drilldown-section">',
+                    '  <h3>Today\'s activity</h3>',
+                    '  <div class="drilldown-grid">',
+                    '    ' + buildStat('Idle total', formatMinutesValue(data.idleTotal)),
+                    '    ' + buildStat('Breaks', formatCountValue(data.breakCount), data.breakMinutes !== null ? formatMinutesValue(data.breakMinutes) : ''),
+                    '    ' + buildStat('Lunches', formatCountValue(data.lunchCount), data.lunchMinutes !== null ? formatMinutesValue(data.lunchMinutes) : ''),
+                    '    ' + buildStat('Presence misses', formatCountValue(data.presenceMisses)),
+                    '  </div>',
+                    '</div>'
+                  ].join('\n');
+
+                  const timelineParts = [
+                    '<div class="drilldown-section">',
+                    '  <h3>Session hints</h3>',
+                    '  <div class="drilldown-grid">',
+                    '    ' + buildStat('First login', firstLoginLabel, firstLoginMeta)
+                  ];
+                  if (detailStat) {
+                    timelineParts.push('    ' + detailStat);
+                  }
+                  timelineParts.push('  </div>');
+                  timelineParts.push('</div>');
+                  const timelineSection = timelineParts.join('\n');
+
+                  content.innerHTML = [statusSection, activitySection, timelineSection].join('\n');
+                  footer.innerHTML = data.detailUrl
+                    ? '<a class="button" href="' + escapeHtmlClient(data.detailUrl) + '" data-drilldown-detail>Open timeline</a>'
+                    : '';
+                };
+
+                const focusTrap = (event) => {
+                  if (!open || event.key !== 'Tab') return;
+                  const focusable = panel.querySelectorAll(FOCUSABLE);
+                  if (!focusable.length) return;
+                  const first = focusable[0];
+                  const last = focusable[focusable.length - 1];
+                  const active = document.activeElement;
+                  if (event.shiftKey) {
+                    if (active === first || active === panel) {
+                      event.preventDefault();
+                      last.focus();
+                    }
+                  } else if (active === last) {
+                    event.preventDefault();
+                    first.focus();
+                  }
+                };
+
+                const closePanel = () => {
+                  if (!open) return;
+                  open = false;
+                  highlight(activeRow, false);
+                  shell.dataset.open = 'false';
+                  panel.setAttribute('aria-hidden', 'true');
+                  document.body.classList.remove('drilldown-locked');
+                  if (cleanupTimer) window.clearTimeout(cleanupTimer);
+                  cleanupTimer = window.setTimeout(() => {
+                    if (!open) shell.hidden = true;
+                  }, 280);
+                  if (lastFocused && typeof lastFocused.focus === 'function') {
+                    lastFocused.focus();
+                  }
+                };
+
+                const openPanelInternal = (row) => {
+                  if (cleanupTimer) {
+                    window.clearTimeout(cleanupTimer);
+                    cleanupTimer = null;
+                  }
+                  activeRow = row;
+                  highlight(activeRow, true);
+                  renderContent(row);
+                  shell.hidden = false;
+                  requestAnimationFrame(() => {
+                    shell.dataset.open = 'true';
+                    panel.setAttribute('aria-hidden', 'false');
+                    document.body.classList.add('drilldown-locked');
+                    const target = closeButtons[0] || panel;
+                    if (target && typeof target.focus === 'function') {
+                      target.focus({ preventScroll: true });
+                    }
+                  });
+                  open = true;
+                };
+
+                const onBackdropClick = (event) => {
+                  event.preventDefault();
+                  closePanel();
+                };
+
+                const onKeydown = (event) => {
+                  if (!open) return;
+                  if (event.key === 'Escape') {
+                    event.preventDefault();
+                    closePanel();
+                    return;
+                  }
+                  focusTrap(event);
+                };
+
+                const onCloseClick = () => closePanel();
+
+                closeButtons.forEach((btn) => btn.addEventListener('click', onCloseClick));
+                backdrop.addEventListener('click', onBackdropClick);
+                document.addEventListener('keydown', onKeydown);
+
+                return {
+                  openFromRow(row) {
+                    if (!row) return;
+                    if (open && row === activeRow) {
+                      closePanel();
+                      return;
+                    }
+                    lastFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+                    openPanelInternal(row);
+                  },
+                  destroy() {
+                    closeButtons.forEach((btn) => btn.removeEventListener('click', onCloseClick));
+                    backdrop.removeEventListener('click', onBackdropClick);
+                    document.removeEventListener('keydown', onKeydown);
+                    closePanel();
+                  }
+                };
+              };
+
+              let panelController = null;
+              const ensurePanelController = () => {
+                if (panelController) {
+                  return panelController;
+                }
+                panelController = createPanelController({
+                  shell,
+                  panel,
+                  backdrop,
+                  closeButtons,
+                  content: panelContent,
+                  footer: panelFooter,
+                  titleEl: panelTitle,
+                  subtitleEl: panelSubtitle
+                });
+                return panelController;
+              };
+
+              if (table) {
+                table.addEventListener('click', (event) => {
+                  if (!(event.target instanceof Element)) {
+                    return;
+                  }
+                  const row = event.target.closest('tr[data-user-id]');
+                  if (!row) return;
+                  const controller = ensurePanelController();
+                  if (!controller) return;
+                  const anchor = event.target.closest('a');
+                  if (anchor && anchor.href) {
+                    event.preventDefault();
+                  }
+                  controller.openFromRow(row);
+                });
+              }
+
+              if (!table) {
+                return;
+              }
               const body = table.querySelector('[data-roster-body]');
               const notice = document.querySelector('[data-roster-notice]');
               const scroll = document.querySelector('[data-roster-container]');
               const empty = document.querySelector('[data-roster-empty]');
 
-              const formatElapsed = (seconds) => {
+              const formatElapsedSeconds = (seconds) => {
                 if (!Number.isFinite(seconds) || seconds <= 0) return '0m';
                 const minutes = Math.floor(seconds / 60);
                 if (minutes <= 0) return '0m';
@@ -3128,7 +3493,7 @@ dashboardRouter.get('/overview', async (req, res) => {
                   const elapsedSeconds = Math.max(0, Math.floor((now - since) / 1000));
                   const elapsedEl = el.querySelector('.since__elapsed');
                   if (elapsedEl) {
-                    elapsedEl.textContent = '· ' + formatElapsed(elapsedSeconds);
+                    elapsedEl.textContent = '· ' + formatElapsedSeconds(elapsedSeconds);
                   }
                 });
                 document.querySelectorAll('[data-idle-since]').forEach((el) => {

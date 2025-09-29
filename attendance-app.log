@@ -1,0 +1,29 @@
+
+> attendance-app@0.2.0 start
+> npm run prepare:dist && electron .
+
+
+> attendance-app@0.2.0 prepare:dist
+> npm run clean && npm run build:ts && npm run build:renderer && npm run copy:assets
+
+
+> attendance-app@0.2.0 clean
+> rimraf dist
+
+
+> attendance-app@0.2.0 build:ts
+> tsc
+
+
+> attendance-app@0.2.0 build:renderer
+> esbuild src/renderer/index.ts --bundle --platform=browser --format=iife --outfile=dist/renderer/index.js --sourcemap
+
+
+  dist/renderer/index.js      44.4kb
+  dist/renderer/index.js.map  78.9kb
+
+⚡ Done in 12ms
+
+> attendance-app@0.2.0 copy:assets
+> copyfiles -u 1 "src/**/*.html" dist
+
