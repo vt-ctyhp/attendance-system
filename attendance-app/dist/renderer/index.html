@@ -2,102 +2,154 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Attendance App</title>
+    <title>Attendance Console</title>
     <style>
       :root {
-        color-scheme: light dark;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        color-scheme: light;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        --bg: #f8fafc;
+        --bg-accent: #eef2ff;
+        --card: #ffffff;
+        --border: #e2e8f0;
+        --text: #0f172a;
+        --muted: #64748b;
+        --primary: #2563eb;
+        --primary-dark: #1d4ed8;
+        --danger: #dc2626;
+        --warning: #f59e0b;
+        --success: #16a34a;
+        --shadow: 0 20px 50px rgba(15, 23, 42, 0.12);
+      }
+
+      * {
+        box-sizing: border-box;
       }
 
       body {
         margin: 0;
-        padding: clamp(16px, 4vw, 48px);
-        display: flex;
         min-height: 100vh;
-        justify-content: center;
-        align-items: center;
-        background: linear-gradient(160deg, #fefefe 0%, #e6eefc 100%);
-        overflow: auto;
-      }
-
-      main {
-        background: rgba(255, 255, 255, 0.95);
-        box-shadow: 0 12px 30px rgba(15, 51, 94, 0.18);
-        border-radius: 16px;
-        padding: clamp(20px, 4vw, 36px);
-        width: min(420px, 100%);
-        max-height: min(90vh, 720px);
-        overflow-y: auto;
-        text-align: center;
-      }
-
-      h1 {
-        margin-top: 0;
-        font-size: 1.6rem;
-        color: #0f335e;
-      }
-
-      .status {
-        background: rgba(15, 51, 94, 0.05);
-        border-radius: 12px;
-        padding: 16px;
-        text-align: left;
-        font-size: 0.92rem;
-        color: #0f335e;
-      }
-
-      .status-row {
+        background: linear-gradient(180deg, var(--bg) 0%, var(--bg-accent) 100%);
+        color: var(--text);
         display: flex;
+        justify-content: center;
+        padding: clamp(1.25rem, 3vw, 2.5rem);
+      }
+
+      main.app-shell {
+        width: min(1080px, 100%);
+        display: flex;
+        flex-direction: column;
+        gap: clamp(1.25rem, 3vw, 2rem);
+      }
+
+      .hero {
+        background: var(--card);
+        border-radius: 24px;
+        padding: clamp(1.75rem, 4vw, 2.75rem);
+        display: flex;
+        gap: clamp(1.5rem, 4vw, 3rem);
+        align-items: flex-start;
         justify-content: space-between;
-        margin-bottom: 6px;
+        box-shadow: var(--shadow);
       }
 
-      .status-row:last-child {
-        margin-bottom: 0;
+      .hero__eyebrow {
+        text-transform: uppercase;
+        font-size: 0.75rem;
+        letter-spacing: 0.12em;
+        color: var(--muted);
+        margin-bottom: 0.5rem;
       }
 
-      .status-label {
-        font-weight: 600;
+      .hero__title {
+        margin: 0;
+        font-size: clamp(1.8rem, 3vw, 2.6rem);
+        font-weight: 700;
       }
 
-      .actions {
+      .hero__subtitle {
+        margin: 0.75rem 0 0;
+        color: var(--muted);
+        font-size: clamp(0.95rem, 2vw, 1.05rem);
+        max-width: 42ch;
+      }
+
+      .hero__status {
         display: grid;
-        gap: 12px;
-        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-        margin-top: 28px;
+        gap: 0.35rem;
+        justify-items: flex-end;
+        text-align: right;
       }
 
-      .footer-actions {
-        margin-top: 16px;
+      .hero__status-label {
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-size: 0.75rem;
+        color: var(--muted);
+      }
+
+      .hero__status-value {
+        font-size: clamp(1.2rem, 2vw, 1.75rem);
+        font-weight: 700;
+      }
+
+      .hero__status-meta {
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+
+      .controls {
         display: flex;
-        justify-content: center;
-        gap: 12px;
         flex-wrap: wrap;
+        gap: 0.75rem;
+        align-items: center;
       }
 
       button {
-        padding: 12px;
         border: none;
-        border-radius: 10px;
-        font-size: 1rem;
+        border-radius: 999px;
+        padding: 0.65rem 1.4rem;
+        font-size: 0.95rem;
         font-weight: 600;
+        font-family: inherit;
         cursor: pointer;
-        transition: transform 0.1s ease, box-shadow 0.1s ease;
-        background: #1e64d8;
-        color: #ffffff;
-        box-shadow: 0 6px 14px rgba(30, 100, 216, 0.25);
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
       }
 
-      button:hover {
+      button.primary {
+        background: var(--primary);
+        color: #fff;
+        box-shadow: 0 14px 30px rgba(37, 99, 235, 0.25);
+      }
+
+      button.primary:hover {
+        background: var(--primary-dark);
         transform: translateY(-1px);
-        box-shadow: 0 8px 16px rgba(30, 100, 216, 0.3);
       }
 
-      button:active {
-        transform: translateY(0);
-        box-shadow: 0 4px 12px rgba(30, 100, 216, 0.25);
+      button.secondary {
+        background: rgba(37, 99, 235, 0.1);
+        color: var(--primary);
+        box-shadow: none;
+      }
+
+      button.secondary:hover {
+        background: rgba(37, 99, 235, 0.18);
+      }
+
+      button.ghost {
+        background: transparent;
+        border: 1px solid rgba(15, 23, 42, 0.12);
+        color: var(--muted);
+      }
+
+      button.ghost:hover {
+        border-color: rgba(15, 23, 42, 0.24);
+        color: var(--text);
       }
 
       button:disabled {
@@ -107,103 +159,272 @@
         box-shadow: none;
       }
 
-      .requests {
-        margin-top: 24px;
-        text-align: left;
-        background: rgba(15, 51, 94, 0.05);
-        border-radius: 12px;
-        padding: 16px;
-        max-height: clamp(160px, 30vh, 320px);
-        overflow-y: auto;
+      .cards-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: clamp(1rem, 3vw, 1.75rem);
+        align-items: stretch;
       }
 
-      .requests__header {
+      .card {
+        background: var(--card);
+        border-radius: 20px;
+        padding: clamp(1.25rem, 3vw, 1.75rem);
+        box-shadow: var(--shadow);
         display: flex;
-        align-items: center;
+        flex-direction: column;
+        gap: 1.25rem;
+      }
+
+      .card__header {
+        display: flex;
         justify-content: space-between;
-        margin-bottom: 8px;
+        gap: 1rem;
+        flex-wrap: wrap;
+        align-items: flex-start;
       }
 
-      .requests__header h2 {
+      .card__title {
         margin: 0;
-        font-size: 1.1rem;
-        color: #0f335e;
+        font-size: 1.2rem;
       }
 
-      .requests__list {
-        list-style: none;
-        padding: 0;
-        margin: 0;
-      }
-
-      .requests__item {
-        border: 1px solid rgba(15, 51, 94, 0.15);
-        border-radius: 10px;
-        padding: 10px;
-        margin-bottom: 10px;
-        background: #ffffff;
-      }
-
-      .requests__item:last-child {
-        margin-bottom: 0;
-      }
-
-      .requests__item strong {
-        display: block;
-        color: #0f335e;
-        margin-bottom: 4px;
-      }
-
-      .requests__item span {
-        display: block;
-        font-size: 0.85rem;
-        color: rgba(15, 51, 94, 0.8);
-      }
-
-      .requests__status {
-        font-weight: 600;
-        text-transform: capitalize;
-        margin-top: 6px;
-      }
-
-      .diagnostics {
-        margin-top: 20px;
-        background: rgba(15, 51, 94, 0.08);
-        border-radius: 10px;
-        padding: 12px;
-        font-size: 0.8rem;
-        color: #0f335e;
-        text-align: left;
-      }
-
-      .diagnostics h2 {
-        margin: 0 0 8px;
+      .card__subtitle {
+        margin: 0.4rem 0 0;
+        color: var(--muted);
         font-size: 0.9rem;
+        max-width: 38ch;
       }
 
-      .diagnostics pre {
+      .card__body {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: 1rem;
+      }
+
+      .stats__item {
+        background: rgba(37, 99, 235, 0.08);
+        border-radius: 16px;
+        padding: 0.9rem 1rem;
+      }
+
+      .stats__label {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--primary);
+        margin-bottom: 0.35rem;
+        display: block;
+      }
+
+      .stats__value {
+        font-size: 1.45rem;
+        font-weight: 700;
+      }
+
+      .stats__meta {
+        display: block;
+        margin-top: 0.25rem;
+        font-size: 0.85rem;
+        color: rgba(37, 99, 235, 0.8);
+      }
+
+      .simple-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      .simple-table thead {
+        background: rgba(15, 23, 42, 0.04);
+      }
+
+      .simple-table th,
+      .simple-table td {
+        padding: 0.65rem 0.75rem;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+        font-size: 0.88rem;
+      }
+
+      .simple-table tbody tr:last-child td {
+        border-bottom: none;
+      }
+
+      .simple-table tbody tr:hover {
+        background: rgba(37, 99, 235, 0.08);
+      }
+
+      .list {
+        list-style: none;
         margin: 0;
-        white-space: pre-wrap;
-        word-break: break-word;
+        padding: 0;
+        display: grid;
+        gap: 0.9rem;
+      }
+
+      .list__item {
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 16px;
+        padding: 0.9rem 1rem;
+        display: grid;
+        gap: 0.35rem;
+      }
+
+      .list__headline {
+        font-weight: 600;
+        font-size: 0.95rem;
+      }
+
+      .list__meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        font-size: 0.8rem;
+        color: var(--muted);
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        padding: 0.2rem 0.6rem;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        background: rgba(15, 23, 42, 0.05);
+      }
+
+      .pill--pending {
+        background: rgba(245, 158, 11, 0.14);
+        color: var(--warning);
+      }
+
+      .pill--approved {
+        background: rgba(34, 197, 94, 0.16);
+        color: var(--success);
+      }
+
+      .pill--denied {
+        background: rgba(220, 38, 38, 0.14);
+        color: var(--danger);
+      }
+
+      .request-form {
+        display: grid;
+        gap: 0.8rem;
+      }
+
+      .form-row {
+        display: flex;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+      }
+
+      label {
+        font-size: 0.85rem;
+        color: var(--muted);
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+        font-weight: 600;
+      }
+
+      select,
+      input,
+      textarea {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 0.55rem 0.75rem;
+        font-size: 0.95rem;
+        font-family: inherit;
+        color: var(--text);
+        background: #fff;
+      }
+
+      textarea {
+        resize: vertical;
+        min-height: 96px;
+      }
+
+      .form-hint {
+        font-size: 0.8rem;
+        color: var(--muted);
+        margin: 0;
+      }
+
+      .schedule {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 0.75rem;
+      }
+
+      .schedule__item {
+        display: flex;
+        justify-content: space-between;
+        gap: 0.75rem;
+        align-items: center;
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 16px;
+        padding: 0.85rem 1rem;
+      }
+
+      .schedule__meta {
+        font-size: 0.82rem;
+        color: var(--muted);
+      }
+
+      .timeline {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 0.75rem;
+      }
+
+      .timeline__item {
+        display: grid;
+        gap: 0.35rem;
+        padding: 0.75rem 0.9rem;
+        border-radius: 14px;
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        background: rgba(15, 23, 42, 0.02);
+      }
+
+      .timeline__label {
+        font-size: 0.85rem;
+        font-weight: 600;
+      }
+
+      .timeline__time {
+        font-size: 0.78rem;
+        color: var(--muted);
       }
 
       .toast {
         position: fixed;
-        bottom: 24px;
-        right: 24px;
-        min-width: 240px;
-        max-width: 360px;
-        padding: 14px 18px;
-        border-radius: 10px;
-        box-shadow: 0 12px 20px rgba(0, 0, 0, 0.18);
-        background: #1e64d8;
+        bottom: 1.5rem;
+        right: 1.5rem;
+        background: var(--primary);
         color: #fff;
-        font-weight: 600;
+        padding: 0.85rem 1.2rem;
+        border-radius: 14px;
+        box-shadow: var(--shadow);
         opacity: 0;
         transform: translateY(20px);
-        transition: opacity 0.2s ease, transform 0.2s ease;
         pointer-events: none;
-        z-index: 1000;
+        transition: opacity 0.2s ease, transform 0.2s ease;
+        font-weight: 600;
+        z-index: 20;
       }
 
       .toast[data-visible='true'] {
@@ -211,570 +432,188 @@
         transform: translateY(0);
       }
 
-      .toast[data-variant='error'] {
-        background: #d83b1e;
+      .toast[data-variant='warning'] {
+        background: var(--warning);
       }
 
       .toast[data-variant='success'] {
-        background: #1e8d3d;
+        background: var(--success);
       }
 
-      .requests__empty {
-        font-size: 0.88rem;
-        color: rgba(15, 51, 94, 0.7);
-        margin: 0;
+      .toast[data-variant='danger'] {
+        background: var(--danger);
       }
 
-      .modal {
-        position: fixed;
-        inset: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: rgba(0, 0, 0, 0.35);
-        opacity: 0;
-        pointer-events: none;
-        transition: opacity 0.2s ease;
-        z-index: 1000;
-      }
-
-      .modal[data-visible='true'] {
-        opacity: 1;
-        pointer-events: auto;
-      }
-
-      .modal__content {
-        background: #ffffff;
-        padding: clamp(20px, 4vw, 28px);
-        border-radius: 14px;
-        width: min(360px, 92vw);
-        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.2);
-        max-height: calc(100vh - 32px);
-        overflow-y: auto;
-      }
-
-      .modal__content h2 {
-        margin-top: 0;
-        margin-bottom: 12px;
-        font-size: 1.3rem;
-        color: #0f335e;
-      }
-
-      .modal__content label {
-        display: block;
-        text-align: left;
-        font-weight: 600;
-        margin-bottom: 6px;
-        color: #0f335e;
-      }
-
-      .modal__content input {
-        width: 100%;
-        padding: 10px;
-        margin-bottom: 14px;
-        border: 1px solid rgba(15, 51, 94, 0.2);
-        border-radius: 8px;
-        font-size: 0.95rem;
-      }
-
-      .modal__content select,
-      .modal__content textarea {
-        width: 100%;
-        border: 1px solid rgba(15, 51, 94, 0.2);
-        border-radius: 8px;
-        font-size: 0.95rem;
-        padding: 10px;
-        margin-bottom: 14px;
-      }
-
-      .modal__actions {
-        display: flex;
-        justify-content: flex-end;
-        gap: 12px;
-        margin-top: 8px;
-      }
-
-      .modal__error {
-        color: #d14343;
-        font-size: 0.85rem;
-        min-height: 18px;
-        margin-top: -6px;
-        margin-bottom: 10px;
-      }
-
-      .modal__success {
-        color: #2d7d46;
-        font-size: 0.85rem;
-        min-height: 18px;
-        margin-top: -6px;
-        margin-bottom: 0;
-      }
-
-      .settings-status-badge {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 0.75rem;
-        height: 0.75rem;
-        border-radius: 999px;
-        font-size: 0.6rem;
-        margin-right: 0.45rem;
-      }
-
-      .settings-status-badge--success {
-        color: #047857;
-      }
-
-      .settings-status-badge--error {
-        color: #b91c1c;
-      }
-
-      .settings-status-detail {
-        display: block;
-        margin-top: 0.25rem;
-        margin-left: 1.2rem;
-        font-size: 0.82rem;
-        color: #4b5563;
-      }
-
-      .modal__hint {
-        font-size: 0.78rem;
-        color: rgba(15, 51, 94, 0.75);
-        margin-top: -8px;
-        margin-bottom: 12px;
-      }
-
-      .modal__button-secondary {
-        background: transparent;
-        color: #0f335e;
-        box-shadow: none;
-        border: 1px solid rgba(15, 51, 94, 0.25);
-      }
-
-      .modal__button-secondary:hover {
-        transform: none;
-        box-shadow: none;
-        background: rgba(15, 51, 94, 0.05);
-      }
-
-      .modal__content-wide {
-        width: min(760px, 94vw);
-      }
-
-      .timesheet__filters {
-        display: flex;
-        gap: 12px;
-        flex-wrap: wrap;
-        align-items: flex-end;
-        margin-bottom: 16px;
-        text-align: left;
-      }
-
-      .timesheet__filters label {
-        display: flex;
-        flex-direction: column;
-        font-size: 0.85rem;
-        color: #0f335e;
-      }
-
-      .timesheet__filters button {
-        align-self: flex-end;
-      }
-
-      .timesheet__filters-actions {
-        display: flex;
-        gap: 8px;
-        align-items: center;
-        align-self: flex-end;
-      }
-
-      .timesheet__summary {
-        display: grid;
-        gap: 10px;
-        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-        margin-bottom: 12px;
-        text-align: left;
-      }
-
-      .timesheet__summary-item {
-        background: rgba(15, 51, 94, 0.08);
-        border-radius: 10px;
-        padding: 10px;
-      }
-
-      .timesheet__summary-item span {
-        font-size: 0.7rem;
-        letter-spacing: 0.05em;
-        text-transform: uppercase;
-        display: block;
-        color: rgba(15, 51, 94, 0.7);
-        margin-bottom: 4px;
-      }
-
-      .timesheet__summary-item strong {
-        display: block;
-        font-size: 1.1rem;
-        color: #0f335e;
-      }
-
-      .timesheet__summary-item small {
-        display: block;
-        font-size: 0.7rem;
-        color: rgba(15, 51, 94, 0.65);
-        margin-top: 4px;
-      }
-
-      .timesheet__table-wrapper {
-        max-height: min(50vh, 320px);
-        overflow-y: auto;
-        background: rgba(15, 51, 94, 0.05);
-        border-radius: 10px;
-        margin-bottom: 8px;
-      }
-
-      .timesheet__table {
-        width: 100%;
-        border-collapse: collapse;
-        min-width: 520px;
-      }
-
-      .timesheet__table th,
-      .timesheet__table td {
-        padding: 8px 10px;
-        font-size: 0.85rem;
-        color: #0f335e;
-        text-align: left;
-      }
-
-      .timesheet__table tbody tr:nth-child(even) {
-        background: rgba(15, 51, 94, 0.05);
-      }
-
-      .timesheet__table button {
-        padding: 6px 10px;
-        font-size: 0.78rem;
-      }
-
-      .timesheet__action {
-        text-align: right;
-      }
-
-      .timesheet__day-note {
-        font-size: 0.7rem;
-        color: rgba(15, 51, 94, 0.75);
-        margin-top: 6px;
-      }
-
-      .timesheet__message {
-        font-size: 0.82rem;
-        margin: 6px 0;
-        color: rgba(15, 51, 94, 0.75);
-        text-align: left;
-      }
-
-      .timesheet__requests {
-        margin-top: 14px;
-        text-align: left;
-      }
-
-      .timesheet__requests header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 8px;
-      }
-
-      .timesheet__requests-list {
-        margin: 0;
-        padding: 0;
-        list-style: none;
-        display: grid;
-        gap: 8px;
-        max-height: min(35vh, 220px);
-        overflow-y: auto;
-      }
-
-      .timesheet__request-item {
-        background: rgba(15, 51, 94, 0.05);
-        border-radius: 10px;
-        padding: 10px;
-      }
-
-      .timesheet__request-item p {
-        margin: 4px 0 6px;
-        font-size: 0.8rem;
-      }
-
-      .timesheet__request-meta {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-        font-size: 0.72rem;
-        color: rgba(15, 51, 94, 0.75);
-      }
-
-      .timesheet__request-status {
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-
-      .timesheet__request-status.pending {
-        color: #92400e;
-      }
-
-      .timesheet__request-status.approved {
-        color: #065f46;
-      }
-
-      .timesheet__request-status.denied {
-        color: #b91c1c;
-      }
-
-      .hidden {
-        display: none !important;
-      }
-
-      @media (max-width: 600px) {
-        body {
-          padding: clamp(12px, 6vw, 24px);
+      @media (max-width: 780px) {
+        .hero {
+          flex-direction: column;
+          align-items: stretch;
         }
-        main {
-          border-radius: 12px;
-          box-shadow: 0 8px 20px rgba(15, 51, 94, 0.16);
+
+        .hero__status {
+          justify-items: flex-start;
+          text-align: left;
         }
-        h1 {
-          font-size: 1.4rem;
+
+        .controls {
+          justify-content: center;
         }
+
         button {
-          font-size: 0.95rem;
-          padding: 10px;
-        }
-        .actions {
-          grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-        }
-        .timesheet__table {
-          min-width: 420px;
+          width: 100%;
+          justify-content: center;
         }
       }
 
-      @media (max-height: 640px) {
+      @media (max-width: 620px) {
         body {
-          align-items: flex-start;
+          padding: clamp(1rem, 6vw, 1.5rem);
         }
-        main {
-          max-height: calc(100vh - 32px);
+
+        .cards-grid {
+          grid-template-columns: 1fr;
         }
       }
     </style>
   </head>
   <body>
-    <main>
-      <h1>Attendance</h1>
-      <div class="status">
-        <div class="status-row">
-          <span class="status-label">User</span>
-          <span id="status-email">Email not set</span>
+    <main class="app-shell">
+      <header class="hero">
+        <div>
+          <div class="hero__eyebrow">Attendance System</div>
+          <h1 class="hero__title" id="hero-title">Welcome back</h1>
+          <p class="hero__subtitle">
+            Monitor your workday, log pauses, respond to presence checks, and keep requests moving without
+            leaving this page.
+          </p>
         </div>
-        <div class="status-row">
-          <span class="status-label">Session</span>
-          <span id="status-session">No active session</span>
+        <div class="hero__status">
+          <span class="hero__status-label">Status</span>
+          <span class="hero__status-value" id="hero-status">Clocked Out</span>
+          <span class="hero__status-meta" id="hero-duration">&mdash;</span>
+          <span class="hero__status-meta" id="hero-presence">Presence check in &mdash;</span>
         </div>
-        <div class="status-row">
-          <span class="status-label">Current Pause</span>
-          <span id="status-pause">No active pause</span>
-        </div>
-        <div class="status-row">
-          <span class="status-label">Last heartbeat</span>
-          <span id="status-heartbeat">Never</span>
-        </div>
-        <div class="status-row">
-          <span class="status-label">Foreground</span>
-          <span id="status-foreground">Unknown</span>
-        </div>
-      </div>
-      <div class="actions">
-        <button data-action="log-in">Log In</button>
-        <button data-action="start-break">Start Break</button>
-        <button data-action="end-break">End Break</button>
-        <button data-action="start-lunch">Start Lunch</button>
-        <button data-action="end-lunch">End Lunch</button>
-        <button data-action="log-out">Log Out</button>
-      </div>
-      <div class="footer-actions">
-        <button type="button" id="open-timesheet" class="modal__button-secondary">Timesheet</button>
-        <button type="button" id="open-requests" class="modal__button-secondary">Requests</button>
-        <button type="button" id="open-settings" class="modal__button-secondary">Settings</button>
-      </div>
-      <section class="requests" id="requests-panel">
-        <header class="requests__header">
-          <h2>My Requests</h2>
-          <button type="button" id="refresh-requests" class="modal__button-secondary">Refresh</button>
-        </header>
-        <ul id="requests-list" class="requests__list"></ul>
-        <p id="requests-empty" class="requests__empty">No requests yet.</p>
+      </header>
+
+      <section class="controls">
+        <button class="primary" id="clock-toggle">Clock In</button>
+        <button class="secondary" id="break-toggle">Start Break</button>
+        <button class="secondary" id="lunch-toggle">Start Lunch</button>
+        <button class="secondary" id="presence-button">Confirm Presence</button>
+        <button class="ghost" id="download-report">Download CSV</button>
       </section>
 
-      <section class="diagnostics" id="diagnostics" hidden>
-        <h2>Diagnostics</h2>
-        <pre id="diagnostics-content"></pre>
+      <section class="cards-grid">
+        <article class="card card--snapshot">
+          <header class="card__header">
+            <div>
+              <h2 class="card__title">Today&apos;s Snapshot</h2>
+              <p class="card__subtitle" id="snapshot-label">Shift overview</p>
+            </div>
+            <span class="pill" id="makeup-progress">Make-up hours</span>
+          </header>
+          <div class="card__body">
+            <dl class="stats" id="stats-list"></dl>
+          </div>
+        </article>
+
+        <article class="card card--timesheet">
+          <header class="card__header">
+            <div>
+              <h2 class="card__title">Timesheet</h2>
+              <p class="card__subtitle" id="timesheet-label">Weekly summary</p>
+            </div>
+            <select id="timesheet-view" aria-label="Timesheet view">
+              <option value="weekly">Weekly</option>
+              <option value="pay_period">Pay Period</option>
+              <option value="monthly">Monthly</option>
+            </select>
+          </header>
+          <div class="card__body">
+            <table class="simple-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Active (h)</th>
+                  <th>Idle (h)</th>
+                  <th>Breaks</th>
+                  <th>Lunches</th>
+                  <th>Presence</th>
+                </tr>
+              </thead>
+              <tbody id="timesheet-body"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="card card--requests">
+          <header class="card__header">
+            <div>
+              <h2 class="card__title">Requests</h2>
+              <p class="card__subtitle">
+                Submit make-up hours or time off and keep an eye on pending approvals.
+              </p>
+            </div>
+          </header>
+          <div class="card__body">
+            <ul class="list" id="request-list"></ul>
+            <form class="request-form" id="request-form">
+              <div class="form-row">
+                <label>
+                  Type
+                  <select id="request-type" required>
+                    <option value="make_up">Make-up Hours</option>
+                    <option value="time_off">Time Off</option>
+                    <option value="edit">Timesheet Edit</option>
+                  </select>
+                </label>
+                <label>
+                  Hours
+                  <input id="request-hours" type="number" min="0" max="24" step="0.25" value="1" />
+                </label>
+              </div>
+              <label>
+                Reason
+                <textarea id="request-reason" placeholder="Share context for your reviewer" required></textarea>
+              </label>
+              <button class="primary" type="submit">Submit Request</button>
+              <p class="form-hint" id="request-hint"></p>
+            </form>
+          </div>
+        </article>
+
+        <article class="card card--schedule">
+          <header class="card__header">
+            <div>
+              <h2 class="card__title">Schedule</h2>
+              <p class="card__subtitle">Default hours and the next few shifts across locations.</p>
+            </div>
+          </header>
+          <div class="card__body">
+            <ul class="schedule" id="schedule-list"></ul>
+          </div>
+        </article>
+
+        <article class="card card--activity">
+          <header class="card__header">
+            <div>
+              <h2 class="card__title">Activity Feed</h2>
+              <p class="card__subtitle">Most recent presence checks, breaks, and request updates.</p>
+            </div>
+          </header>
+          <div class="card__body">
+            <ol class="timeline" id="activity-list"></ol>
+          </div>
+        </article>
       </section>
     </main>
 
-    <div class="toast" id="app-toast" aria-live="assertive"></div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <div class="modal" id="login-modal" data-visible="false">
-      <div class="modal__content">
-        <h2>Work Email</h2>
-        <form id="login-form">
-          <label for="login-email">Work Email</label>
-          <input type="email" id="login-email" name="email" autocomplete="email" required />
-          <p class="modal__hint">Employees enter their email once. We use it to start sessions.</p>
-          <p class="modal__error" id="login-error"></p>
-          <div class="modal__actions">
-            <button type="button" id="login-cancel" class="modal__button-secondary">Cancel</button>
-            <button type="submit">Save Email</button>
-          </div>
-        </form>
-      </div>
-    </div>
-
-    <div class="modal" id="presence-modal" data-visible="false">
-      <div class="modal__content">
-        <h2>Presence Check</h2>
-        <p id="presence-message">Please confirm your presence.</p>
-        <div class="modal__actions">
-          <button type="button" id="presence-dismiss" class="modal__button-secondary">Dismiss</button>
-          <button type="button" id="presence-confirm">Confirm</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="modal" id="settings-modal" data-visible="false">
-      <div class="modal__content">
-        <h2>Settings</h2>
-        <form id="settings-form">
-          <label for="settings-email">Work Email</label>
-          <input type="email" id="settings-email" name="email" autocomplete="email" required />
-          <p class="modal__hint">Update if your work email changes.</p>
-          <label for="settings-base-url">Server Base URL</label>
-          <input type="url" id="settings-base-url" name="serverBaseUrl" required />
-          <p class="modal__hint">Example: https://attendance.example.com</p>
-          <div class="modal__actions">
-            <button type="button" id="settings-cancel" class="modal__button-secondary">Cancel</button>
-            <button type="button" id="settings-test" class="modal__button-secondary">Test Connection</button>
-            <button type="submit">Save</button>
-          </div>
-          <p class="modal__error" id="settings-error" aria-live="polite" role="status"></p>
-          <p class="modal__success" id="settings-success" aria-live="polite" role="status"></p>
-        </form>
-      </div>
-    </div>
-
-    <div class="modal" id="timesheet-modal" data-visible="false">
-      <div class="modal__content modal__content-wide">
-        <h2>Timesheet</h2>
-        <form id="timesheet-filter" class="timesheet__filters">
-          <label for="timesheet-view">View
-            <select id="timesheet-view" name="view">
-              <option value="pay_period">Pay Period</option>
-              <option value="weekly">Weekly</option>
-              <option value="monthly">Monthly</option>
-            </select>
-          </label>
-          <label id="timesheet-date-group" for="timesheet-date">Date
-            <input type="date" id="timesheet-date" name="date" />
-          </label>
-          <label id="timesheet-month-group" for="timesheet-month" class="hidden">Month
-            <input type="month" id="timesheet-month" name="month" />
-          </label>
-          <div class="timesheet__filters-actions">
-            <button type="submit" class="modal__button-secondary">Update</button>
-            <button type="button" id="timesheet-refresh" class="modal__button-secondary">Refresh</button>
-          </div>
-        </form>
-        <div id="timesheet-summary" class="timesheet__summary"></div>
-        <p id="timesheet-loading" class="timesheet__message" hidden>Loading…</p>
-        <p id="timesheet-empty" class="timesheet__message">No activity recorded for this range.</p>
-        <div class="timesheet__table-wrapper">
-          <table id="timesheet-table" class="timesheet__table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Active (h)</th>
-                <th>Idle (h)</th>
-                <th>Breaks</th>
-                <th>Lunches</th>
-                <th>Presence</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="timesheet-table-body"></tbody>
-          </table>
-        </div>
-        <section class="timesheet__requests" id="timesheet-requests-section">
-          <header>
-            <h3>Edit Requests</h3>
-            <button type="button" id="timesheet-requests-refresh" class="modal__button-secondary">Refresh</button>
-          </header>
-          <ul id="timesheet-requests-list" class="timesheet__requests-list"></ul>
-          <p id="timesheet-requests-empty" class="timesheet__message">No edit requests yet.</p>
-        </section>
-        <div class="modal__actions">
-          <button type="button" id="timesheet-close" class="modal__button-secondary">Close</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="modal" id="timesheet-edit-modal" data-visible="false">
-      <div class="modal__content">
-        <h2>Request Timesheet Edit</h2>
-        <p id="timesheet-edit-date-label" class="timesheet__message">Select a day to request changes.</p>
-        <form id="timesheet-edit-form">
-          <label for="timesheet-edit-reason">Reason</label>
-          <textarea id="timesheet-edit-reason" name="reason" rows="3" placeholder="Describe the change" required></textarea>
-          <label for="timesheet-edit-hours">Requested Hours (optional)</label>
-          <input type="number" id="timesheet-edit-hours" name="hours" min="0" step="0.25" />
-          <p class="modal__hint">Leave blank if you only need to provide context.</p>
-          <p class="modal__error" id="timesheet-edit-error"></p>
-          <p class="modal__success" id="timesheet-edit-success"></p>
-          <div class="modal__actions">
-            <button type="button" id="timesheet-edit-cancel" class="modal__button-secondary">Cancel</button>
-            <button type="submit">Submit</button>
-          </div>
-        </form>
-      </div>
-    </div>
-
-    <div class="modal" id="request-modal" data-visible="false">
-      <div class="modal__content">
-        <h2>Submit Request</h2>
-        <form id="request-form">
-          <label for="request-type">Type</label>
-          <select id="request-type" name="type" required>
-            <option value="">Select type</option>
-            <option value="PTO">PTO</option>
-            <option value="NON_PTO">Non-PTO</option>
-            <option value="MAKE_UP">Make-Up</option>
-          </select>
-          <label for="request-start-date">Start Date</label>
-          <input type="date" id="request-start-date" name="startDate" required />
-          <label for="request-end-date">End Date (optional)</label>
-          <input type="date" id="request-end-date" name="endDate" />
-          <label for="request-hours">Hours</label>
-          <input type="number" id="request-hours" name="hours" min="0" step="0.25" required />
-          <label for="request-reason">Reason</label>
-          <textarea id="request-reason" name="reason" rows="3" placeholder="Provide details" required></textarea>
-          <p class="modal__error" id="request-error"></p>
-          <p class="modal__success" id="request-success"></p>
-          <div class="modal__actions">
-            <button type="button" id="request-cancel" class="modal__button-secondary">Cancel</button>
-            <button type="submit">Submit</button>
-          </div>
-        </form>
-      </div>
-    </div>
-
+<<<<<<< ours
     <script src="./index.js"></script>
+=======
+    <script type="module" src="./index.ts"></script>
+>>>>>>> theirs
   </body>
 </html>
