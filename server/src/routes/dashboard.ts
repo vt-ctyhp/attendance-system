@@ -1332,64 +1332,94 @@ dashboardRouter.get('/today', async (req, res) => {
     .map((summary) => buildTodayRow(summary, dateParam, requestBadges.get(summary.userId) ?? []))
     .join('\n');
   const totalsRow = renderTotalsRow(totals, 3);
+  const timezoneNote = renderTimezoneNote(dayStart, dayEnd);
 
   const html = `
     <!doctype html>
     <html lang="en">
       <head>
         <meta charset="utf-8" />
-        <title>Attendance Dashboard – ${dateParam}</title>
+        <title>Attendance Dashboard – ${escapeHtml(label)}</title>
         <style>${baseStyles}</style>
       </head>
-      <body>
+      <body class="dashboard dashboard--today">
         ${renderNav('today')}
-        ${renderTimezoneNote(dayStart, dayEnd)}
-        <h1>Sessions for ${label}</h1>
-        <div class="actions no-print">
-          <form method="get" action="/dashboard/today" class="filters">
-            <label>
-              <span>Date</span>
-              <input type="date" name="date" value="${escapeHtml(requestedDateParam)}" />
-            </label>
-            <button type="submit">Apply</button>
-          </form>
-          <form method="get" action="/dashboard/today">
-            <input type="hidden" name="date" value="${dateParam}" />
-            <input type="hidden" name="download" value="csv" />
-            <button type="submit">Download CSV</button>
-          </form>
-          <button type="button" class="print-button" onclick="window.print()">Print</button>
-        </div>
-        ${
-          tableRows
-            ? `<div class="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>User</th>
-                      <th>Email</th>
-                      <th>Started At</th>
-                      <th>Active Minutes</th>
-                      <th>Idle Minutes</th>
-                      <th>Breaks</th>
-                      <th>Break Minutes</th>
-                      <th>Lunches</th>
-                      <th>Lunch Minutes</th>
-                      <th>Presence Misses</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${tableRows}
-                  </tbody>
-                  ${totalsRow}
-                </table>
-              </div>`
-            : '<div class="empty">No sessions recorded for this date.</div>'
-        }
-        <section class="card">
-          <h2>Breaks and Lunches</h2>
-          ${renderPauseTable(pauses)}
-        </section>
+        <main class="page-shell">
+          <header class="page-header">
+            <div class="page-header__content">
+              <p class="page-header__eyebrow">Attendance</p>
+              <h1 class="page-header__title">Daily Sessions</h1>
+              <p class="page-header__subtitle">Detailed activity, pauses, and presence checks for ${escapeHtml(label)}.</p>
+            </div>
+            <div class="page-header__meta">
+              ${timezoneNote}
+            </div>
+          </header>
+          <div class="cards-grid">
+            <section class="card card--table">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Session Metrics</h2>
+                  <p class="card__subtitle">${escapeHtml(label)} • ${summaries.length} ${summaries.length === 1 ? 'record' : 'records'}</p>
+                </div>
+                <div class="card__actions no-print">
+                  <form method="get" action="/dashboard/today" class="filters">
+                    <label>
+                      <span>Date</span>
+                      <input type="date" name="date" value="${escapeHtml(requestedDateParam)}" />
+                    </label>
+                    <button type="submit">Apply</button>
+                  </form>
+                  <form method="get" action="/dashboard/today">
+                    <input type="hidden" name="date" value="${dateParam}" />
+                    <input type="hidden" name="download" value="csv" />
+                    <button type="submit">Download CSV</button>
+                  </form>
+                  <button type="button" class="print-button" onclick="window.print()">Print</button>
+                </div>
+              </div>
+              <div class="card__body">
+                ${
+                  tableRows
+                    ? `<div class="table-scroll">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>User</th>
+                              <th>Email</th>
+                              <th>Started At</th>
+                              <th>Active Minutes</th>
+                              <th>Idle Minutes</th>
+                              <th>Breaks</th>
+                              <th>Break Minutes</th>
+                              <th>Lunches</th>
+                              <th>Lunch Minutes</th>
+                              <th>Presence Misses</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            ${tableRows}
+                          </tbody>
+                          ${totalsRow}
+                        </table>
+                      </div>`
+                    : '<div class="empty">No sessions recorded for this date.</div>'
+                }
+              </div>
+            </section>
+            <section class="card card--detail">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Breaks and Lunches</h2>
+                  <p class="card__subtitle">Sequence and duration for recorded pauses.</p>
+                </div>
+              </div>
+              <div class="card__body">
+                ${renderPauseTable(pauses)}
+              </div>
+            </section>
+          </div>
+        </main>
       </body>
     </html>
   `;
@@ -1445,6 +1475,7 @@ dashboardRouter.get('/weekly', async (req, res) => {
     .map((summary, index) => buildWeeklyRow(summary, index, startParam, requestBadges.get(summary.userId) ?? []))
     .join('\n');
   const totalsRow = renderTotalsRow(totals, 3);
+  const timezoneNote = renderTimezoneNote(windowStart, windowEnd);
 
   const html = `
     <!doctype html>
@@ -1454,52 +1485,73 @@ dashboardRouter.get('/weekly', async (req, res) => {
         <title>Weekly Attendance Summary</title>
         <style>${baseStyles}</style>
       </head>
-      <body>
+      <body class="dashboard dashboard--weekly">
         ${renderNav('weekly')}
-        ${renderTimezoneNote(windowStart, windowEnd)}
-        <h1>Weekly Summary</h1>
-        <div class="actions no-print">
-          <form method="get" action="/dashboard/weekly" class="filters">
-            <label>
-              <span>Week starting</span>
-              <input type="date" name="start" value="${startParam}" />
-            </label>
-            <button type="submit">Apply</button>
-          </form>
-          <form method="get" action="/dashboard/weekly">
-            <input type="hidden" name="start" value="${startParam}" />
-            <input type="hidden" name="download" value="csv" />
-            <button type="submit">Download CSV</button>
-          </form>
-          <button type="button" class="print-button" onclick="window.print()">Print</button>
-        </div>
-        <h2>${label}</h2>
-        ${
-          tableRows
-            ? `<div class="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>#</th>
-                      <th>User</th>
-                    <th>Email</th>
-                    <th>Active Minutes</th>
-                    <th>Idle Minutes</th>
-                    <th>Breaks</th>
-                    <th>Break Minutes</th>
-                    <th>Lunches</th>
-                    <th>Lunch Minutes</th>
-                    <th>Presence Misses</th>
-                  </tr>
-                </thead>
-                  <tbody>
-                    ${tableRows}
-                  </tbody>
-                  ${totalsRow}
-                </table>
-              </div>`
-            : '<div class="empty">No activity recorded for this range.</div>'
-        }
+        <main class="page-shell">
+          <header class="page-header">
+            <div class="page-header__content">
+              <p class="page-header__eyebrow">Attendance</p>
+              <h1 class="page-header__title">Weekly Summary</h1>
+              <p class="page-header__subtitle">Activity, pauses, and presence insights for the week of ${escapeHtml(label)}.</p>
+            </div>
+            <div class="page-header__meta">
+              ${timezoneNote}
+            </div>
+          </header>
+          <div class="cards-grid">
+            <section class="card card--table">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Team Overview</h2>
+                  <p class="card__subtitle">${summaries.length} ${summaries.length === 1 ? 'teammate' : 'teammates'} recorded during this range.</p>
+                </div>
+                <div class="card__actions no-print">
+                  <form method="get" action="/dashboard/weekly" class="filters">
+                    <label>
+                      <span>Week starting</span>
+                      <input type="date" name="start" value="${startParam}" />
+                    </label>
+                    <button type="submit">Apply</button>
+                  </form>
+                  <form method="get" action="/dashboard/weekly">
+                    <input type="hidden" name="start" value="${startParam}" />
+                    <input type="hidden" name="download" value="csv" />
+                    <button type="submit">Download CSV</button>
+                  </form>
+                  <button type="button" class="print-button" onclick="window.print()">Print</button>
+                </div>
+              </div>
+              <div class="card__body">
+                ${
+                  tableRows
+                    ? `<div class="table-scroll">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>#</th>
+                              <th>User</th>
+                              <th>Email</th>
+                              <th>Active Minutes</th>
+                              <th>Idle Minutes</th>
+                              <th>Breaks</th>
+                              <th>Break Minutes</th>
+                              <th>Lunches</th>
+                              <th>Lunch Minutes</th>
+                              <th>Presence Misses</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            ${tableRows}
+                          </tbody>
+                          ${totalsRow}
+                        </table>
+                      </div>`
+                    : '<div class="empty">No activity recorded for this range.</div>'
+                }
+              </div>
+            </section>
+          </div>
+        </main>
       </body>
     </html>
   `;
@@ -1557,6 +1609,8 @@ dashboardRouter.get('/monthly', async (req, res) => {
     .join('\n');
   const totalsRow = renderTotalsRow(totals, 3);
 
+  const timezoneNote = renderTimezoneNote(monthStart, monthEnd);
+
   const html = `
     <!doctype html>
     <html lang="en">
@@ -1565,51 +1619,73 @@ dashboardRouter.get('/monthly', async (req, res) => {
         <title>${label} Attendance Summary</title>
         <style>${baseStyles}</style>
       </head>
-      <body>
+      <body class="dashboard dashboard--monthly">
         ${renderNav('monthly')}
-        ${renderTimezoneNote(monthStart, monthEnd)}
-        <h1>${label}</h1>
-        <div class="actions no-print">
-          <form method="get" action="/dashboard/monthly" class="filters">
-            <label>
-              <span>Month</span>
-              <input type="month" name="month" value="${monthParam}" />
-            </label>
-            <button type="submit">Apply</button>
-          </form>
-          <form method="get" action="/dashboard/monthly">
-            <input type="hidden" name="month" value="${monthParam}" />
-            <input type="hidden" name="download" value="csv" />
-            <button type="submit">Download CSV</button>
-          </form>
-          <button type="button" class="print-button" onclick="window.print()">Print</button>
-        </div>
-        ${
-          tableRows
-            ? `<div class="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>#</th>
-                      <th>User</th>
-                      <th>Email</th>
-                      <th>Active Minutes</th>
-                      <th>Idle Minutes</th>
-                      <th>Breaks</th>
-                      <th>Break Minutes</th>
-                      <th>Lunches</th>
-                      <th>Lunch Minutes</th>
-                      <th>Presence Misses</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${tableRows}
-                  </tbody>
-                  ${totalsRow}
-                </table>
-              </div>`
-            : '<div class="empty">No activity recorded for this month.</div>'
-        }
+        <main class="page-shell">
+          <header class="page-header">
+            <div class="page-header__content">
+              <p class="page-header__eyebrow">Attendance</p>
+              <h1 class="page-header__title">Monthly Summary</h1>
+              <p class="page-header__subtitle">Comprehensive metrics for ${escapeHtml(label)}.</p>
+            </div>
+            <div class="page-header__meta">
+              ${timezoneNote}
+            </div>
+          </header>
+          <div class="cards-grid">
+            <section class="card card--table">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Team Overview</h2>
+                  <p class="card__subtitle">${summaries.length} ${summaries.length === 1 ? 'teammate' : 'teammates'} recorded this month.</p>
+                </div>
+                <div class="card__actions no-print">
+                  <form method="get" action="/dashboard/monthly" class="filters">
+                    <label>
+                      <span>Month</span>
+                      <input type="month" name="month" value="${monthParam}" />
+                    </label>
+                    <button type="submit">Apply</button>
+                  </form>
+                  <form method="get" action="/dashboard/monthly">
+                    <input type="hidden" name="month" value="${monthParam}" />
+                    <input type="hidden" name="download" value="csv" />
+                    <button type="submit">Download CSV</button>
+                  </form>
+                  <button type="button" class="print-button" onclick="window.print()">Print</button>
+                </div>
+              </div>
+              <div class="card__body">
+                ${
+                  tableRows
+                    ? `<div class="table-scroll">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>#</th>
+                              <th>User</th>
+                              <th>Email</th>
+                              <th>Active Minutes</th>
+                              <th>Idle Minutes</th>
+                              <th>Breaks</th>
+                              <th>Break Minutes</th>
+                              <th>Lunches</th>
+                              <th>Lunch Minutes</th>
+                              <th>Presence Misses</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            ${tableRows}
+                          </tbody>
+                          ${totalsRow}
+                        </table>
+                      </div>`
+                    : '<div class="empty">No activity recorded for this month.</div>'
+                }
+              </div>
+            </section>
+          </div>
+        </main>
       </body>
     </html>
   `;
@@ -1823,6 +1899,8 @@ dashboardRouter.get(
       .map((value) => `<option value="${value}"${value === normalizedView ? ' selected' : ''}>${escapeHtml(timesheetViewLabel(value))}</option>`)
       .join('');
 
+    const timezoneNote = renderTimezoneNote(range.start, range.end);
+
     const html = `
       <!doctype html>
       <html lang="en">
@@ -1831,54 +1909,89 @@ dashboardRouter.get(
           <title>Timesheet Review</title>
           <style>${baseStyles}</style>
         </head>
-        <body>
+        <body class="dashboard dashboard--timesheets">
           ${renderNav('timesheets')}
-          ${renderTimezoneNote(range.start, range.end)}
-          <h1>Timesheet Review</h1>
-          ${message ? `<div class="alert success no-print">${escapeHtml(message)}</div>` : ''}
-          ${error ? `<div class="alert error no-print">${escapeHtml(error)}</div>` : ''}
-          <section class="card no-print">
-            <h2>Filters</h2>
-            <form method="get" class="filters">
-              <label>
-                <span>View</span>
-                <select name="view">${viewOptions}</select>
-              </label>
-              <label>
-                <span>Date (weekly/pay period)</span>
-                <input type="date" name="date" value="${escapeHtml(dateValue)}" />
-              </label>
-              <label>
-                <span>Month (monthly)</span>
-                <input type="month" name="month" value="${escapeHtml(monthValue)}" />
-              </label>
-              <button type="submit">Apply</button>
-            </form>
-            <div class="meta">Viewing ${escapeHtml(currentViewLabel)} • ${escapeHtml(range.label)}</div>
-          </section>
-          ${aggregateCards}
-          ${employeeSections}
-          <section class="card">
-            <h2>Edit Requests</h2>
-            <div class="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Employee</th>
-                    <th>Status</th>
-                    <th>Reason</th>
-                    <th>Requested Hours</th>
-                    <th>Reviewed</th>
-                    <th>Update</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${requestRows}
-                </tbody>
-              </table>
+          <main class="page-shell">
+            <header class="page-header">
+              <div class="page-header__content">
+                <p class="page-header__eyebrow">Attendance</p>
+                <h1 class="page-header__title">Timesheet Review</h1>
+                <p class="page-header__subtitle">Inspect employee activity and edits for ${escapeHtml(range.label)}.</p>
+              </div>
+              <div class="page-header__meta">
+                ${timezoneNote}
+              </div>
+            </header>
+            ${message ? `<div class="alert success no-print">${escapeHtml(message)}</div>` : ''}
+            ${error ? `<div class="alert error no-print">${escapeHtml(error)}</div>` : ''}
+            <div class="cards-grid">
+              <section class="card card--filters no-print">
+                <div class="card__header">
+                  <h2 class="card__title">Filters</h2>
+                </div>
+                <div class="card__body">
+                  <form method="get" class="filters">
+                    <label>
+                      <span>View</span>
+                      <select name="view">${viewOptions}</select>
+                    </label>
+                    <label>
+                      <span>Date (weekly/pay period)</span>
+                      <input type="date" name="date" value="${escapeHtml(dateValue)}" />
+                    </label>
+                    <label>
+                      <span>Month (monthly)</span>
+                      <input type="month" name="month" value="${escapeHtml(monthValue)}" />
+                    </label>
+                    <button type="submit">Apply</button>
+                  </form>
+                  <div class="meta">Viewing ${escapeHtml(currentViewLabel)} • ${escapeHtml(range.label)}</div>
+                </div>
+              </section>
+              ${
+                aggregateCards
+                  ? `<section class="card card--summary">
+                      <div class="card__header">
+                        <h2 class="card__title">Team Summary</h2>
+                        <p class="card__subtitle">Aggregate metrics across all employees.</p>
+                      </div>
+                      <div class="card__body">
+                        ${aggregateCards}
+                      </div>
+                    </section>`
+                  : ''
+              }
             </div>
-          </section>
+            ${employeeSections}
+            <section class="card card--table">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Edit Requests</h2>
+                  <p class="card__subtitle">Submitted changes for this period.</p>
+                </div>
+              </div>
+              <div class="card__body">
+                <div class="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Employee</th>
+                        <th>Status</th>
+                        <th>Reason</th>
+                        <th>Requested Hours</th>
+                        <th>Reviewed</th>
+                        <th>Update</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${requestRows}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+          </main>
         </body>
       </html>
     `;
@@ -2095,6 +2208,8 @@ dashboardRouter.get('/requests', async (req, res) => {
   const rangeStartForNote = fromDate ?? (requests.length ? zonedStartOfDay(requests[requests.length - 1].startDate) : zonedStartOfDay(new Date()));
   const rangeEndForNote = toDate ?? (requests.length ? zonedEndOfDay(requests[0].endDate) : zonedEndOfDay(new Date()));
 
+  const timezoneNote = renderTimezoneNote(rangeStartForNote, rangeEndForNote);
+
   const html = `
     <!doctype html>
     <html lang="en">
@@ -2103,68 +2218,98 @@ dashboardRouter.get('/requests', async (req, res) => {
         <title>Time Requests</title>
         <style>${baseStyles}</style>
       </head>
-      <body>
+      <body class="dashboard dashboard--requests">
         ${renderNav('requests')}
-        ${renderTimezoneNote(rangeStartForNote, rangeEndForNote)}
-        <h1>Time Requests</h1>
-        <div class="meta">Showing ${requests.length} ${requests.length === 1 ? 'request' : 'requests'}.</div>
-        <div class="actions no-print">
-          <form method="get" action="/dashboard/requests" class="filters">
-            <label>
-              <span>Status</span>
-              <select name="status">
-                ${buildSelectOptions(statusOptions, statusValue)}
-              </select>
-            </label>
-            <label>
-              <span>Type</span>
-              <select name="type">
-                ${buildSelectOptions(typeOptions, typeValue)}
-              </select>
-            </label>
-            <label>
-              <span>From</span>
-              <input type="date" name="from" value="${fromValue}" />
-            </label>
-            <label>
-              <span>To</span>
-              <input type="date" name="to" value="${toValue}" />
-            </label>
-            <button type="submit">Apply</button>
-          </form>
-          <form method="get" action="/dashboard/requests">
-            <input type="hidden" name="status" value="${statusValue}" />
-            <input type="hidden" name="type" value="${typeValue}" />
-            <input type="hidden" name="from" value="${fromValue}" />
-            <input type="hidden" name="to" value="${toValue}" />
-            <input type="hidden" name="download" value="csv" />
-            <button type="submit">Download CSV</button>
-          </form>
-        </div>
-        ${
-          requests.length
-            ? `<div class="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Submitted</th>
-                      <th>Employee</th>
-                      <th>Type</th>
-                    <th>Status</th>
-                    <th>Date Range</th>
-                    <th>Hours</th>
-                    <th>Reason</th>
-                    <th>Approver</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                  <tbody>
-                    ${tableRows}
-                  </tbody>
-                </table>
-              </div>`
-            : '<div class="empty">No requests match the selected filters.</div>'
-        }
+        <main class="page-shell">
+          <header class="page-header">
+            <div class="page-header__content">
+              <p class="page-header__eyebrow">Attendance</p>
+              <h1 class="page-header__title">Time Requests</h1>
+              <p class="page-header__subtitle">Review submitted PTO, non-PTO, and make-up requests.</p>
+            </div>
+            <div class="page-header__meta">
+              <span>${requests.length} ${requests.length === 1 ? 'request' : 'requests'} listed</span>
+              ${timezoneNote}
+            </div>
+          </header>
+          <div class="cards-grid">
+            <section class="card card--filters no-print">
+              <div class="card__header">
+                <h2 class="card__title">Filters</h2>
+              </div>
+              <div class="card__body">
+                <form method="get" action="/dashboard/requests" class="filters">
+                  <label>
+                    <span>Status</span>
+                    <select name="status">
+                      ${buildSelectOptions(statusOptions, statusValue)}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Type</span>
+                    <select name="type">
+                      ${buildSelectOptions(typeOptions, typeValue)}
+                    </select>
+                  </label>
+                  <label>
+                    <span>From</span>
+                    <input type="date" name="from" value="${escapeHtml(fromValue)}" />
+                  </label>
+                  <label>
+                    <span>To</span>
+                    <input type="date" name="to" value="${escapeHtml(toValue)}" />
+                  </label>
+                  <div class="filters__actions">
+                    <button type="submit">Apply</button>
+                  </div>
+                </form>
+                <form method="get" action="/dashboard/requests" class="filters filters--inline">
+                  <input type="hidden" name="status" value="${escapeHtml(statusValue)}" />
+                  <input type="hidden" name="type" value="${escapeHtml(typeValue)}" />
+                  <input type="hidden" name="from" value="${escapeHtml(fromValue)}" />
+                  <input type="hidden" name="to" value="${escapeHtml(toValue)}" />
+                  <input type="hidden" name="download" value="csv" />
+                  <button type="submit">Download CSV</button>
+                  <button type="button" class="print-button" onclick="window.print()">Print</button>
+                </form>
+              </div>
+            </section>
+          </div>
+          <section class="card card--table">
+            <div class="card__header">
+              <div>
+                <h2 class="card__title">Request Log</h2>
+                <p class="card__subtitle">Sorted newest first.</p>
+              </div>
+            </div>
+            <div class="card__body">
+              ${
+                tableRows
+                  ? `<div class="table-scroll">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Submitted</th>
+                            <th>Employee</th>
+                            <th>Type</th>
+                            <th>Status</th>
+                            <th>Date Range</th>
+                            <th>Hours</th>
+                            <th>Reason</th>
+                            <th>Approver</th>
+                            <th>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          ${tableRows}
+                        </tbody>
+                      </table>
+                    </div>`
+                  : '<div class="empty">No requests match the selected filters.</div>'
+              }
+            </div>
+          </section>
+        </main>
       </body>
     </html>
   `;
@@ -2551,7 +2696,11 @@ dashboardRouter.get('/balances', async (req, res) => {
     ? zonedEndOfDay(updatedDates.reduce((max, current) => (current > max ? current : max)))
     : zonedEndOfDay(new Date());
 
-  let detailSection = '<section class="balances-detail"><div class="empty">No users available.</div></section>';
+  let detailSection = `
+      <section class="card balances-detail">
+        <div class="card__body"><div class="empty">No users available.</div></div>
+      </section>
+    `;
   if (selectedUser) {
     const overview = await getBalanceOverview(selectedUser.id, { limit: 200 });
     const { balance, ledger } = overview;
@@ -2640,19 +2789,25 @@ dashboardRouter.get('/balances', async (req, res) => {
     `;
 
     detailSection = `
-      <section class="balances-detail" id="balance-detail" data-user-id="${selectedUser.id}">
-        <h2>${escapeHtml(selectedUser.name)}</h2>
-        <div class="meta">${escapeHtml(selectedUser.email)}</div>
-        ${summaryCards}
-        <div class="actions no-print balances-detail-actions">
-          <button type="button" class="button" data-open-adjust>Adjust Balance</button>
-          <a href="/dashboard/requests?type=pto" class="button button-secondary">Review PTO Requests</a>
+      <section class="card balances-detail" id="balance-detail" data-user-id="${selectedUser.id}">
+        <div class="card__header">
+          <div>
+            <h2 class="card__title">${escapeHtml(selectedUser.name)}</h2>
+            <p class="card__subtitle">${escapeHtml(selectedUser.email)}</p>
+          </div>
+          <div class="card__actions no-print balances-detail-actions">
+            <button type="button" class="button" data-open-adjust>Adjust Balance</button>
+            <a href="/dashboard/requests?type=pto" class="button button-secondary">Review PTO Requests</a>
+          </div>
         </div>
-        ${dialogHtml}
-        <h3>PTO Ledger</h3>
-        <div class="meta">Entries are sorted newest first.</div>
-        ${ledgerTable}
-        ${ledgerEmpty}
+        <div class="card__body">
+          ${summaryCards}
+          ${dialogHtml}
+          <h3>PTO Ledger</h3>
+          <p class="meta">Entries are sorted newest first.</p>
+          ${ledgerTable}
+          ${ledgerEmpty}
+        </div>
       </section>
     `;
   }
@@ -2735,6 +2890,8 @@ dashboardRouter.get('/balances', async (req, res) => {
         </script>
   `;
 
+  const timezoneNote = renderTimezoneNote(balancesRangeStart, balancesRangeEnd);
+
   const html = `
     <!doctype html>
     <html lang="en">
@@ -2743,41 +2900,63 @@ dashboardRouter.get('/balances', async (req, res) => {
         <title>Balances</title>
         <style>${baseStyles}</style>
       </head>
-      <body>
+      <body class="dashboard dashboard--balances">
         ${renderNav('balances')}
-        ${renderTimezoneNote(balancesRangeStart, balancesRangeEnd)}
-        <h1>Balances</h1>
-        <div class="meta">Tracking ${rows.length} ${rows.length === 1 ? 'user' : 'users'}. Select a user to view ledger history and make adjustments.</div>
-        <div class="actions no-print">
-          <form method="get" action="/dashboard/balances">
-            <input type="hidden" name="download" value="csv" />
-            <button type="submit">Download CSV</button>
-          </form>
-          <a href="/dashboard/requests" class="button button-secondary">Review Requests</a>
-        </div>
-        ${
-          rows.length
-            ? `<div class="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>User</th>
-                      <th>Email</th>
-                      <th>PTO</th>
-                      <th>Non-PTO</th>
-                      <th>Make-Up</th>
-                      <th>Updated</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${tableRows}
-                  </tbody>
-                  ${totalsRow}
-                </table>
-              </div>`
-            : '<div class="empty">No balances recorded yet.</div>'
-        }
-        ${detailSection}
+        <main class="page-shell">
+          <header class="page-header">
+            <div class="page-header__content">
+              <p class="page-header__eyebrow">Attendance</p>
+              <h1 class="page-header__title">Balances</h1>
+              <p class="page-header__subtitle">Track remaining hours and review ledger adjustments.</p>
+            </div>
+            <div class="page-header__meta">
+              <span>${rows.length} ${rows.length === 1 ? 'user' : 'users'} monitored</span>
+              ${timezoneNote}
+            </div>
+          </header>
+          <div class="cards-grid">
+            <section class="card card--table">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Roster Balances</h2>
+                  <p class="card__subtitle">Select an employee to inspect ledger history.</p>
+                </div>
+                <div class="card__actions no-print">
+                  <form method="get" action="/dashboard/balances">
+                    <input type="hidden" name="download" value="csv" />
+                    <button type="submit">Download CSV</button>
+                  </form>
+                  <button type="button" class="print-button" onclick="window.print()">Print</button>
+                </div>
+              </div>
+              <div class="card__body">
+                ${
+                  rows.length
+                    ? `<div class="table-scroll">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>User</th>
+                              <th>Email</th>
+                              <th>PTO</th>
+                              <th>Non-PTO</th>
+                              <th>Make-Up</th>
+                              <th>Updated</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            ${tableRows}
+                          </tbody>
+                          ${totalsRow}
+                        </table>
+                      </div>`
+                    : '<div class="empty">No balances recorded yet.</div>'
+                }
+              </div>
+            </section>
+            ${detailSection}
+          </div>
+        </main>
         ${script}
       </body>
     </html>
@@ -3201,73 +3380,101 @@ const renderSettingsPage = ({ enabled, employees, logs, message, error }: Settin
         <title>Settings – Email Sign-In</title>
         <style>${baseStyles}</style>
       </head>
-      <body>
+      <body class="dashboard dashboard--settings">
         ${renderNav('settings')}
-        <h1>Email Sign-In Settings</h1>
-        ${renderAlert()}
-        <section class="card no-print">
-          <h2>Feature Flag</h2>
-          <p>Allow employees to request session access with email only. Current status: <strong>${
-            enabled ? 'Enabled' : 'Disabled'
-          }</strong>.</p>
-          <form method="post" action="/dashboard/settings/toggle-email-signin">
-            <input type="hidden" name="enabled" value="${enabled ? 'false' : 'true'}" />
-            <button type="submit">${enabled ? 'Disable' : 'Enable'} Email Sign-In</button>
-          </form>
-        </section>
-        <section class="card no-print">
-          <h2>Add Employee</h2>
-          <form method="post" action="/dashboard/settings/employees" class="stack-form">
-            <label>
-              <span>Name</span>
-              <input type="text" name="name" required />
-            </label>
-            <label>
-              <span>Email</span>
-              <input type="email" name="email" required />
-            </label>
-            <button type="submit">Add Employee</button>
-          </form>
-        </section>
-        <section class="card">
-          <h2>Employee Roster</h2>
-          <div class="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Status</th>
-                  <th>Created</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${employeeRows}
-              </tbody>
-            </table>
+        <main class="page-shell">
+          <header class="page-header">
+            <div class="page-header__content">
+              <p class="page-header__eyebrow">Administration</p>
+              <h1 class="page-header__title">Email Sign-In Settings</h1>
+              <p class="page-header__subtitle">Enable, manage, and audit employee access via email-only authentication.</p>
+            </div>
+          </header>
+          ${renderAlert()}
+          <div class="cards-grid">
+            <section class="card card--feature">
+              <div class="card__header">
+                <h2 class="card__title">Feature Flag</h2>
+                <p class="card__subtitle">Current status: <strong>${enabled ? 'Enabled' : 'Disabled'}</strong></p>
+              </div>
+              <div class="card__body">
+                <p>Allow employees to request session access with email only.</p>
+                <form method="post" action="/dashboard/settings/toggle-email-signin">
+                  <input type="hidden" name="enabled" value="${enabled ? 'false' : 'true'}" />
+                  <button type="submit">${enabled ? 'Disable' : 'Enable'} Email Sign-In</button>
+                </form>
+              </div>
+            </section>
+            <section class="card card--form no-print">
+              <div class="card__header">
+                <h2 class="card__title">Add Employee</h2>
+                <p class="card__subtitle">New entries default to active status.</p>
+              </div>
+              <div class="card__body">
+                <form method="post" action="/dashboard/settings/employees" class="stack-form">
+                  <label>
+                    <span>Name</span>
+                    <input type="text" name="name" required />
+                  </label>
+                  <label>
+                    <span>Email</span>
+                    <input type="email" name="email" required />
+                  </label>
+                  <button type="submit">Add Employee</button>
+                </form>
+              </div>
+            </section>
           </div>
-        </section>
-        <section class="card">
-          <h2>Sign-In Audit Trail</h2>
-          <div class="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Timestamp</th>
-                  <th>Email</th>
-                  <th>Result</th>
-                  <th>Reason</th>
-                  <th>IP</th>
-                  <th>Device</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${auditRows}
-              </tbody>
-            </table>
-          </div>
-        </section>
+          <section class="card card--table">
+            <div class="card__header">
+              <h2 class="card__title">Employee Roster</h2>
+              <p class="card__subtitle">Activate or deactivate email-only access.</p>
+            </div>
+            <div class="card__body">
+              <div class="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Email</th>
+                      <th>Status</th>
+                      <th>Created</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${employeeRows}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+          <section class="card card--table">
+            <div class="card__header">
+              <h2 class="card__title">Sign-In Audit Trail</h2>
+              <p class="card__subtitle">Last 50 attempts, newest first.</p>
+            </div>
+            <div class="card__body">
+              <div class="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Timestamp</th>
+                      <th>Email</th>
+                      <th>Result</th>
+                      <th>Reason</th>
+                      <th>IP</th>
+                      <th>Device</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${auditRows}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        </main>
       </body>
     </html>
   `;
