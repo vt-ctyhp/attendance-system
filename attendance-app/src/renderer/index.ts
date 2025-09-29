@@ -1,580 +1,219 @@
-import {
-  applyPauseUpdate,
-  buildPauseState,
-  computePauseDuration as computePauseDurationHelper,
-  formatPauseLabel,
-  type PauseAction,
-  type PauseApiPayload,
-  type PauseKind,
-  type PauseRecord,
-  type PauseSnapshot,
-  type PauseState
-} from './pauseLogic';
+const MINUTE = 60_000;
 
-const HEARTBEAT_INTERVAL_MS = 60_000;
-const IDLE_THRESHOLD_SECONDS = 10 * 60; // 10 minutes
-const PRESENCE_CONFIRMATION_WINDOW_MS = 60_000;
-const ACTIVITY_HISTORY_MINUTES = 10;
-
-interface ApiRequest<TResponse = unknown> {
-  path: string;
-  method?: 'POST' | 'GET' | 'PUT' | 'PATCH' | 'DELETE';
-  body?: unknown;
-  requiresAuth?: boolean;
-  description?: string;
-  tokenOverride?: string | null;
-  transform?: (data: unknown) => TResponse;
-}
-
-class ApiError extends Error {
-  status?: number;
-  body?: unknown;
-  requestId?: string;
-
-  constructor(message: string, status?: number, body?: unknown, requestId?: string) {
-    super(message);
-    this.name = 'ApiError';
-    this.status = status;
-    this.body = body;
-    this.requestId = requestId;
-  }
-}
-
-class ApiClient {
-  private token: string | null = null;
-
-  constructor(private baseUrl: string) {}
-
-  setToken(token: string | null) {
-    this.token = token;
-  }
-
-  setBaseUrl(url: string) {
-    this.baseUrl = url;
-  }
-
-  getToken() {
-    return this.token;
-  }
-
-  async request<TResponse = unknown>(request: ApiRequest<TResponse>): Promise<TResponse> {
-    const { path, method = 'POST', body, requiresAuth = false, tokenOverride, transform } = request;
-    const normalizedMethod = method.toUpperCase() as typeof method;
-    const isGetRequest = normalizedMethod === 'GET';
-
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    const requestId = (typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : `req_${Math.random().toString(36).slice(2, 10)}`);
-    headers['X-Debug-Req'] = requestId;
-
-    const authToken = requiresAuth ? tokenOverride ?? this.token : null;
-    if (requiresAuth && !authToken) {
-      throw new ApiError('No authentication token available');
-    }
-
-    if (requiresAuth && authToken) {
-      headers.Authorization = `Bearer ${authToken}`;
-    }
-
-    if (isGetRequest) {
-      headers['Cache-Control'] = 'no-cache';
-      headers.Pragma = 'no-cache';
-    }
-
-    for (const key of Object.keys(headers)) {
-      if (key.toLowerCase() === 'if-none-match') {
-        delete headers[key];
-      }
-    }
-
-    const stringify = (payload: unknown) => {
-      if (payload === undefined || payload === null) {
-        return '';
-      }
-      try {
-        const raw = typeof payload === 'string' ? payload : JSON.stringify(payload);
-        return raw.length > 1024 ? `${raw.slice(0, 1024)}…` : raw;
-      } catch (error) {
-        return `[unserializable:${(error as Error).message}]`;
-      }
-    };
-
-    const executeFetch = async (attempt: number): Promise<Response> => {
-      const url = new URL(path, this.baseUrl);
-      if (isGetRequest) {
-        url.searchParams.set('_t', Date.now().toString());
-      }
-
-      const fetchHeaders = { ...headers };
-      const requestInit: RequestInit = { method: normalizedMethod, headers: fetchHeaders };
-      if (isGetRequest) {
-        requestInit.cache = attempt === 0 ? 'no-store' : 'reload';
-      }
-      if (body !== undefined) {
-        requestInit.body = JSON.stringify(body);
-      }
-
-      console.info('[api]', {
-        phase: 'request',
-        attempt: attempt + 1,
-        method: normalizedMethod,
-        url: url.toString(),
-        requestId,
-        body: attempt === 0 ? stringify(body) : undefined
-      });
-
-      try {
-        return await fetch(url.toString(), requestInit);
-      } catch (error) {
-        console.error('[api]', {
-          phase: 'network_error',
-          method: normalizedMethod,
-          url: url.toString(),
-          requestId,
-          message: (error as Error).message
-        });
-        recordRequestTrace({ requestId, url: url.toString(), status: -1 });
-        throw new ApiError((error as Error).message, undefined, undefined, requestId);
-      }
-    };
-
-    let response = await executeFetch(0);
-
-    if (response.status === 304 && isGetRequest) {
-      console.warn('[api]', {
-        phase: 'not_modified_retry',
-        method: normalizedMethod,
-        path,
-        requestId
-      });
-      response = await executeFetch(1);
-    }
-
-    // Treat 204 No Content as a successful response with no body
-    if (response.status === 204) {
-      console.info('[api]', {
-        phase: 'response',
-        method: normalizedMethod,
-        path,
-        status: 204,
-        requestId
-      });
-      recordRequestTrace({ requestId, url: new URL(path, this.baseUrl).toString(), status: 204 });
-      return undefined;
-    }
-
-    if (!response.ok) {
-      let errorBody: unknown = null;
-      let snippet = '';
-      try {
-        const raw = await response.text();
-        snippet = stringify(raw);
-        const contentType = response.headers.get('content-type');
-        errorBody = contentType && contentType.includes('application/json') ? JSON.parse(raw) : raw;
-      } catch (error) {
-        errorBody = (error as Error).message;
-        snippet = stringify(errorBody);
-      }
-
-      console.warn('[api]', {
-        phase: 'response_error',
-        method: normalizedMethod,
-        path,
-        status: response.status,
-        requestId,
-        body: snippet
-      });
-
-      recordRequestTrace({ requestId, url: `${this.baseUrl}${path}`, status: response.status });
-
-      throw new ApiError(`Request failed with status ${response.status}`, response.status, errorBody, requestId);
-    }
-
-    const contentType = response.headers.get('content-type');
-    let data: unknown;
-    if (contentType && contentType.includes('application/json')) {
-      data = await response.json();
-    } else {
-      data = await response.text();
-    }
-
-    const serverDateHeader = response.headers.get('date');
-    processServerDateHeader(serverDateHeader, requestId);
-
-    console.info('[api]', {
-      phase: 'response',
-      method: normalizedMethod,
-      path,
-      status: response.status,
-      requestId
-    });
-
-    recordRequestTrace({ requestId, url: `${this.baseUrl}${path}`, status: response.status });
-
-    return transform ? transform(data) : (data as TResponse);
-  }
-}
-
-// Manual test tip: stub global fetch so the first call returns a 304 and the second a 200,
-// then assert request() resolves with the retry payload to cover the 304 retry path.
-
-type AuthTokens = {
-  tokenType: string;
-  scope: string;
-  accessToken: string;
-  accessTokenExpiresAt?: string;
-  refreshToken: string;
-  refreshTokenExpiresAt?: string;
-};
-
-type QueueEntry = QueueItem;
-
-type QueuedRequest = ApiRequest & {
-  attempt: number;
-  nextAttemptAt: number;
-  tokenOverride?: string | null;
-};
-
-type TimeRequest = {
-  id?: string;
-  type: string;
-  startDate: string;
-  endDate?: string | null;
-  hours: number;
-  reason: string;
-  status: 'pending' | 'approved' | 'denied' | string;
-  createdAt?: string;
-};
-
+type SessionStatus = 'clocked_out' | 'working' | 'break' | 'lunch';
+type RequestType = 'make_up' | 'time_off' | 'edit';
+type RequestStatus = 'pending' | 'approved' | 'denied';
 type TimesheetView = 'weekly' | 'pay_period' | 'monthly';
 
-type TimesheetTotals = {
-  activeMinutes: number;
+type ActivityCategory = 'session' | 'presence' | 'break' | 'lunch' | 'request';
+
+interface TimesheetDay {
+  date: string;
+  label: string;
   activeHours: number;
-  idleMinutes: number;
   idleHours: number;
   breaks: number;
   lunches: number;
   presenceMisses: number;
-};
+  note?: string;
+}
 
-type TimesheetEditRequest = {
+interface TimesheetTotals {
+  activeHours: number;
+  idleHours: number;
+  breaks: number;
+  lunches: number;
+  presenceMisses: number;
+}
+
+interface TimesheetPeriod {
+  label: string;
+  range: string;
+  days: TimesheetDay[];
+  totals: TimesheetTotals;
+}
+
+interface RequestItem {
   id: string;
-  status: 'pending' | 'approved' | 'denied' | string;
-  targetDate: string;
-  createdAt: string;
-  updatedAt: string;
+  type: RequestType;
+  status: RequestStatus;
+  startDate: string;
+  endDate?: string | null;
+  hours: number;
   reason: string;
-  requestedMinutes: number | null;
-  adminNote: string | null;
-  reviewedAt: string | null;
-};
+  submittedAt: string;
+}
 
-type TimesheetDay = {
+interface ScheduleTemplate {
+  label: string;
+  start: string;
+  end: string;
+}
+
+interface ScheduleEntry {
+  id: string;
+  date: string;
+  label: string;
+  start: string;
+  end: string;
+  location: string;
+  status: 'upcoming' | 'in_progress' | 'completed';
+  note?: string;
+}
+
+interface ActivityItem {
+  id: string;
+  timestamp: string;
+  message: string;
+  category: ActivityCategory;
+}
+
+interface TodaySnapshot {
   date: string;
   label: string;
   activeMinutes: number;
   idleMinutes: number;
-  breaks: number;
-  lunches: number;
+  breakMinutes: number;
+  lunchMinutes: number;
+  breaksCount: number;
+  lunchCount: number;
   presenceMisses: number;
-  editRequests: TimesheetEditRequest[];
-};
-
-type TimesheetSummary = {
-  view: TimesheetView;
-  label: string;
-  rangeStart: string;
-  rangeEnd: string;
-  rangeStartLabel: string;
-  rangeEndLabel: string;
-  totals: TimesheetTotals;
-  days: TimesheetDay[];
-  editRequests: TimesheetEditRequest[];
-};
-
-class OfflineQueue {
-  private queue: QueueEntry[] = [];
-  private processing = false;
-  private hydrated = false;
-
-  constructor(private readonly client: ApiClient) {}
-
-  async initialize() {
-    if (this.hydrated) {
-      return;
-    }
-    try {
-      const persisted = await window.attendance.loadOfflineQueue();
-      if (Array.isArray(persisted) && persisted.length > 0) {
-        this.queue.push(...persisted);
-      }
-    } catch (error) {
-      console.warn('Failed to hydrate offline queue', error);
-    }
-    this.hydrated = true;
-    if (this.queue.length > 0) {
-      void this.process();
-    }
-  }
-
-  hasPending() {
-    return this.queue.length > 0;
-  }
-
-  enqueue(request: ApiRequest) {
-    const { transform: _unused, ...rest } = request;
-    const entry: QueueEntry = {
-      ...rest,
-      tokenOverride: request.tokenOverride ?? this.client.getToken(),
-      attempt: 0,
-      nextAttemptAt: Date.now()
-    };
-    this.queue.push(entry);
-    void this.persist();
-    void this.process();
-  }
-
-  reset() {
-    this.queue.length = 0;
-    void this.persist();
-  }
-
-  private async persist() {
-    try {
-      if (this.queue.length > 0) {
-        await window.attendance.saveOfflineQueue(this.queue);
-      } else {
-        await window.attendance.clearOfflineQueue();
-      }
-    } catch (error) {
-      console.warn('Failed to persist offline queue', error);
-    }
-  }
-
-  async process() {
-    if (this.processing) {
-      return;
-    }
-    this.processing = true;
-
-    while (this.queue.length > 0) {
-      const request = this.queue[0];
-      const now = Date.now();
-      if (request.nextAttemptAt > now) {
-        const waitMs = request.nextAttemptAt - now;
-        await new Promise((resolve) => setTimeout(resolve, waitMs));
-      }
-
-      try {
-        if (request.requiresAuth) {
-          request.tokenOverride = this.client.getToken();
-        }
-        await this.client.request(request);
-        this.queue.shift();
-        console.info(`[OfflineQueue] ${request.description ?? request.path} sent successfully`);
-        await this.persist();
-      } catch (error) {
-        const retryable = shouldQueue(error);
-        if (!retryable) {
-          console.warn(
-            `[OfflineQueue] dropping non-retryable request ${request.description ?? request.path}`,
-            error
-          );
-          this.queue.shift();
-          await this.persist();
-          continue;
-        }
-        request.attempt += 1;
-        const delay = Math.min(60_000, Math.pow(2, request.attempt) * 1000);
-        request.nextAttemptAt = Date.now() + delay;
-        console.warn(`[OfflineQueue] ${request.description ?? request.path} retry in ${delay / 1000}s`, error);
-        await this.persist();
-      }
-    }
-
-    this.processing = false;
-  }
 }
 
-type SessionState = 'inactive' | 'active' | 'idle' | 'break' | 'lunch';
-
-type HealthStatus =
-  | { state: 'idle' }
-  | { state: 'testing'; baseUrl: string }
-  | { state: 'success'; baseUrl: string; version: string; time: Date }
-  | { state: 'error'; baseUrl: string; detail: string };
-
-interface PresencePrompt {
-  id: string;
-  expiresAt: string;
-  message?: string;
+interface SessionState {
+  status: SessionStatus;
+  startedAt: Date | null;
+  breakStartedAt: Date | null;
+  lunchStartedAt: Date | null;
+  lastPresenceCheck: Date | null;
+  nextPresenceCheck: Date;
+  lastClockedInAt: Date | null;
+  lastClockedOutAt: Date | null;
 }
 
-interface AppState {
-  bootstrap: BootstrapData | null;
-  email: string | null;
-  token: string | null;
-  refreshToken: string | null;
-  tokenExpiresAt: Date | null;
-  tokenScope: string | null;
-  sessionId: string | null;
-  sessionState: SessionState;
-  lastHeartbeatAt: Date | null;
-  currentPrompt: PresencePrompt | null;
-  settings: AppSettings | null;
-  systemStatus: SystemStatus | null;
-  requests: TimeRequest[];
-  user: { id: number; email: string; name?: string | null; role?: string | null } | null;
-  timesheet: TimesheetSummary | null;
-  timesheetView: TimesheetView;
-  timesheetReference: string | null;
-  timesheetTimezone: string | null;
-  timesheetLoading: boolean;
-  lastServerSkewMs: number | null;
-  lastServerDate: Date | null;
-  lastRequestTrace: { requestId: string; url: string; status: number } | null;
-  pauseHistory: PauseRecord[];
-  currentPause: PauseRecord | null;
-  healthStatus: HealthStatus;
-  lastHealthSuccess: { baseUrl: string; version: string; time: Date } | null;
+interface AttendanceState {
+  user: {
+    name: string;
+    role: string;
+    location: string;
+  };
+  session: SessionState;
+  today: TodaySnapshot;
+  timesheet: {
+    view: TimesheetView;
+    periods: Record<TimesheetView, TimesheetPeriod>;
+  };
+  requests: RequestItem[];
+  schedule: {
+    defaults: ScheduleTemplate[];
+    upcoming: ScheduleEntry[];
+  };
+  activity: ActivityItem[];
+  makeUpCap: {
+    used: number;
+    cap: number;
+  };
 }
 
-const state: AppState = {
-  bootstrap: null,
-  email: null,
-  token: null,
-  refreshToken: null,
-  tokenExpiresAt: null,
-  tokenScope: null,
-  sessionId: null,
-  sessionState: 'inactive',
-  lastHeartbeatAt: null,
-  currentPrompt: null,
-  settings: null,
-  systemStatus: null,
-  requests: [],
-  user: null,
-  timesheet: null,
-  timesheetView: 'pay_period',
-  timesheetReference: null,
-  timesheetTimezone: null,
-  timesheetLoading: false,
-  lastServerSkewMs: null,
-  lastServerDate: null,
-  lastRequestTrace: null,
-  pauseHistory: [],
-  currentPause: null,
-  healthStatus: { state: 'idle' },
-  lastHealthSuccess: null
+const addDays = (date: Date, amount: number) => {
+  const copy = new Date(date.getTime());
+  copy.setDate(copy.getDate() + amount);
+  return copy;
 };
 
-const activityBuckets = new Map<string, { keys: number; mouse: number }>();
+const addMinutes = (date: Date, minutes: number) => new Date(date.getTime() + minutes * MINUTE);
 
-let heartbeatTimer: number | null = null;
-let presenceTimeout: number | null = null;
-let pauseTimer: number | null = null;
-let apiClient: ApiClient;
-let offlineQueue: OfflineQueue;
-let refreshInFlight: Promise<void> | null = null;
-let pendingTimesheetEdit: { date: string; label: string } | null = null;
-
-const applyAuthTokens = (tokens: AuthTokens) => {
-  state.token = tokens.accessToken;
-  state.refreshToken = tokens.refreshToken;
-  state.tokenExpiresAt = tokens.accessTokenExpiresAt ? new Date(tokens.accessTokenExpiresAt) : null;
-  state.tokenScope = tokens.scope ?? null;
-  apiClient.setToken(tokens.accessToken);
-  updateDiagnostics();
+const startOfWeek = (date: Date) => {
+  const copy = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const day = copy.getDay();
+  const mondayIndex = (day + 6) % 7;
+  copy.setDate(copy.getDate() - mondayIndex);
+  return copy;
 };
 
-const getDeviceId = () => state.settings?.deviceId ?? state.bootstrap?.deviceId ?? '';
+const isoDate = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
-const statusEmailEl = document.getElementById('status-email');
-const statusSessionEl = document.getElementById('status-session');
-const statusHeartbeatEl = document.getElementById('status-heartbeat');
-const statusPauseEl = document.getElementById('status-pause');
-const statusForegroundEl = document.getElementById('status-foreground');
+const parseIsoDate = (value: string) => new Date(`${value}T00:00:00`);
 
-const loginModal = document.getElementById('login-modal') as HTMLDivElement | null;
-const loginForm = document.getElementById('login-form') as HTMLFormElement | null;
-const loginEmailInput = document.getElementById('login-email') as HTMLInputElement | null;
-const loginErrorEl = document.getElementById('login-error') as HTMLParagraphElement | null;
-const loginCancelBtn = document.getElementById('login-cancel') as HTMLButtonElement | null;
+const formatDayLabel = (date: Date) =>
+  new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric' }).format(date);
 
-const presenceModal = document.getElementById('presence-modal') as HTMLDivElement | null;
-const presenceMessageEl = document.getElementById('presence-message') as HTMLParagraphElement | null;
-const presenceConfirmBtn = document.getElementById('presence-confirm') as HTMLButtonElement | null;
-const presenceDismissBtn = document.getElementById('presence-dismiss') as HTMLButtonElement | null;
+const formatDateLong = (date: Date) =>
+  new Intl.DateTimeFormat(undefined, { month: 'long', day: 'numeric', year: 'numeric' }).format(date);
 
-const settingsModal = document.getElementById('settings-modal') as HTMLDivElement | null;
-const settingsForm = document.getElementById('settings-form') as HTMLFormElement | null;
-const settingsEmailInput = document.getElementById('settings-email') as HTMLInputElement | null;
-const settingsBaseUrlInput = document.getElementById('settings-base-url') as HTMLInputElement | null;
-const settingsErrorEl = document.getElementById('settings-error') as HTMLParagraphElement | null;
-const settingsSuccessEl = document.getElementById('settings-success') as HTMLParagraphElement | null;
-const settingsCancelBtn = document.getElementById('settings-cancel') as HTMLButtonElement | null;
-const settingsTestBtn = document.getElementById('settings-test') as HTMLButtonElement | null;
-const openSettingsBtn = document.getElementById('open-settings') as HTMLButtonElement | null;
-const openRequestsBtn = document.getElementById('open-requests') as HTMLButtonElement | null;
-const refreshRequestsBtn = document.getElementById('refresh-requests') as HTMLButtonElement | null;
-const requestsListEl = document.getElementById('requests-list') as HTMLUListElement | null;
-const requestsEmptyEl = document.getElementById('requests-empty') as HTMLParagraphElement | null;
+const formatMonthLabel = (date: Date) =>
+  new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(date);
 
-const diagnosticsPanel = document.getElementById('diagnostics') as HTMLDivElement | null;
-const diagnosticsContentEl = document.getElementById('diagnostics-content') as HTMLPreElement | null;
-const toastEl = document.getElementById('app-toast') as HTMLDivElement | null;
+const formatRelative = (date: Date | null) => {
+  if (!date) {
+    return '—';
+  }
+  const diffMs = Date.now() - date.getTime();
+  const diffMinutes = Math.round(diffMs / MINUTE);
+  if (diffMinutes < 1) {
+    return 'just now';
+  }
+  if (diffMinutes < 60) {
+    return `${diffMinutes} min ago`;
+  }
+  const diffHours = Math.round(diffMinutes / 60);
+  if (diffHours < 24) {
+    return `${diffHours} hr${diffHours === 1 ? '' : 's'} ago`;
+  }
+  return formatDateLong(date);
+};
 
-const requestModal = document.getElementById('request-modal') as HTMLDivElement | null;
-const requestForm = document.getElementById('request-form') as HTMLFormElement | null;
-const requestCancelBtn = document.getElementById('request-cancel') as HTMLButtonElement | null;
-const requestTypeInput = document.getElementById('request-type') as HTMLSelectElement | null;
-const requestStartDateInput = document.getElementById('request-start-date') as HTMLInputElement | null;
-const requestEndDateInput = document.getElementById('request-end-date') as HTMLInputElement | null;
-const requestHoursInput = document.getElementById('request-hours') as HTMLInputElement | null;
-const requestReasonInput = document.getElementById('request-reason') as HTMLTextAreaElement | null;
-const requestErrorEl = document.getElementById('request-error') as HTMLParagraphElement | null;
-const requestSuccessEl = document.getElementById('request-success') as HTMLParagraphElement | null;
-const openTimesheetBtn = document.getElementById('open-timesheet') as HTMLButtonElement | null;
-const timesheetModal = document.getElementById('timesheet-modal') as HTMLDivElement | null;
-const timesheetFilterForm = document.getElementById('timesheet-filter') as HTMLFormElement | null;
-const timesheetViewSelect = document.getElementById('timesheet-view') as HTMLSelectElement | null;
-const timesheetDateGroup = document.getElementById('timesheet-date-group') as HTMLLabelElement | null;
-const timesheetMonthGroup = document.getElementById('timesheet-month-group') as HTMLLabelElement | null;
-const timesheetDateInput = document.getElementById('timesheet-date') as HTMLInputElement | null;
-const timesheetMonthInput = document.getElementById('timesheet-month') as HTMLInputElement | null;
-const timesheetSummaryEl = document.getElementById('timesheet-summary') as HTMLDivElement | null;
-const timesheetTable = document.getElementById('timesheet-table') as HTMLTableElement | null;
-const timesheetTableBody = document.getElementById('timesheet-table-body') as HTMLTableSectionElement | null;
-const timesheetEmptyEl = document.getElementById('timesheet-empty') as HTMLParagraphElement | null;
-const timesheetLoadingEl = document.getElementById('timesheet-loading') as HTMLParagraphElement | null;
-const timesheetCloseBtn = document.getElementById('timesheet-close') as HTMLButtonElement | null;
-const timesheetRefreshBtn = document.getElementById('timesheet-refresh') as HTMLButtonElement | null;
-const timesheetRequestsSection = document.getElementById('timesheet-requests-section') as HTMLElement | null;
-const timesheetRequestsRefreshBtn = document.getElementById('timesheet-requests-refresh') as HTMLButtonElement | null;
-const timesheetRequestsList = document.getElementById('timesheet-requests-list') as HTMLUListElement | null;
-const timesheetRequestsEmpty = document.getElementById('timesheet-requests-empty') as HTMLParagraphElement | null;
-const timesheetEditModal = document.getElementById('timesheet-edit-modal') as HTMLDivElement | null;
-const timesheetEditForm = document.getElementById('timesheet-edit-form') as HTMLFormElement | null;
-const timesheetEditDateLabel = document.getElementById('timesheet-edit-date-label') as HTMLParagraphElement | null;
-const timesheetEditReasonInput = document.getElementById('timesheet-edit-reason') as HTMLTextAreaElement | null;
-const timesheetEditHoursInput = document.getElementById('timesheet-edit-hours') as HTMLInputElement | null;
-const timesheetEditErrorEl = document.getElementById('timesheet-edit-error') as HTMLParagraphElement | null;
-const timesheetEditSuccessEl = document.getElementById('timesheet-edit-success') as HTMLParagraphElement | null;
-const timesheetEditCancelBtn = document.getElementById('timesheet-edit-cancel') as HTMLButtonElement | null;
+const formatCountdown = (target: Date | null) => {
+  if (!target) {
+    return '—';
+  }
+  const diffMs = target.getTime() - Date.now();
+  if (diffMs <= 0) {
+    return 'due now';
+  }
+  const minutes = Math.floor(diffMs / MINUTE);
+  if (minutes >= 60) {
+    const hours = Math.floor(minutes / 60);
+    const remainder = minutes % 60;
+    if (remainder === 0) {
+      return `${hours} hr${hours === 1 ? '' : 's'}`;
+    }
+    return `${hours} hr ${remainder} min`;
+  }
+  return `${minutes} min`;
+};
 
-const buttons = document.querySelectorAll<HTMLButtonElement>('[data-action]');
+const formatDurationMinutes = (minutes: number) => {
+  if (minutes <= 0) {
+    return '0m';
+  }
+  const hours = Math.floor(minutes / 60);
+  const remainder = Math.round(minutes % 60);
+  if (hours === 0) {
+    return `${remainder}m`;
+  }
+  if (remainder === 0) {
+    return `${hours}h`;
+  }
+  return `${hours}h ${remainder}m`;
+};
 
-type PresenceUiMode = 'overlay' | 'popup' | 'both';
+const formatHours = (hours: number) => {
+  const rounded = Math.round(hours * 100) / 100;
+  return Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(2);
+};
 
-let presenceUiMode: PresenceUiMode = 'both';
-let activePromptId: string | null = null;
-let presenceAckInFlight = false;
-
-const isPopupModeEnabled = () => presenceUiMode === 'popup' || presenceUiMode === 'both';
-
-const minutesLabel = (minutes: number) => `${Math.max(0, minutes)} min`;
+const minutesBetween = (start: Date | null, end: Date = new Date()) => {
+  if (!start) {
+    return 0;
+  }
+  return Math.max(0, Math.round((end.getTime() - start.getTime()) / MINUTE));
+};
 
 const escapeHtml = (value: string) =>
   value
@@ -584,2189 +223,791 @@ const escapeHtml = (value: string) =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
-const renderHealthStatus = () => {
-  if (!settingsSuccessEl || !settingsErrorEl) {
-    return;
-  }
+const createDay = (
+  date: Date,
+  data: { active: number; idle: number; breaks: number; lunches: number; presence: number; note?: string }
+): TimesheetDay => ({
+  date: isoDate(date),
+  label: formatDayLabel(date),
+  activeHours: data.active,
+  idleHours: data.idle,
+  breaks: data.breaks,
+  lunches: data.lunches,
+  presenceMisses: data.presence,
+  note: data.note
+});
 
-  settingsSuccessEl.textContent = '';
-  settingsSuccessEl.innerHTML = '';
-  settingsErrorEl.textContent = '';
-  settingsErrorEl.innerHTML = '';
-
-  const status = state.healthStatus;
-
-  switch (status.state) {
-    case 'idle':
-      return;
-    case 'testing':
-      settingsSuccessEl.textContent = 'Testing connection…';
-      return;
-    case 'success': {
-      const formattedTime = new Intl.DateTimeFormat(undefined, {
-        dateStyle: 'short',
-        timeStyle: 'short'
-      }).format(status.time);
-      const html = `<span class="settings-status-badge settings-status-badge--success" aria-hidden="true">●</span><span> Connected • v${escapeHtml(
-        status.version
-      )} • ${escapeHtml(formattedTime)}</span>`;
-      settingsSuccessEl.innerHTML = html;
-      return;
-    }
-    case 'error': {
-      const html = `<span class="settings-status-badge settings-status-badge--error" aria-hidden="true">!</span><span> Unable to reach server.</span><span class="settings-status-detail">${escapeHtml(
-        status.detail
-      )}</span>`;
-      settingsErrorEl.innerHTML = html;
-      return;
-    }
-    default:
-      return;
-  }
-};
-
-const parsePausePayload = (value: unknown): PauseApiPayload | undefined => {
-  if (!value || typeof value !== 'object') {
-    return undefined;
-  }
-  const raw = value as Record<string, unknown>;
-  const kind = raw.kind === 'break' || raw.kind === 'lunch' ? (raw.kind as PauseKind) : undefined;
-  const action = raw.action === 'start' || raw.action === 'end' ? (raw.action as PauseAction) : undefined;
-  if (!kind || !action) {
-    return undefined;
-  }
-  const sequenceValue = Number(raw.sequence);
-  if (!Number.isFinite(sequenceValue)) {
-    return undefined;
-  }
-  const startedAt = typeof raw.startedAt === 'string' ? raw.startedAt : undefined;
-  if (!startedAt) {
-    return undefined;
-  }
-  const endedAt = typeof raw.endedAt === 'string' ? raw.endedAt : raw.endedAt === null ? null : null;
-  const durationMinutes = typeof raw.durationMinutes === 'number' ? raw.durationMinutes : null;
-  return {
-    kind,
-    action,
-    sequence: Math.max(1, Math.floor(sequenceValue)),
-    startedAt,
-    endedAt,
-    durationMinutes
-  };
-};
-
-const parsePauseSnapshot = (value: unknown): PauseSnapshot | undefined => {
-  if (!value || typeof value !== 'object') {
-    return undefined;
-  }
-  const raw = value as Record<string, unknown>;
-  const kind = raw.kind === 'break' || raw.kind === 'lunch' ? (raw.kind as PauseKind) : undefined;
-  if (!kind) {
-    return undefined;
-  }
-  const sequenceValue = Number(raw.sequence);
-  if (!Number.isFinite(sequenceValue)) {
-    return undefined;
-  }
-  const startedAt = typeof raw.startedAt === 'string' ? raw.startedAt : undefined;
-  if (!startedAt) {
-    return undefined;
-  }
-  const endedAt = typeof raw.endedAt === 'string' ? raw.endedAt : raw.endedAt === null ? null : null;
-  const durationMinutes = typeof raw.durationMinutes === 'number' ? raw.durationMinutes : null;
-  return {
-    kind,
-    sequence: Math.max(1, Math.floor(sequenceValue)),
-    startedAt,
-    endedAt,
-    durationMinutes
-  };
-};
-
-const parsePauseStateResponse = (value: unknown): { current: PauseSnapshot | null; history: PauseSnapshot[] } | null => {
-  if (!value || typeof value !== 'object') {
-    return null;
-  }
-  const raw = value as Record<string, unknown>;
-  const currentRaw = raw.current ?? null;
-  const current = currentRaw ? parsePauseSnapshot(currentRaw) ?? null : null;
-  const historyRaw = Array.isArray(raw.history) ? raw.history : [];
-  const history = historyRaw
-    .map((entry) => parsePauseSnapshot(entry))
-    .filter((entry): entry is PauseSnapshot => Boolean(entry));
-  return { current, history };
-};
-
-const updatePauseDisplay = () => {
-  if (!statusPauseEl) {
-    return;
-  }
-  if (state.currentPause) {
-    const minutes = computePauseDurationHelper(state.currentPause, new Date());
-    statusPauseEl.textContent = `${formatPauseLabel(state.currentPause)} · ${minutesLabel(minutes)}`;
-  } else {
-    statusPauseEl.textContent = 'No active pause';
-  }
-};
-
-const startPauseTimer = () => {
-  if (pauseTimer) {
-    return;
-  }
-  pauseTimer = window.setInterval(() => {
-    updatePauseDisplay();
-  }, 1_000);
-  updatePauseDisplay();
-};
-
-const stopPauseTimer = () => {
-  if (pauseTimer) {
-    clearInterval(pauseTimer);
-    pauseTimer = null;
-  }
-  updatePauseDisplay();
-};
-
-const applyPauseStateFromUpdate = (pauseState: PauseState) => {
-  state.currentPause = pauseState.current;
-  state.pauseHistory = pauseState.history;
-  if (state.currentPause) {
-    state.sessionState = state.currentPause.kind;
-    startPauseTimer();
-  } else {
-    stopPauseTimer();
-    if (state.sessionId) {
-      state.sessionState = 'active';
-    }
-  }
-  updateStatus();
-};
-
-const minuteKey = (date: Date) => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  const hour = String(date.getHours()).padStart(2, '0');
-  const minute = String(date.getMinutes()).padStart(2, '0');
-  return `${year}-${month}-${day}T${hour}:${minute}`;
-};
-
-const pruneActivityBuckets = () => {
-  const cutoff = new Date();
-  cutoff.setMinutes(cutoff.getMinutes() - ACTIVITY_HISTORY_MINUTES);
-  const cutoffKey = minuteKey(cutoff);
-
-  for (const key of activityBuckets.keys()) {
-    if (key < cutoffKey) {
-      activityBuckets.delete(key);
-    }
-  }
-};
-
-const getActivitySnapshot = () => {
-  pruneActivityBuckets();
-  const buckets = Array.from(activityBuckets.entries())
-    .map(([key, counts]) => ({
-      minute: key,
-      keys: counts.keys,
-      mouse: counts.mouse
-    }))
-    .sort((a, b) => a.minute.localeCompare(b.minute));
-
-  const aggregated = buckets.reduce(
-    (acc, bucket) => {
-      acc.keys += bucket.keys;
-      acc.mouse += bucket.mouse;
-      return acc;
+const recomputeTotals = (days: TimesheetDay[]): TimesheetTotals =>
+  days.reduce(
+    (totals, day) => {
+      totals.activeHours += day.activeHours;
+      totals.idleHours += day.idleHours;
+      totals.breaks += day.breaks;
+      totals.lunches += day.lunches;
+      totals.presenceMisses += day.presenceMisses;
+      return totals;
     },
-    { keys: 0, mouse: 0 }
+    { activeHours: 0, idleHours: 0, breaks: 0, lunches: 0, presenceMisses: 0 }
   );
 
-  return { buckets, aggregated };
+const greeting = (date: Date) => {
+  const hour = date.getHours();
+  if (hour < 12) {
+    return 'Good morning';
+  }
+  if (hour < 17) {
+    return 'Good afternoon';
+  }
+  return 'Good evening';
 };
 
-const registerActivity = (kind: 'keyboard' | 'mouse') => {
-  const key = minuteKey(new Date());
-  const bucket = activityBuckets.get(key) ?? { keys: 0, mouse: 0 };
-  if (kind === 'keyboard') {
-    bucket.keys += 1;
+const requestLabel = (type: RequestType) => {
+  switch (type) {
+    case 'make_up':
+      return 'Make-up hours';
+    case 'time_off':
+      return 'Time off';
+    case 'edit':
+      return 'Timesheet edit';
+    default:
+      return type.replace('_', ' ');
+  }
+};
+
+const requestStatusClass = (status: RequestStatus) => {
+  if (status === 'pending') {
+    return 'pill pill--pending';
+  }
+  if (status === 'approved') {
+    return 'pill pill--approved';
+  }
+  return 'pill pill--denied';
+};
+
+const categoryIcon = (category: ActivityCategory) => {
+  switch (category) {
+    case 'session':
+      return '🕑';
+    case 'presence':
+      return '👋';
+    case 'break':
+      return '☕';
+    case 'lunch':
+      return '🍱';
+    case 'request':
+      return '📝';
+    default:
+      return '•';
+  }
+};
+
+const logAction = (action: string) => {
+  try {
+    window.attendance?.logAction(action);
+  } catch (error) {
+    console.warn('logAction failed', error);
+  }
+};
+
+const showToast = (message: string, variant: 'info' | 'success' | 'warning' | 'danger' = 'success') => {
+  const toast = document.getElementById('toast');
+  if (!toast) {
+    return;
+  }
+  toast.textContent = message;
+  if (variant === 'info') {
+    toast.removeAttribute('data-variant');
   } else {
-    bucket.mouse += 1;
+    toast.dataset.variant = variant;
   }
-  activityBuckets.set(key, bucket);
+  toast.setAttribute('data-visible', 'true');
+  window.setTimeout(() => toast.removeAttribute('data-visible'), 2_500);
 };
 
-const initActivityTracking = () => {
-  window.addEventListener('keydown', () => registerActivity('keyboard'));
-  window.addEventListener('keypress', () => registerActivity('keyboard'));
-  window.addEventListener('mousemove', () => registerActivity('mouse'));
-  window.addEventListener('mousedown', () => registerActivity('mouse'));
-  window.addEventListener('wheel', () => registerActivity('mouse'));
+const now = new Date();
+const weekStart = startOfWeek(now);
+
+const weeklyTemplate = [
+  { active: 7.8, idle: 0.4, breaks: 2, lunches: 1, presence: 0, note: 'Floor reset complete.' },
+  { active: 7.6, idle: 0.5, breaks: 2, lunches: 1, presence: 0 },
+  { active: 7.9, idle: 0.6, breaks: 3, lunches: 1, presence: 1, note: 'Missed presence check at 2:10 pm.' },
+  { active: 8.2, idle: 0.3, breaks: 2, lunches: 1, presence: 0 },
+  { active: 7.4, idle: 0.5, breaks: 2, lunches: 1, presence: 0 },
+  { active: 5.0, idle: 0.7, breaks: 2, lunches: 1, presence: 0, note: 'Partial shift for inventory count.' },
+  { active: 0, idle: 0, breaks: 0, lunches: 0, presence: 0, note: 'Scheduled day off.' }
+] as const;
+
+const weeklyDays = weeklyTemplate.map((data, index) => createDay(addDays(weekStart, index), data));
+
+const previousWeekTemplate = [
+  { active: 7.5, idle: 0.6, breaks: 2, lunches: 1, presence: 0 },
+  { active: 7.9, idle: 0.4, breaks: 2, lunches: 1, presence: 0 },
+  { active: 8.1, idle: 0.5, breaks: 3, lunches: 1, presence: 0 },
+  { active: 7.7, idle: 0.6, breaks: 2, lunches: 1, presence: 0 },
+  { active: 7.3, idle: 0.6, breaks: 2, lunches: 1, presence: 0 },
+  { active: 4.5, idle: 0.5, breaks: 1, lunches: 1, presence: 0 },
+  { active: 0, idle: 0, breaks: 0, lunches: 0, presence: 0 }
+] as const;
+
+const previousWeekStart = addDays(weekStart, -7);
+const previousWeekDays = previousWeekTemplate.map((data, index) => createDay(addDays(previousWeekStart, index), data));
+
+const earlyWeekTemplate = [
+  { active: 7.2, idle: 0.5, breaks: 2, lunches: 1, presence: 0 },
+  { active: 7.8, idle: 0.4, breaks: 2, lunches: 1, presence: 0 },
+  { active: 7.6, idle: 0.5, breaks: 2, lunches: 1, presence: 0 },
+  { active: 8.0, idle: 0.4, breaks: 2, lunches: 1, presence: 0 },
+  { active: 7.1, idle: 0.6, breaks: 2, lunches: 1, presence: 0 },
+  { active: 0, idle: 0, breaks: 0, lunches: 0, presence: 0 },
+  { active: 0, idle: 0, breaks: 0, lunches: 0, presence: 0 }
+] as const;
+
+const earlyWeekStart = addDays(previousWeekStart, -7);
+const earlyWeekDays = earlyWeekTemplate.map((data, index) => createDay(addDays(earlyWeekStart, index), data));
+
+const payPeriodDays = [...previousWeekDays, ...weeklyDays];
+const monthlyDays = [...earlyWeekDays, ...previousWeekDays, ...weeklyDays];
+
+const weeklyPeriod: TimesheetPeriod = {
+  label: `${formatDayLabel(parseIsoDate(weeklyDays[0].date))} – ${formatDayLabel(
+    parseIsoDate(weeklyDays[weeklyDays.length - 1].date)
+  )}`,
+  range: `${formatDateLong(parseIsoDate(weeklyDays[0].date))} – ${formatDateLong(
+    parseIsoDate(weeklyDays[weeklyDays.length - 1].date)
+  )}`,
+  days: weeklyDays,
+  totals: recomputeTotals(weeklyDays)
 };
 
-const updateStatus = () => {
-  if (statusEmailEl) {
-    statusEmailEl.textContent = state.email ?? 'Not logged in';
-  }
+const payPeriod: TimesheetPeriod = {
+  label: `Pay Period ${formatDateLong(parseIsoDate(payPeriodDays[0].date))} – ${formatDateLong(
+    parseIsoDate(payPeriodDays[payPeriodDays.length - 1].date)
+  )}`,
+  range: `${formatDayLabel(parseIsoDate(payPeriodDays[0].date))} – ${formatDayLabel(
+    parseIsoDate(payPeriodDays[payPeriodDays.length - 1].date)
+  )}`,
+  days: payPeriodDays,
+  totals: recomputeTotals(payPeriodDays)
+};
 
-  if (statusSessionEl) {
-    const parts: string[] = [];
-    if (!state.sessionId) {
-      parts.push('No active session');
-    } else {
-      parts.push('Active session');
-      if (state.currentPause) {
-        const minutes = computePauseDurationHelper(state.currentPause, new Date());
-        parts.push(`(${formatPauseLabel(state.currentPause)} · ${minutesLabel(minutes)})`);
-      } else {
-        const idleFromSystem = state.systemStatus
-          ? state.systemStatus.idleSeconds >= IDLE_THRESHOLD_SECONDS
-          : state.sessionState === 'idle';
-        if (idleFromSystem) {
-          parts.push('(Idle)');
-        }
+const monthStart = parseIsoDate(monthlyDays[0].date);
+const monthEnd = parseIsoDate(monthlyDays[monthlyDays.length - 1].date);
+
+const monthlyPeriod: TimesheetPeriod = {
+  label: `${formatMonthLabel(monthStart)} • ${formatDayLabel(monthStart)} – ${formatDayLabel(monthEnd)}`,
+  range: `${formatDateLong(monthStart)} – ${formatDateLong(monthEnd)}`,
+  days: monthlyDays,
+  totals: recomputeTotals(monthlyDays)
+};
+
+const todayIso = isoDate(now);
+const todayEntry = weeklyDays.find((day) => day.date === todayIso) ?? weeklyDays[0];
+
+const todaySnapshot: TodaySnapshot = {
+  date: todayEntry.date,
+  label: todayEntry.label,
+  activeMinutes: Math.round(todayEntry.activeHours * 60),
+  idleMinutes: Math.round(todayEntry.idleHours * 60),
+  breakMinutes: todayEntry.breaks * 10,
+  lunchMinutes: todayEntry.lunches > 0 ? todayEntry.lunches * 45 : 0,
+  breaksCount: todayEntry.breaks,
+  lunchCount: todayEntry.lunches,
+  presenceMisses: todayEntry.presenceMisses
+};
+
+const state: AttendanceState = {
+  user: {
+    name: 'Chloe Sanchez',
+    role: 'Retail Associate',
+    location: 'San Francisco Retail Floor'
+  },
+  session: {
+    status: 'clocked_out',
+    startedAt: null,
+    breakStartedAt: null,
+    lunchStartedAt: null,
+    lastPresenceCheck: null,
+    nextPresenceCheck: addMinutes(now, 45),
+    lastClockedInAt: null,
+    lastClockedOutAt: addMinutes(now, -30)
+  },
+  today: todaySnapshot,
+  timesheet: {
+    view: 'weekly',
+    periods: {
+      weekly: weeklyPeriod,
+      pay_period: payPeriod,
+      monthly: monthlyPeriod
+    }
+  },
+  requests: [
+    {
+      id: 'req-pto-001',
+      type: 'time_off',
+      status: 'approved',
+      startDate: addDays(now, -3).toISOString(),
+      endDate: addDays(now, -2).toISOString(),
+      hours: 16,
+      reason: 'Family visit in Sacramento.',
+      submittedAt: addDays(now, -12).toISOString()
+    },
+    {
+      id: 'req-make-up-002',
+      type: 'make_up',
+      status: 'pending',
+      startDate: addDays(now, 2).toISOString(),
+      endDate: addDays(now, 2).toISOString(),
+      hours: 3,
+      reason: 'Cover for inventory audit.',
+      submittedAt: addDays(now, -1).toISOString()
+    },
+    {
+      id: 'req-edit-003',
+      type: 'edit',
+      status: 'denied',
+      startDate: addDays(now, -7).toISOString(),
+      endDate: addDays(now, -7).toISOString(),
+      hours: 0,
+      reason: 'Adjustment already applied by manager.',
+      submittedAt: addDays(now, -5).toISOString()
+    }
+  ],
+  schedule: {
+    defaults: [
+      { label: 'Mon – Fri', start: '09:00', end: '17:30' },
+      { label: 'Sat', start: '10:00', end: '18:00' }
+    ],
+    upcoming: [
+      {
+        id: 'shift-today',
+        date: todayIso,
+        label: 'Today',
+        start: '09:00',
+        end: '17:30',
+        location: 'Retail Floor',
+        status: 'in_progress',
+        note: 'Coverage with Marcus during lunch rush.'
+      },
+      {
+        id: 'shift-tomorrow',
+        date: isoDate(addDays(now, 1)),
+        label: 'Tomorrow',
+        start: '11:00',
+        end: '19:30',
+        location: 'Outlet – Union Square',
+        status: 'upcoming',
+        note: 'Swap approved for evening coverage.'
+      },
+      {
+        id: 'shift-weekend',
+        date: isoDate(addDays(now, 3)),
+        label: formatDayLabel(addDays(now, 3)),
+        start: '10:00',
+        end: '16:00',
+        location: 'Pop-up Kiosk',
+        status: 'upcoming'
+      },
+      {
+        id: 'shift-prev',
+        date: isoDate(addDays(now, -1)),
+        label: 'Yesterday',
+        start: '09:30',
+        end: '17:00',
+        location: 'Retail Floor',
+        status: 'completed'
       }
+    ]
+  },
+  activity: [
+    {
+      id: 'activity-1',
+      timestamp: addMinutes(now, -12).toISOString(),
+      message: 'Presence check confirmed from desktop app.',
+      category: 'presence'
+    },
+    {
+      id: 'activity-2',
+      timestamp: addMinutes(now, -38).toISOString(),
+      message: 'Lunch ended – 42 minutes.',
+      category: 'lunch'
+    },
+    {
+      id: 'activity-3',
+      timestamp: addMinutes(now, -96).toISOString(),
+      message: 'Break recorded – 10 minutes.',
+      category: 'break'
+    },
+    {
+      id: 'activity-4',
+      timestamp: addMinutes(now, -130).toISOString(),
+      message: 'Clocked in from store kiosk.',
+      category: 'session'
+    },
+    {
+      id: 'activity-5',
+      timestamp: addMinutes(now, -280).toISOString(),
+      message: 'Approved time-off request for Oct 3 – Oct 4.',
+      category: 'request'
     }
-    statusSessionEl.textContent = parts.join(' ');
+  ],
+  makeUpCap: {
+    used: 6,
+    cap: 20
   }
-
-  if (statusHeartbeatEl) {
-    statusHeartbeatEl.textContent = state.lastHeartbeatAt
-      ? state.lastHeartbeatAt.toLocaleTimeString()
-      : 'Never';
-  }
-
-  if (statusForegroundEl) {
-    if (state.systemStatus?.foregroundApp?.title) {
-      const owner = state.systemStatus.foregroundApp.owner;
-      statusForegroundEl.textContent = owner
-        ? `${state.systemStatus.foregroundApp.title} (${owner})`
-        : state.systemStatus.foregroundApp.title;
-    } else {
-      statusForegroundEl.textContent = 'Unknown';
-    }
-  }
-
-  updateControls();
-  updateDiagnostics();
-  updatePauseDisplay();
 };
 
-const updateControls = () => {
-  buttons.forEach((button) => {
-    const action = button.dataset.action;
-    if (!action) {
-      return;
-    }
+const dom = {
+  heroTitle: document.getElementById('hero-title')!,
+  heroStatus: document.getElementById('hero-status')!,
+  heroDuration: document.getElementById('hero-duration')!,
+  heroPresence: document.getElementById('hero-presence')!,
+  clockToggle: document.getElementById('clock-toggle') as HTMLButtonElement,
+  breakToggle: document.getElementById('break-toggle') as HTMLButtonElement,
+  lunchToggle: document.getElementById('lunch-toggle') as HTMLButtonElement,
+  presenceButton: document.getElementById('presence-button') as HTMLButtonElement,
+  downloadButton: document.getElementById('download-report') as HTMLButtonElement,
+  snapshotLabel: document.getElementById('snapshot-label')!,
+  statsList: document.getElementById('stats-list')!,
+  timesheetLabel: document.getElementById('timesheet-label')!,
+  timesheetBody: document.getElementById('timesheet-body')!,
+  timesheetView: document.getElementById('timesheet-view') as HTMLSelectElement,
+  requestList: document.getElementById('request-list')!,
+  requestForm: document.getElementById('request-form') as HTMLFormElement,
+  requestType: document.getElementById('request-type') as HTMLSelectElement,
+  requestHours: document.getElementById('request-hours') as HTMLInputElement,
+  requestReason: document.getElementById('request-reason') as HTMLTextAreaElement,
+  requestHint: document.getElementById('request-hint')!,
+  scheduleList: document.getElementById('schedule-list')!,
+  activityList: document.getElementById('activity-list')!,
+  makeupProgress: document.getElementById('makeup-progress')!
+};
 
-    if (action === 'log-in') {
-      button.disabled = false;
-      return;
-    }
+dom.timesheetView.value = state.timesheet.view;
 
-    if (action === 'log-out') {
-      button.disabled = !state.token;
-      return;
+const updateTimesheetFromToday = () => {
+  const hours = state.today.activeMinutes / 60;
+  const idleHours = state.today.idleMinutes / 60;
+  (Object.values(state.timesheet.periods) as TimesheetPeriod[]).forEach((period) => {
+    const day = period.days.find((entry) => entry.date === state.today.date);
+    if (day) {
+      day.activeHours = Math.round(hours * 100) / 100;
+      day.idleHours = Math.round(idleHours * 100) / 100;
+      day.breaks = state.today.breaksCount;
+      day.lunches = state.today.lunchCount;
+      day.presenceMisses = state.today.presenceMisses;
+      period.totals = recomputeTotals(period.days);
     }
-
-    button.disabled = !state.sessionId;
   });
 };
 
-let toastTimer: number | null = null;
-const MAX_CLOCK_SKEW_WARNING_MS = 5 * 60 * 1000;
+const renderHero = () => {
+  dom.heroTitle.textContent = `${greeting(new Date())}, ${state.user.name}`;
+  dom.heroStatus.textContent =
+    state.session.status === 'working'
+      ? 'Working'
+      : state.session.status === 'break'
+      ? 'On Break'
+      : state.session.status === 'lunch'
+      ? 'At Lunch'
+      : 'Clocked Out';
 
-const showToast = (message: string, variant: 'info' | 'success' | 'error' = 'info', code?: string, hint?: string) => {
-  if (!toastEl) {
-    return;
-  }
-  const parts = [message];
-  if (hint) {
-    parts.push(`Hint: ${hint}`);
-  }
-  const prefix = code ? `[${code}] ` : '';
-  toastEl.textContent = `${prefix}${parts.join(' – ')}`;
-  toastEl.dataset.variant = variant;
-  toastEl.dataset.visible = 'true';
-
-  if (toastTimer) {
-    window.clearTimeout(toastTimer);
-  }
-  toastTimer = window.setTimeout(() => {
-    if (toastEl) {
-      toastEl.dataset.visible = 'false';
+  const duration = (() => {
+    switch (state.session.status) {
+      case 'working':
+        return `Working for ${formatDurationMinutes(minutesBetween(state.session.startedAt))}`;
+      case 'break':
+        return `On break for ${formatDurationMinutes(minutesBetween(state.session.breakStartedAt))}`;
+      case 'lunch':
+        return `On lunch for ${formatDurationMinutes(minutesBetween(state.session.lunchStartedAt))}`;
+      default:
+        return state.session.lastClockedOutAt
+          ? `Last clock out ${formatRelative(state.session.lastClockedOutAt)}`
+          : 'No session yet';
     }
-  }, 4000);
+  })();
+
+  dom.heroDuration.textContent = duration;
+  dom.heroPresence.textContent = `Presence check in ${formatCountdown(
+    state.session.status === 'clocked_out' ? null : state.session.nextPresenceCheck
+  )}`;
 };
 
-const resolvePresencePrompt = (response: unknown): PresencePrompt | null => {
-  if (!response || typeof response !== 'object') {
-    return null;
-  }
-  const payload = response as Record<string, unknown>;
-  const candidate = payload.presencePrompt ?? payload.prompt;
-  if (!candidate || typeof candidate !== 'object') {
-    return null;
-  }
-  const prompt = candidate as PresencePrompt;
-  if (typeof prompt.id !== 'string' || prompt.id.trim().length === 0) {
-    return null;
-  }
-  if (typeof prompt.expiresAt !== 'string' || prompt.expiresAt.trim().length === 0) {
-    return null;
-  }
-  return prompt;
-};
+const renderSnapshot = () => {
+  dom.snapshotLabel.textContent = `${state.today.label} • ${state.user.location}`;
+  dom.makeupProgress.textContent = `${state.makeUpCap.used} / ${state.makeUpCap.cap} make-up hours used`;
+  dom.makeupProgress.title = `${Math.max(state.makeUpCap.cap - state.makeUpCap.used, 0)} hours remaining this month`;
 
-const shouldDisplayPresencePrompt = (prompt: PresencePrompt | null) => {
-  if (!prompt) {
-    return false;
-  }
-  if (!prompt.id || !prompt.expiresAt) {
-    return false;
-  }
-  if (activePromptId === prompt.id && presenceModal?.dataset.visible === 'true') {
-    return false;
-  }
-  return true;
-};
-
-const presencePayload = (prompt: PresencePrompt) => ({
-  id: prompt.id,
-  expiresAt: prompt.expiresAt,
-  message: prompt.message ?? undefined
-});
-
-const requestPresencePopup = (prompt: PresencePrompt) => {
-  if (!isPopupModeEnabled()) {
-    return;
-  }
-  window.attendance.openPresencePrompt(presencePayload(prompt));
-};
-
-function updateDiagnostics() {
-  if (!diagnosticsPanel || !diagnosticsContentEl) {
-    return;
-  }
-
-  const shouldShow = Boolean(state.token || state.sessionId || state.user);
-  diagnosticsPanel.hidden = !shouldShow;
-  if (!shouldShow) {
-    diagnosticsContentEl.textContent = '';
-    return;
-  }
-
-  const lines: string[] = [
-    `localTime: ${new Date().toLocaleString()}`,
-    `sessionId: ${state.sessionId ?? 'none'}`,
-    `sessionState: ${state.sessionState}`,
-    `userId: ${state.user?.id ?? 'unknown'}`,
-    `role: ${state.user?.role ?? 'unknown'}`,
-    `tokenScope: ${state.tokenScope ?? 'n/a'}`,
-    `tokenExpires: ${state.tokenExpiresAt ? state.tokenExpiresAt.toLocaleString() : 'n/a'}`,
-    `lastReqId: ${state.lastRequestTrace?.requestId ?? 'n/a'}`,
-    `lastReqStatus: ${state.lastRequestTrace?.status ?? 'n/a'}`,
-    `clockSkewMs: ${state.lastServerSkewMs ?? 'n/a'}`
+  const stats = [
+    {
+      label: 'Active hours',
+      value: formatHours(state.today.activeMinutes / 60),
+      meta: `Idle ${formatHours(state.today.idleMinutes / 60)} h`
+    },
+    {
+      label: 'Break time',
+      value: formatDurationMinutes(state.today.breakMinutes),
+      meta: `${state.today.breaksCount} break${state.today.breaksCount === 1 ? '' : 's'}`
+    },
+    {
+      label: 'Lunch',
+      value: formatDurationMinutes(state.today.lunchMinutes),
+      meta: state.today.lunchCount ? `${state.today.lunchCount} lunch` : 'No lunch logged'
+    },
+    {
+      label: 'Presence misses',
+      value: `${state.today.presenceMisses}`,
+      meta: state.session.lastPresenceCheck ? `Last check ${formatRelative(state.session.lastPresenceCheck)}` : 'Awaiting check'
+    }
   ];
 
-  diagnosticsContentEl.textContent = lines.join('\n');
-}
-
-function processServerDateHeader(dateHeader: string | null, requestId: string) {
-  if (!dateHeader) {
-    return;
-  }
-  const parsed = new Date(dateHeader);
-  if (Number.isNaN(parsed.getTime())) {
-    return;
-  }
-  const skewMs = Math.abs(parsed.getTime() - Date.now());
-  state.lastServerSkewMs = skewMs;
-  state.lastServerDate = parsed;
-  if (skewMs > MAX_CLOCK_SKEW_WARNING_MS) {
-    console.warn('[diagnostics]', {
-      type: 'clock_skew',
-      skewMs,
-      thresholdMs: MAX_CLOCK_SKEW_WARNING_MS,
-      requestId,
-      serverDate: parsed.toISOString()
-    });
-  }
-  updateDiagnostics();
-}
-
-function recordRequestTrace(trace: { requestId: string; url: string; status: number }) {
-  state.lastRequestTrace = trace;
-  updateDiagnostics();
-}
-
-function parseApiError(error: unknown): { message: string; code?: string; hint?: string } {
-  if (error instanceof ApiError) {
-    const body = error.body as Record<string, unknown> | undefined;
-    if (body && typeof body === 'object') {
-      const code = typeof body.code === 'string' ? body.code : typeof body.error === 'string' ? body.error : undefined;
-      const message = typeof body.error === 'string' ? body.error : error.message;
-      const hint = typeof body.hint === 'string' ? body.hint : undefined;
-      return { message, code, hint };
-    }
-    return { message: error.message, code: error.status ? String(error.status) : undefined };
-  }
-  if (error instanceof Error) {
-    return { message: error.message };
-  }
-  return { message: 'Unknown failure' };
-}
-
-const renderRequests = () => {
-  if (!requestsListEl || !requestsEmptyEl) {
-    return;
-  }
-
-  requestsListEl.innerHTML = '';
-
-  if (!state.requests || state.requests.length === 0) {
-    requestsEmptyEl.style.display = 'block';
-    return;
-  }
-
-  requestsEmptyEl.style.display = 'none';
-
-  state.requests
-    .slice()
-    .sort((a, b) => {
-      const aDate = a.createdAt ?? a.startDate;
-      const bDate = b.createdAt ?? b.startDate;
-      return (bDate ?? '').localeCompare(aDate ?? '');
-    })
-    .forEach((request) => {
-      const item = document.createElement('li');
-      item.className = 'requests__item';
-
-      const title = document.createElement('strong');
-      title.textContent = `${request.type} • ${formatDateRange(request.startDate, request.endDate)}`;
-      item.appendChild(title);
-
-      const hours = document.createElement('span');
-      hours.textContent = `Hours: ${request.hours}`;
-      item.appendChild(hours);
-
-      if (request.reason) {
-        const reason = document.createElement('span');
-        reason.textContent = `Reason: ${request.reason}`;
-        item.appendChild(reason);
-      }
-
-      const status = document.createElement('span');
-      status.className = 'requests__status';
-      status.textContent = `Status: ${request.status ?? 'pending'}`;
-      item.appendChild(status);
-
-      requestsListEl.appendChild(item);
-    });
-};
-
-const formatDateRange = (start: string, end?: string | null) => {
-  if (!end || end === start) {
-    return start;
-  }
-  return `${start} → ${end}`;
-};
-
-const isoDateOnly = (value: string) => value.slice(0, 10);
-const isoMonthOnly = (value: string) => value.slice(0, 7);
-const minutesToHours = (minutes: number) => Math.round((minutes / 60) * 100) / 100;
-const formatHours = (hours: number) => (Number.isInteger(hours) ? hours.toFixed(0) : hours.toFixed(2));
-const formatLocalDate = (iso: string) => {
-  const parsed = new Date(iso);
-  if (Number.isNaN(parsed.getTime())) {
-    return iso;
-  }
-  return parsed.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-};
-const formatStatus = (value: string) => (value ? `${value.charAt(0).toUpperCase()}${value.slice(1)}` : value);
-
-const updateTimesheetInputVisibility = (view: TimesheetView) => {
-  const showMonth = view === 'monthly';
-  if (timesheetDateGroup) {
-    timesheetDateGroup.classList.toggle('hidden', showMonth);
-  }
-  if (timesheetMonthGroup) {
-    timesheetMonthGroup.classList.toggle('hidden', !showMonth);
-  }
-};
-
-const ensureTimesheetFormDefaults = () => {
-  if (!timesheetViewSelect) {
-    return;
-  }
-  const view = state.timesheetView ?? 'pay_period';
-  timesheetViewSelect.value = view;
-  updateTimesheetInputVisibility(view);
-  const todayIso = new Date().toISOString();
-  if (view === 'monthly') {
-    if (timesheetMonthInput) {
-      timesheetMonthInput.value = state.timesheetReference ?? isoMonthOnly(todayIso);
-    }
-    if (timesheetDateInput) {
-      timesheetDateInput.value = '';
-    }
-  } else {
-    if (timesheetDateInput) {
-      timesheetDateInput.value = state.timesheetReference ?? isoDateOnly(todayIso);
-    }
-    if (timesheetMonthInput) {
-      timesheetMonthInput.value = '';
-    }
-  }
-};
-
-const toggleTimesheetEditModal = (visible: boolean) => {
-  if (!timesheetEditModal) {
-    return;
-  }
-  timesheetEditModal.dataset.visible = visible ? 'true' : 'false';
-  if (visible) {
-    if (timesheetEditReasonInput) {
-      timesheetEditReasonInput.value = '';
-    }
-    if (timesheetEditHoursInput) {
-      timesheetEditHoursInput.value = '';
-    }
-    if (timesheetEditErrorEl) {
-      timesheetEditErrorEl.textContent = '';
-    }
-    if (timesheetEditSuccessEl) {
-      timesheetEditSuccessEl.textContent = '';
-    }
-  } else {
-    pendingTimesheetEdit = null;
-    if (timesheetEditErrorEl) {
-      timesheetEditErrorEl.textContent = '';
-    }
-    if (timesheetEditSuccessEl) {
-      timesheetEditSuccessEl.textContent = '';
-    }
-  }
-};
-
-const renderTimesheetRequests = (summary: TimesheetSummary | null) => {
-  if (!timesheetRequestsSection || !timesheetRequestsList || !timesheetRequestsEmpty) {
-    return;
-  }
-
-  if (!summary) {
-    timesheetRequestsSection.style.display = 'none';
-    timesheetRequestsList.innerHTML = '';
-    timesheetRequestsEmpty.style.display = 'block';
-    return;
-  }
-
-  timesheetRequestsSection.style.display = 'block';
-
-  if (!summary.editRequests.length) {
-    timesheetRequestsList.innerHTML = '';
-    timesheetRequestsEmpty.style.display = 'block';
-    return;
-  }
-
-  timesheetRequestsEmpty.style.display = 'none';
-  timesheetRequestsList.innerHTML = '';
-
-  summary.editRequests
-    .slice()
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    .forEach((request) => {
-      const item = document.createElement('li');
-      item.className = 'timesheet__request-item';
-
-      const title = document.createElement('strong');
-      title.textContent = `${formatLocalDate(request.targetDate)} • ${formatStatus(request.status)}`;
-      item.appendChild(title);
-
-      const reason = document.createElement('p');
-      reason.textContent = request.reason;
-      item.appendChild(reason);
-
-      const meta = document.createElement('div');
-      meta.className = 'timesheet__request-meta';
-
-      const statusEl = document.createElement('span');
-      statusEl.className = `timesheet__request-status ${request.status}`;
-      statusEl.textContent = formatStatus(request.status);
-      meta.appendChild(statusEl);
-
-      const createdEl = document.createElement('span');
-      createdEl.textContent = `Requested ${formatLocalDate(request.createdAt)}`;
-      meta.appendChild(createdEl);
-
-      if (request.reviewedAt) {
-        const reviewedEl = document.createElement('span');
-        reviewedEl.textContent = `Reviewed ${formatLocalDate(request.reviewedAt)}`;
-        meta.appendChild(reviewedEl);
-      }
-
-      if (request.requestedMinutes && request.requestedMinutes > 0) {
-        const requestedHours = formatHours(minutesToHours(request.requestedMinutes));
-        const requestedEl = document.createElement('span');
-        requestedEl.textContent = `Requested hours: ${requestedHours}`;
-        meta.appendChild(requestedEl);
-      }
-
-      if (request.adminNote) {
-        const noteEl = document.createElement('span');
-        noteEl.textContent = `Admin note: ${request.adminNote}`;
-        meta.appendChild(noteEl);
-      }
-
-      item.appendChild(meta);
-      timesheetRequestsList.appendChild(item);
-    });
+  dom.statsList.innerHTML = stats
+    .map(
+      (item) => `
+        <div class="stats__item">
+          <span class="stats__label">${escapeHtml(item.label)}</span>
+          <span class="stats__value">${escapeHtml(item.value)}</span>
+          <span class="stats__meta">${escapeHtml(item.meta)}</span>
+        </div>
+      `
+    )
+    .join('\n');
 };
 
 const renderTimesheet = () => {
-  if (!timesheetSummaryEl || !timesheetEmptyEl || !timesheetTableBody || !timesheetLoadingEl) {
-    return;
-  }
+  const period = state.timesheet.periods[state.timesheet.view];
+  dom.timesheetLabel.textContent = period.label;
 
-  const loading = state.timesheetLoading;
-  const summary = state.timesheet;
-
-  timesheetLoadingEl.hidden = !loading;
-
-  if (loading) {
-    timesheetSummaryEl.innerHTML = '';
-    timesheetTableBody.innerHTML = '';
-    if (timesheetEmptyEl) {
-      timesheetEmptyEl.style.display = 'none';
-    }
-    if (timesheetTable) {
-      timesheetTable.style.display = 'none';
-    }
-    renderTimesheetRequests(summary);
-    return;
-  }
-
-  if (!summary) {
-    timesheetSummaryEl.innerHTML = '';
-    timesheetTableBody.innerHTML = '';
-    if (timesheetEmptyEl) {
-      timesheetEmptyEl.style.display = 'block';
-      timesheetEmptyEl.textContent = 'No activity recorded for this range.';
-    }
-    if (timesheetTable) {
-      timesheetTable.style.display = 'none';
-    }
-    renderTimesheetRequests(summary);
-    return;
-  }
-
-  const summaryCards = [
-    `<div class="timesheet__summary-item"><span>Range</span><strong>${summary.label}</strong><small>${state.timesheetTimezone ?? ''}</small></div>`,
-    `<div class="timesheet__summary-item"><span>Active Hours</span><strong>${formatHours(summary.totals.activeHours)}</strong><small>${summary.totals.activeMinutes} min</small></div>`,
-    `<div class="timesheet__summary-item"><span>Idle Hours</span><strong>${formatHours(summary.totals.idleHours)}</strong><small>${summary.totals.idleMinutes} min</small></div>`,
-    `<div class="timesheet__summary-item"><span>Breaks</span><strong>${summary.totals.breaks}</strong></div>`,
-    `<div class="timesheet__summary-item"><span>Lunches</span><strong>${summary.totals.lunches}</strong></div>`,
-    `<div class="timesheet__summary-item"><span>Presence Misses</span><strong>${summary.totals.presenceMisses}</strong></div>`
-  ];
-  timesheetSummaryEl.innerHTML = summaryCards.join('');
-
-  if (timesheetTable) {
-    timesheetTable.style.display = summary.days.length ? 'table' : 'none';
-  }
-  if (timesheetEmptyEl) {
-    timesheetEmptyEl.style.display = summary.days.length ? 'none' : 'block';
-  }
-
-  timesheetTableBody.innerHTML = '';
-  summary.days.forEach((day) => {
-    const row = document.createElement('tr');
-
-    const dateCell = document.createElement('td');
-    dateCell.textContent = day.label;
-    row.appendChild(dateCell);
-
-    const activeCell = document.createElement('td');
-    activeCell.textContent = formatHours(minutesToHours(day.activeMinutes));
-    row.appendChild(activeCell);
-
-    const idleCell = document.createElement('td');
-    idleCell.textContent = formatHours(minutesToHours(day.idleMinutes));
-    row.appendChild(idleCell);
-
-    const breaksCell = document.createElement('td');
-    breaksCell.textContent = String(day.breaks);
-    row.appendChild(breaksCell);
-
-    const lunchesCell = document.createElement('td');
-    lunchesCell.textContent = String(day.lunches);
-    row.appendChild(lunchesCell);
-
-    const presenceCell = document.createElement('td');
-    presenceCell.textContent = String(day.presenceMisses);
-    row.appendChild(presenceCell);
-
-    const actionCell = document.createElement('td');
-    actionCell.className = 'timesheet__action';
-    const hasPending = day.editRequests.some((req) => req.status === 'pending');
-    const actionButton = document.createElement('button');
-    actionButton.type = 'button';
-    actionButton.dataset.action = 'timesheet-request-edit';
-    actionButton.dataset.date = day.date;
-    actionButton.dataset.label = day.label;
-    actionButton.textContent = hasPending ? 'Pending' : 'Request Edit';
-    actionButton.disabled = hasPending;
-    actionCell.appendChild(actionButton);
-
-    if (day.editRequests.length) {
-      const note = document.createElement('div');
-      note.className = 'timesheet__day-note';
-      note.textContent = day.editRequests
-        .map((req) => `${formatStatus(req.status)} • ${formatLocalDate(req.createdAt)}`)
-        .join(', ');
-      actionCell.appendChild(note);
-    }
-
-    row.appendChild(actionCell);
-    timesheetTableBody.appendChild(row);
-  });
-
-  renderTimesheetRequests(summary);
+  dom.timesheetBody.innerHTML = period.days
+    .map((day) => {
+      const presence = day.presenceMisses > 0 ? `${day.presenceMisses} miss` : 'On track';
+      const presenceClass = day.presenceMisses > 0 ? 'pill pill--pending' : 'pill';
+      const noteRow = day.note ? `<div class="form-hint">${escapeHtml(day.note)}</div>` : '';
+      return `
+        <tr>
+          <td>
+            <div>${escapeHtml(day.label)}</div>
+            ${noteRow}
+          </td>
+          <td>${escapeHtml(formatHours(day.activeHours))}</td>
+          <td>${escapeHtml(formatHours(day.idleHours))}</td>
+          <td>${day.breaks}</td>
+          <td>${day.lunches}</td>
+          <td><span class="${presenceClass}">${escapeHtml(presence)}</span></td>
+        </tr>
+      `;
+    })
+    .join('\n');
 };
 
-const toggleTimesheetModal = (visible: boolean) => {
-  if (!timesheetModal) {
-    return;
-  }
-  timesheetModal.dataset.visible = visible ? 'true' : 'false';
-  if (visible) {
-    ensureTimesheetFormDefaults();
-    renderTimesheet();
-    void fetchTimesheet({
-      view: (timesheetViewSelect?.value as TimesheetView | undefined) ?? state.timesheetView,
-      date: timesheetDateInput?.value || undefined,
-      month: timesheetMonthInput?.value || undefined,
-      silent: Boolean(state.timesheet)
+const renderRequests = () => {
+  const items = state.requests
+    .slice()
+    .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime())
+    .map((request) => {
+      const start = new Date(request.startDate);
+      const end = request.endDate ? new Date(request.endDate) : start;
+      const rangeLabel = start.getTime() === end.getTime()
+        ? formatDateLong(start)
+        : `${formatDateLong(start)} – ${formatDateLong(end)}`;
+      const hoursLabel = request.hours ? `${request.hours}h` : '—';
+      return `
+        <li class="list__item">
+          <div class="list__headline">${escapeHtml(requestLabel(request.type))}</div>
+          <div class="list__meta">
+            <span class="${requestStatusClass(request.status)}">${escapeHtml(request.status)}</span>
+            <span>${escapeHtml(rangeLabel)}</span>
+            <span>${escapeHtml(hoursLabel)}</span>
+            <span>${escapeHtml(formatRelative(new Date(request.submittedAt)))}</span>
+          </div>
+          <p class="form-hint">${escapeHtml(request.reason)}</p>
+        </li>
+      `;
     });
-  } else {
-    toggleTimesheetEditModal(false);
-  }
+
+  dom.requestList.innerHTML = items.join('') || '<li class="form-hint">No requests submitted yet.</li>';
+  const remaining = Math.max(state.makeUpCap.cap - state.makeUpCap.used, 0);
+  dom.requestHint.textContent = `${state.makeUpCap.used} of ${state.makeUpCap.cap} make-up hours used this month • ${remaining} remaining.`;
 };
 
-const openTimesheetEditRequest = (date: string, label: string) => {
-  if (!state.timesheet) {
-    return;
-  }
-  pendingTimesheetEdit = { date, label };
-  if (timesheetEditDateLabel) {
-    timesheetEditDateLabel.textContent = `Request change for ${label}`;
-  }
-  toggleTimesheetEditModal(true);
+const renderSchedule = () => {
+  const defaults = state.schedule.defaults
+    .map(
+      (entry) => `
+        <li class="schedule__item">
+          <div>
+            <strong>${escapeHtml(entry.label)}</strong>
+            <div class="schedule__meta">Default • ${escapeHtml(entry.start)} – ${escapeHtml(entry.end)}</div>
+          </div>
+          <span class="pill">Default</span>
+        </li>
+      `
+    )
+    .join('\n');
+
+  const shifts = state.schedule.upcoming
+    .slice()
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+    .map((entry) => {
+      const timeLabel = `${entry.start} – ${entry.end}`;
+      const statusClass =
+        entry.status === 'completed' ? 'pill pill--approved' : entry.status === 'in_progress' ? 'pill pill--pending' : 'pill';
+      const noteRow = entry.note ? `<div class="schedule__meta">${escapeHtml(entry.note)}</div>` : '';
+      return `
+        <li class="schedule__item">
+          <div>
+            <strong>${escapeHtml(entry.label)}</strong>
+            <div class="schedule__meta">${escapeHtml(timeLabel)} • ${escapeHtml(entry.location)}</div>
+            ${noteRow}
+          </div>
+          <span class="${statusClass}">${escapeHtml(entry.status.replace('_', ' '))}</span>
+        </li>
+      `;
+    })
+    .join('\n');
+
+  dom.scheduleList.innerHTML = defaults + shifts;
 };
 
-const getTimesheetRequestValues = () => {
-  const view = (timesheetViewSelect?.value as TimesheetView | undefined) ?? state.timesheetView;
-  const dateValue = timesheetDateInput?.value?.trim();
-  const monthValue = timesheetMonthInput?.value?.trim();
-  return {
-    view,
-    date: view === 'monthly' ? null : dateValue && dateValue.length ? dateValue : state.timesheetReference,
-    month: view === 'monthly' ? (monthValue && monthValue.length ? monthValue : state.timesheetReference) : null
-  };
+const renderActivity = () => {
+  dom.activityList.innerHTML = state.activity
+    .slice()
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    .slice(0, 10)
+    .map(
+      (item) => `
+        <li class="timeline__item">
+          <span class="timeline__label">${categoryIcon(item.category)} ${escapeHtml(item.message)}</span>
+          <span class="timeline__time">${escapeHtml(formatRelative(new Date(item.timestamp)))}</span>
+        </li>
+      `
+    )
+    .join('\n');
 };
 
-const fetchTimesheet = async (options?: { view?: TimesheetView; date?: string | null; month?: string | null; silent?: boolean }) => {
-  const ensureAuth = state.token ? true : await ensureAuthenticated();
-  if (!ensureAuth) {
-    return;
-  }
+const updateControls = () => {
+  dom.clockToggle.textContent = state.session.status === 'clocked_out' ? 'Clock In' : 'Clock Out';
+  dom.breakToggle.textContent = state.session.status === 'break' ? 'End Break' : 'Start Break';
+  dom.lunchToggle.textContent = state.session.status === 'lunch' ? 'End Lunch' : 'Start Lunch';
 
-  const requestValues = options ?? getTimesheetRequestValues();
-  const view = requestValues.view ?? state.timesheetView ?? 'pay_period';
-  const isMonthly = view === 'monthly';
-  let dateParam = isMonthly ? null : (requestValues.date ?? undefined);
-  let monthParam = isMonthly ? (requestValues.month ?? undefined) : null;
-
-  const todayIso = new Date().toISOString();
-  if (isMonthly && (!monthParam || monthParam.length === 0)) {
-    monthParam = state.timesheetReference ?? isoMonthOnly(todayIso);
-  }
-  if (!isMonthly && (!dateParam || dateParam.length === 0)) {
-    dateParam = state.timesheetReference ?? isoDateOnly(todayIso);
-  }
-
-  state.timesheetLoading = !options?.silent;
-  renderTimesheet();
-
-  const params = new URLSearchParams({ view });
-  if (isMonthly) {
-    params.set('month', monthParam!);
-  } else if (dateParam) {
-    params.set('date', dateParam);
-  }
-
-  const result = await sendOrQueue<{ timezone?: string; timesheet?: TimesheetSummary; view?: TimesheetView; userId?: number }>({
-    path: `/api/timesheets?${params.toString()}`,
-    method: 'GET',
-    requiresAuth: true,
-    description: 'Fetch Timesheet'
-  });
-
-  state.timesheetLoading = false;
-
-  if (result.ok) {
-    const payload = result.data ?? {};
-    const summary = (payload && (payload as { timesheet?: TimesheetSummary }).timesheet) || (payload as TimesheetSummary);
-    state.timesheet = summary ?? null;
-    state.timesheetView = view;
-    state.timesheetReference = isMonthly ? monthParam ?? null : dateParam ?? null;
-    state.timesheetTimezone = (payload && (payload as { timezone?: string }).timezone) ?? state.timesheetTimezone;
-
-    if (timesheetViewSelect) {
-      timesheetViewSelect.value = view;
-      updateTimesheetInputVisibility(view);
-    }
-    if (isMonthly) {
-      if (timesheetMonthInput) {
-        timesheetMonthInput.value = monthParam ?? (summary ? isoMonthOnly(summary.rangeStart) : '');
-      }
-      if (timesheetDateInput) {
-        timesheetDateInput.value = '';
-      }
-    } else if (timesheetDateInput) {
-      timesheetDateInput.value = dateParam ?? (summary ? isoDateOnly(summary.rangeStart) : '');
-    }
-
-    renderTimesheet();
-  } else if (result.queued) {
-    showToast('Offline: timesheet request queued.', 'info');
-  } else {
-    const parsed = parseApiError(result.error);
-    showToast(`Unable to load timesheet: ${parsed.message}`, 'error', parsed.code, parsed.hint);
-    renderTimesheet();
-  }
+  const disabled = state.session.status === 'clocked_out';
+  dom.breakToggle.disabled = disabled;
+  dom.lunchToggle.disabled = disabled;
+  dom.presenceButton.disabled = disabled;
 };
 
-const toggleLoginModal = (visible: boolean) => {
-  if (!loginModal) {
-    return;
-  }
-  loginModal.dataset.visible = visible ? 'true' : 'false';
-  if (!visible) {
-    if (loginErrorEl) {
-      loginErrorEl.textContent = '';
-    }
-    const submitButton = loginForm?.querySelector('button[type="submit"]') as HTMLButtonElement | null;
-    submitButton?.removeAttribute('disabled');
-  }
-};
-
-const togglePresenceModal = (visible: boolean) => {
-  if (!presenceModal) {
-    return;
-  }
-  presenceModal.dataset.visible = visible ? 'true' : 'false';
-  if (visible) {
-    if (presenceConfirmBtn) {
-      presenceConfirmBtn.disabled = false;
-    }
-    if (presenceDismissBtn) {
-      presenceDismissBtn.disabled = false;
-    }
-  }
-};
-
-const toggleSettingsModal = (visible: boolean) => {
-  if (!settingsModal) {
-    return;
-  }
-  settingsModal.dataset.visible = visible ? 'true' : 'false';
-  if (!visible) {
-    if (settingsErrorEl) {
-      settingsErrorEl.textContent = '';
-    }
-    if (settingsSuccessEl) {
-      settingsSuccessEl.textContent = '';
-    }
-  }
-};
-
-const resetRequestForm = () => {
-  requestForm?.reset();
-  if (requestSuccessEl) {
-    requestSuccessEl.textContent = '';
-  }
-  if (requestErrorEl) {
-    requestErrorEl.textContent = '';
-  }
-};
-
-const toggleRequestModal = (visible: boolean) => {
-  if (!requestModal) {
-    return;
-  }
-  requestModal.dataset.visible = visible ? 'true' : 'false';
-  if (visible) {
-    if (requestSuccessEl) {
-      requestSuccessEl.textContent = '';
-    }
-    if (requestErrorEl) {
-      requestErrorEl.textContent = '';
-    }
-  } else {
-    resetRequestForm();
-  }
-};
-
-const fetchSystemStatus = async (): Promise<SystemStatus | null> => {
-  try {
-    const status = await window.attendance.getSystemStatus();
-    state.systemStatus = status;
-    return status;
-  } catch (error) {
-    console.warn('Failed to fetch system status', error);
-    return state.systemStatus;
-  } finally {
-    updateStatus();
-  }
-};
-
-const buildHeartbeatPayload = (status: SystemStatus | null) => {
-  if (!state.sessionId) {
-    throw new Error('Cannot build heartbeat payload without session');
-  }
-
-  const { buckets, aggregated } = getActivitySnapshot();
-  const idleSeconds = status?.idleSeconds ?? Number.POSITIVE_INFINITY;
-  const isIdle = idleSeconds >= IDLE_THRESHOLD_SECONDS;
-  const activeMinute = idleSeconds < 60;
-
-  return {
-    sessionId: state.sessionId,
+const pushActivity = (message: string, category: ActivityCategory) => {
+  state.activity.unshift({
+    id: `activity-${Date.now()}`,
     timestamp: new Date().toISOString(),
-    idleFlag: isIdle,
-    idleSeconds: Number.isFinite(idleSeconds) ? idleSeconds : null,
-    activeMinute,
-    keysCount: aggregated.keys,
-    mouseCount: aggregated.mouse,
-    activityBuckets: buckets,
-    foregroundAppTitle: status?.foregroundApp?.title ?? null,
-    foregroundAppOwner: status?.foregroundApp?.owner ?? null
-  };
-};
-
-const shouldQueue = (error: unknown) => {
-  if (error instanceof ApiError) {
-    if (typeof error.status === 'number') {
-      return error.status >= 500 || error.status === 429;
-    }
-    return true;
-  }
-  return true;
-};
-
-const refreshAuthToken = async () => {
-  if (!state.refreshToken) {
-    throw new Error('missing_refresh_token');
-  }
-  if (!refreshInFlight) {
-    refreshInFlight = (async () => {
-      const response = await apiClient.request<AuthTokens>({
-        path: '/api/sessions/refresh',
-        body: { refreshToken: state.refreshToken },
-        requiresAuth: false,
-        description: 'Refresh Access Token'
-      });
-      applyAuthTokens(response);
-    })().finally(() => {
-      refreshInFlight = null;
-    });
-  }
-  await refreshInFlight;
-};
-
-const tryRefreshAuthToken = async () => {
-  try {
-    await refreshAuthToken();
-    return true;
-  } catch (error) {
-    console.warn('Token refresh failed', error);
-    return false;
-  }
-};
-
-const sendOrQueueCore = async <T = unknown>(request: ApiRequest<T>) => {
-  const execute = () => apiClient.request(request);
-
-  try {
-    const data = await execute();
-    return { ok: true as const, data };
-  } catch (error) {
-    let finalError: unknown = error;
-
-    if (error instanceof ApiError && error.status === 401) {
-      const refreshed = await tryRefreshAuthToken();
-      if (refreshed) {
-        try {
-          const data = await execute();
-          return { ok: true as const, data };
-        } catch (retryError) {
-          finalError = retryError;
-        }
-      }
-
-      clearAuth();
-      return { ok: false as const, queued: false as const, error: finalError };
-    }
-
-    if (shouldQueue(finalError)) {
-      console.warn(`[Queue] ${request.description ?? request.path} queued`, finalError);
-      offlineQueue.enqueue({ ...request });
-      return { ok: false as const, queued: true as const, error: finalError };
-    }
-
-    return { ok: false as const, queued: false as const, error: finalError };
-  }
-};
-
-let sendOrQueueHandler: typeof sendOrQueueCore = sendOrQueueCore;
-
-const sendOrQueue = async <T = unknown>(request: ApiRequest<T>) => sendOrQueueHandler(request);
-
-const setSendOrQueueHandler = (handler: typeof sendOrQueueCore) => {
-  sendOrQueueHandler = handler;
-};
-
-const resetSendOrQueueHandler = () => {
-  sendOrQueueHandler = sendOrQueueCore;
-};
-
-const ensureAuthenticated = async (): Promise<boolean> => {
-  if (state.token) {
-    return true;
-  }
-
-  return new Promise<boolean>((resolve) => {
-    if (!loginModal || !loginForm || !loginCancelBtn) {
-      resolve(false);
-      return;
-    }
-
-    let resolved = false;
-
-    const setError = (message: string) => {
-      if (loginErrorEl) {
-        loginErrorEl.textContent = message;
-      }
-    };
-
-    const cleanup = () => {
-      loginForm.removeEventListener('submit', submitHandler);
-      loginCancelBtn.removeEventListener('click', cancelHandler);
-    };
-
-    const submitHandler = async (event: SubmitEvent) => {
-      event.preventDefault();
-      const formData = new FormData(loginForm);
-      const email = String(formData.get('email') ?? '').trim().toLowerCase();
-      const deviceId = getDeviceId();
-
-      if (!email) {
-        setError('Enter your work email.');
-        return;
-      }
-
-      const submitButton = loginForm.querySelector('button[type="submit"]') as HTMLButtonElement | null;
-      submitButton?.setAttribute('disabled', 'true');
-      setError('');
-
-      console.info('[ui]', { event: 'login_submit', email, deviceId });
-
-      try {
-        const response = await apiClient.request<AuthTokens>({
-          path: '/api/sessions/start',
-          body: {
-            flow: 'email_only',
-            email,
-            ...(deviceId ? { deviceId } : {})
-          },
-          requiresAuth: false,
-          description: 'Email Sign-In'
-        });
-
-        applyAuthTokens(response);
-        state.email = email;
-        await fetchCurrentUser();
-        updateStatus();
-        toggleLoginModal(false);
-        cleanup();
-        loginForm.reset();
-        if (loginEmailInput) {
-          loginEmailInput.value = email;
-        }
-        resolved = true;
-        window.attendance.logAction('Logged in');
-        await fetchRequests();
-        showToast('Logged in successfully', 'success');
-        console.info('[ui]', { event: 'login_success', email });
-        resolve(true);
-      } catch (error) {
-        const message =
-          error instanceof ApiError && error.status === 401
-            ? 'We could not verify that email. Check with your manager.'
-            : error instanceof ApiError
-            ? error.message
-            : 'Sign-in failed. Please try again.';
-        setError(message);
-        const parsed = parseApiError(error);
-        showToast(`Login failed: ${parsed.message}`, 'error', parsed.code, parsed.hint);
-        submitButton?.removeAttribute('disabled');
-      }
-    };
-
-    const cancelHandler = () => {
-      toggleLoginModal(false);
-      cleanup();
-      if (!resolved) {
-        resolved = true;
-        resolve(false);
-      }
-    };
-
-    loginForm.addEventListener('submit', submitHandler);
-    loginCancelBtn.addEventListener('click', cancelHandler, { once: true });
-
-    const observer = new MutationObserver(() => {
-      if (loginModal.dataset.visible !== 'true') {
-        observer.disconnect();
-        cleanup();
-        if (!resolved) {
-          resolved = true;
-          resolve(Boolean(state.token));
-        }
-      }
-    });
-    observer.observe(loginModal, { attributes: true, attributeFilter: ['data-visible'] });
-
-    if (loginEmailInput) {
-      loginEmailInput.value = state.email ?? loginEmailInput.value ?? '';
-    }
-    setError('');
-    toggleLoginModal(true);
-    loginEmailInput?.focus();
+    message,
+    category
   });
+  state.activity = state.activity.slice(0, 20);
+  renderActivity();
 };
 
-const startSession = async () => {
-  if (!state.bootstrap) {
-    throw new Error('Application not initialized');
-  }
-
-  if (!state.token) {
-    const authenticated = await ensureAuthenticated();
-    if (!authenticated) {
-      return;
-    }
-  }
-
-  if (state.sessionId) {
-    return;
-  }
-
-  if (!state.email) {
-    const authenticated = await ensureAuthenticated();
-    if (!authenticated || !state.email) {
-      console.warn('No employee email available to start session');
-      return;
-    }
-  }
-
-  try {
-    const response = await apiClient.request<{ sessionId?: string; id?: string }>({
-      path: '/api/sessions/start',
-      body: {
-        email: state.email,
-        deviceId: state.bootstrap.deviceId,
-        platform: state.bootstrap.platform
-      },
-      requiresAuth: true,
-      description: 'Start Session'
-    });
-
-    const sessionId = response.sessionId ?? response.id;
-    if (!sessionId) {
-      throw new ApiError('Session ID missing in response');
-    }
-
-    state.sessionId = sessionId;
-    state.sessionState = 'active';
-    state.lastHeartbeatAt = null;
-    updateStatus();
-    await hydratePauseState();
-    startHeartbeatLoop();
-    void offlineQueue.process();
-    void fetchRequests();
-    window.attendance.logAction('Session started');
-    showToast('Session started', 'success');
-    console.info('[ui]', { event: 'session_started', sessionId });
-  } catch (error) {
-    const message = error instanceof ApiError ? error.message : 'Unable to start session';
-    console.error(message, error);
-    const parsed = parseApiError(error);
-    showToast(`Unable to start session: ${parsed.message}`, 'error', parsed.code, parsed.hint);
-  }
-};
-
-const stopSessionLocally = () => {
-  state.sessionId = null;
-  state.sessionState = 'inactive';
-  state.lastHeartbeatAt = null;
-  state.currentPause = null;
-  state.pauseHistory = [];
-  stopPauseTimer();
-  updateStatus();
-  stopHeartbeatLoop();
-};
-
-const clearAuth = () => {
-  state.token = null;
-  state.refreshToken = null;
-  state.tokenExpiresAt = null;
-  state.tokenScope = null;
-  apiClient.setToken(null);
-  state.requests = [];
-  state.user = null;
-  state.lastRequestTrace = null;
-  state.lastServerSkewMs = null;
-  state.lastServerDate = null;
-  state.currentPause = null;
-  state.pauseHistory = [];
-  stopPauseTimer();
+const render = () => {
+  renderHero();
+  renderSnapshot();
+  renderTimesheet();
   renderRequests();
-  updateStatus();
+  renderSchedule();
+  renderActivity();
+  updateControls();
 };
 
-const endSession = async () => {
-  if (!state.sessionId) {
-    return;
-  }
-
-  const request: ApiRequest = {
-    path: '/api/sessions/end',
-    body: { sessionId: state.sessionId },
-    description: 'End Session'
-  };
-
-  const result = await sendOrQueue(request);
-  if (!result.ok && !result.queued) {
-    console.error('Failed to end session', result.error);
-    const parsed = parseApiError(result.error);
-    showToast(`End session failed: ${parsed.message}`, 'error', parsed.code, parsed.hint);
-    return;
-  }
-
-  stopSessionLocally();
-  clearAuth();
-  window.attendance.logAction('Session ended');
-  showToast('Session ended', 'success');
-};
-
-const startHeartbeatLoop = () => {
-  if (heartbeatTimer) {
-    return;
-  }
-  heartbeatTimer = window.setInterval(() => {
-    void sendHeartbeat();
-  }, HEARTBEAT_INTERVAL_MS);
-  void sendHeartbeat();
-};
-
-const stopHeartbeatLoop = () => {
-  if (heartbeatTimer) {
-    clearInterval(heartbeatTimer);
-    heartbeatTimer = null;
+const completeBreakIfNeeded = () => {
+  if (state.session.status === 'break' && state.session.breakStartedAt) {
+    const minutes = minutesBetween(state.session.breakStartedAt);
+    state.today.breakMinutes += minutes;
+    state.today.breaksCount += 1;
+    state.session.breakStartedAt = null;
+    pushActivity(`Break ended (${formatDurationMinutes(minutes)})`, 'break');
+    logAction('break_end');
   }
 };
 
-const sendHeartbeat = async () => {
-  if (!state.sessionId) {
-    return;
-  }
-
-  const status = await fetchSystemStatus();
-  const payload = buildHeartbeatPayload(status);
-
-  const request: ApiRequest<{ prompt?: PresencePrompt | null }> = {
-    path: '/api/events/heartbeat',
-    body: payload,
-    description: 'Heartbeat'
-  };
-
-  const result = await sendOrQueue(request);
-  if (!result.ok) {
-    if (!result.queued) {
-      console.warn('Heartbeat failed', result.error);
-    }
-    return;
-  }
-
-  state.lastHeartbeatAt = new Date();
-  if (state.sessionState !== 'break' && state.sessionState !== 'lunch') {
-    state.sessionState = payload.idleFlag ? 'idle' : 'active';
-  }
-  updateStatus();
-
-  const response = result.data;
-  const prompt = resolvePresencePrompt(response);
-  if (prompt && shouldDisplayPresencePrompt(prompt)) {
-    showPresencePrompt(prompt);
+const completeLunchIfNeeded = () => {
+  if (state.session.status === 'lunch' && state.session.lunchStartedAt) {
+    const minutes = minutesBetween(state.session.lunchStartedAt);
+    state.today.lunchMinutes += minutes;
+    state.today.lunchCount += 1;
+    state.session.lunchStartedAt = null;
+    pushActivity(`Lunch ended (${formatDurationMinutes(minutes)})`, 'lunch');
+    logAction('lunch_end');
   }
 };
 
-const hydratePauseState = async () => {
-  if (!state.sessionId) {
-    state.currentPause = null;
-    state.pauseHistory = [];
-    stopPauseTimer();
-    updatePauseDisplay();
-    return;
-  }
-
-  try {
-    const response = await apiClient.request<{ current: PauseSnapshot | null; history: PauseSnapshot[] } | null>({
-      path: `/api/sessions/${state.sessionId}/pauses`,
-      method: 'GET',
-      requiresAuth: true,
-      description: 'Load Session Pauses',
-      transform: (data) => parsePauseStateResponse(data)
-    });
-
-    if (!response) {
-      applyPauseStateFromUpdate({ current: null, history: [] });
-      return;
+const handleClockToggle = () => {
+  if (state.session.status === 'clocked_out') {
+    state.session.status = 'working';
+    state.session.startedAt = new Date();
+    state.session.lastClockedInAt = state.session.startedAt;
+    state.session.nextPresenceCheck = addMinutes(state.session.startedAt, 45);
+    pushActivity('Clocked in', 'session');
+    showToast('Clocked in. Have a great shift!', 'success');
+    logAction('clock_in');
+  } else {
+    completeBreakIfNeeded();
+    completeLunchIfNeeded();
+    const minutes = minutesBetween(state.session.startedAt);
+    if (minutes > 0) {
+      state.today.activeMinutes += minutes;
     }
-
-    const pauseState = buildPauseState(response, new Date());
-    applyPauseStateFromUpdate(pauseState);
-  } catch (error) {
-    console.warn('Failed to load session pauses', error);
+    state.session.status = 'clocked_out';
+    state.session.lastClockedOutAt = new Date();
+    state.session.startedAt = null;
+    showToast('Clocked out. Rest well!', 'info');
+    pushActivity('Clocked out', 'session');
+    logAction('clock_out');
   }
+  updateTimesheetFromToday();
+  render();
 };
 
-const fetchRequests = async () => {
-  if (!state.token) {
+const handleBreakToggle = () => {
+  if (state.session.status === 'clocked_out') {
+    showToast('Clock in before starting a break.', 'warning');
     return;
   }
-
-  const result = await sendOrQueue<{ requests?: TimeRequest[] } | TimeRequest[]>({
-    path: '/api/time-requests/my',
-    method: 'GET',
-    requiresAuth: true,
-    description: 'Fetch Time Requests'
-  });
-
-  if (result.ok) {
-    const response = result.data;
-    const requests = Array.isArray(response) ? response : response?.requests ?? [];
-    state.requests = requests;
-    renderRequests();
-  } else if (!result.queued) {
-    console.warn('Unable to fetch requests', result.error);
-    const parsed = parseApiError(result.error);
-    showToast(`Unable to fetch requests: ${parsed.message}`, 'error', parsed.code, parsed.hint);
+  if (state.session.status === 'break') {
+    completeBreakIfNeeded();
+    state.session.status = 'working';
+  } else {
+    completeLunchIfNeeded();
+    state.session.status = 'break';
+    state.session.breakStartedAt = new Date();
+    pushActivity('Break started', 'break');
+    showToast('Enjoy your break.', 'success');
+    logAction('break_start');
   }
+  updateTimesheetFromToday();
+  render();
 };
 
-const fetchCurrentUser = async () => {
-  if (!state.token) {
+const handleLunchToggle = () => {
+  if (state.session.status === 'clocked_out') {
+    showToast('Clock in before starting lunch.', 'warning');
     return;
   }
-
-  const result = await sendOrQueue<{ user?: { id: number; email: string; name?: string; role?: string } }>({
-    path: '/api/me',
-    method: 'GET',
-    requiresAuth: true,
-    description: 'Fetch Current User'
-  });
-
-  if (result.ok) {
-    const payload = result.data;
-    if (payload && typeof payload === 'object' && 'user' in payload) {
-      state.user = (payload as { user?: { id: number; email: string; name?: string; role?: string } }).user ?? null;
-      updateStatus();
-    }
-  } else if (!result.queued) {
-    console.warn('Unable to fetch current user', result.error);
-    const parsed = parseApiError(result.error);
-    showToast(`Unable to fetch user: ${parsed.message}`, 'error', parsed.code, parsed.hint);
+  if (state.session.status === 'lunch') {
+    completeLunchIfNeeded();
+    state.session.status = 'working';
+  } else {
+    completeBreakIfNeeded();
+    state.session.status = 'lunch';
+    state.session.lunchStartedAt = new Date();
+    pushActivity('Lunch started', 'lunch');
+    showToast('Lunch started.', 'success');
+    logAction('lunch_start');
   }
+  updateTimesheetFromToday();
+  render();
 };
 
-const submitRequest = async () => {
-  if (!requestForm || !state.bootstrap) {
+const handlePresence = () => {
+  if (state.session.status === 'clocked_out') {
+    showToast('Start a session before confirming presence.', 'warning');
+    return;
+  }
+  state.session.lastPresenceCheck = new Date();
+  state.session.nextPresenceCheck = addMinutes(state.session.lastPresenceCheck, 45);
+  state.today.presenceMisses = Math.max(0, state.today.presenceMisses - 1);
+  pushActivity('Presence confirmed', 'presence');
+  showToast('Presence confirmed.', 'success');
+  logAction('presence_confirm');
+  updateTimesheetFromToday();
+  render();
+};
+
+const handleRequestSubmit = (event: SubmitEvent) => {
+  event.preventDefault();
+  const type = dom.requestType.value as RequestType;
+  const hours = Number(dom.requestHours.value) || 0;
+  const reason = dom.requestReason.value.trim();
+  if (!reason) {
+    showToast('Share a short reason for the request.', 'warning');
     return;
   }
 
-  if (!state.token) {
-    const authenticated = await ensureAuthenticated();
-    if (!authenticated) {
-      if (requestErrorEl) {
-        requestErrorEl.textContent = 'Log in to submit a request.';
-      }
-      return;
-    }
-  }
+  const submittedAt = new Date();
+  const defaultEnd = type === 'time_off' ? addDays(submittedAt, 1) : submittedAt;
 
-  if (!state.email) {
-    if (requestErrorEl) {
-      requestErrorEl.textContent = 'Log in to submit a request.';
-    }
-    return;
-  }
-
-  const type = requestTypeInput?.value ?? '';
-  const startDate = requestStartDateInput?.value ?? '';
-  const endDateRaw = requestEndDateInput?.value ?? '';
-  const hoursValue = requestHoursInput?.value ?? '';
-  const reason = requestReasonInput?.value?.trim() ?? '';
-
-  if (!type || !startDate || !hoursValue || !reason) {
-    if (requestErrorEl) {
-      requestErrorEl.textContent = 'All required fields must be completed.';
-    }
-    return;
-  }
-
-  const hours = Number.parseFloat(hoursValue);
-  if (Number.isNaN(hours) || hours <= 0) {
-    if (requestErrorEl) {
-      requestErrorEl.textContent = 'Hours must be a positive number.';
-    }
-    return;
-  }
-
-  const endDate = endDateRaw ? endDateRaw : null;
-  if (endDate && endDate < startDate) {
-    if (requestErrorEl) {
-      requestErrorEl.textContent = 'End date cannot be before start date.';
-    }
-    return;
-  }
-
-  const payload: Record<string, unknown> = {
+  const request: RequestItem = {
+    id: `req-${Date.now()}`,
     type,
-    startDate,
+    status: 'pending',
+    startDate: submittedAt.toISOString(),
+    endDate: defaultEnd.toISOString(),
     hours,
     reason,
-    email: state.email,
-    deviceId: state.bootstrap.deviceId
+    submittedAt: submittedAt.toISOString()
   };
 
-  if (endDate) {
-    payload.endDate = endDate;
+  state.requests.unshift(request);
+  if (type === 'make_up') {
+    state.makeUpCap.used = Math.min(state.makeUpCap.cap, Math.round((state.makeUpCap.used + hours) * 100) / 100);
   }
 
-  if (requestErrorEl) {
-    requestErrorEl.textContent = '';
-  }
-  if (requestSuccessEl) {
-    requestSuccessEl.textContent = 'Submitting...';
-  }
-
-  const result = await sendOrQueue({
-    path: '/api/time-requests',
-    body: payload,
-    requiresAuth: true,
-    description: 'Submit Time Request'
-  });
-
-  if (result.ok) {
-    if (requestSuccessEl) {
-      requestSuccessEl.textContent = 'Request submitted.';
-    }
-    toggleRequestModal(false);
-    await fetchRequests();
-  } else if (result.queued) {
-    if (requestSuccessEl) {
-      requestSuccessEl.textContent = 'Offline: request queued and will submit automatically.';
-    }
-    return;
-  } else {
-    if (requestErrorEl) {
-      requestErrorEl.textContent = 'Unable to submit request.';
-    }
-  }
-};
-
-const showPresencePrompt = (prompt: PresencePrompt) => {
-  state.currentPrompt = prompt;
-  activePromptId = prompt.id;
-
-  if (presenceMessageEl) {
-    presenceMessageEl.textContent = prompt.message ?? 'Please confirm your presence.';
-  }
-
-  togglePresenceModal(true);
-
-  if (presenceTimeout) {
-    clearTimeout(presenceTimeout);
-  }
-  presenceTimeout = window.setTimeout(() => {
-    if (activePromptId === prompt.id) {
-      togglePresenceModal(false);
-      window.attendance.closePresencePrompt(prompt.id);
-      state.currentPrompt = null;
-      activePromptId = null;
-    }
-  }, PRESENCE_CONFIRMATION_WINDOW_MS);
-
-  requestPresencePopup(prompt);
-};
-
-const acknowledgePresencePrompt = async (source: 'overlay' | 'popup') => {
-  if (!state.currentPrompt || !state.sessionId || presenceAckInFlight) {
-    return;
-  }
-
-  const prompt = state.currentPrompt;
-  presenceAckInFlight = true;
-
-  if (presenceTimeout) {
-    clearTimeout(presenceTimeout);
-    presenceTimeout = null;
-  }
-
-  if (source === 'popup') {
-    togglePresenceModal(false);
-  } else if (presenceConfirmBtn) {
-    presenceConfirmBtn.disabled = true;
-  }
-
-  window.attendance.closePresencePrompt(prompt.id);
-
-  const request: ApiRequest = {
-    path: '/api/events/presence/confirm',
-    body: {
-      sessionId: state.sessionId,
-      promptId: prompt.id,
-      timestamp: new Date().toISOString()
-    },
-    description: 'Presence Confirmation'
-  };
-
-  const result = await sendOrQueue(request);
-  presenceAckInFlight = false;
-
-  if (!result.ok && !result.queued) {
-    console.error('Presence confirmation failed', result.error);
-    const parsed = parseApiError(result.error);
-    showToast(`Presence confirmation failed: ${parsed.message}`, 'error', parsed.code, parsed.hint);
-    if (source === 'overlay' && presenceConfirmBtn) {
-      presenceConfirmBtn.disabled = false;
-    }
-    state.currentPrompt = prompt;
-    activePromptId = prompt.id;
-    requestPresencePopup(prompt);
-    togglePresenceModal(true);
-    return;
-  }
-
-  state.currentPrompt = null;
-  activePromptId = null;
-  togglePresenceModal(false);
-  window.attendance.closePresencePrompt(prompt.id);
-};
-
-const confirmPresence = async () => {
-  await acknowledgePresencePrompt('overlay');
-};
-
-const requireSessionAndSend = async (path: string, description: string) => {
-  if (!state.token) {
-    const authenticated = await ensureAuthenticated();
-    if (!authenticated) {
-      return;
-    }
-  }
-
-  if (!state.sessionId) {
-    await startSession();
-    if (!state.sessionId) {
-      console.warn('No active session for action');
-      return;
-    }
-  }
-
-  const request: ApiRequest = {
-    path,
-    body: { sessionId: state.sessionId, timestamp: new Date().toISOString() },
-    requiresAuth: path.startsWith('/api/time-requests') ? true : false,
-    description
-  };
-
-  console.info('[ui]', {
-    event: 'api_attempt',
-    description,
-    path,
-    payload: request.body,
-    sessionId: state.sessionId
-  });
-
-  const result = await sendOrQueue(request);
-  if (result.ok) {
-    const payload = typeof result.data === 'object' && result.data !== null ? (result.data as Record<string, unknown>) : undefined;
-    const pausePayload = payload ? parsePausePayload(payload.pause) : undefined;
-    if (pausePayload) {
-      const updatedPauseState = applyPauseUpdate(
-        { current: state.currentPause, history: state.pauseHistory },
-        pausePayload,
-        new Date()
-      );
-      applyPauseStateFromUpdate(updatedPauseState);
-      return;
-    }
-
-    if (path === '/api/events/break/start') {
-      state.sessionState = 'break';
-      updateStatus();
-      return;
-    }
-    if (path === '/api/events/break/end') {
-      state.currentPause = null;
-      stopPauseTimer();
-      state.sessionState = 'active';
-      updateStatus();
-      return;
-    }
-    if (path === '/api/events/lunch/start') {
-      state.sessionState = 'lunch';
-      updateStatus();
-      return;
-    }
-    if (path === '/api/events/lunch/end') {
-      state.currentPause = null;
-      stopPauseTimer();
-      state.sessionState = 'active';
-      updateStatus();
-      return;
-    }
-    return;
-  }
-  if (!result.queued) {
-    console.error(`${description} failed`, result.error);
-    const parsed = parseApiError(result.error);
-    showToast(`${description} failed: ${parsed.message}`, 'error', parsed.code, parsed.hint);
-    return;
-  }
-  showToast(`${description} queued`, 'info');
-};
-
-const initPresenceHandlers = () => {
-  if (presenceConfirmBtn) {
-    presenceConfirmBtn.addEventListener('click', () => {
-      void confirmPresence();
-    });
-  }
-
-  if (presenceDismissBtn) {
-    presenceDismissBtn.addEventListener('click', () => {
-      togglePresenceModal(false);
-    });
-  }
-
-  window.attendance.onPresenceWindowConfirm((promptId) => {
-    if (!activePromptId || promptId !== activePromptId) {
-      return;
-    }
-    void acknowledgePresencePrompt('popup');
-  });
-
-  window.attendance.onPresenceWindowDismiss((promptId) => {
-    if (activePromptId && promptId === activePromptId) {
-      togglePresenceModal(false);
-    }
-  });
-};
-
-const initSettingsHandlers = () => {
-  const populate = () => {
-    if (!state.settings) {
-      return;
-    }
-    if (settingsBaseUrlInput) {
-      settingsBaseUrlInput.value = state.settings.serverBaseUrl;
-    }
-    if (settingsEmailInput) {
-      settingsEmailInput.value = state.settings.workEmail ?? '';
-    }
-    if (state.lastHealthSuccess) {
-      state.healthStatus = {
-        state: 'success',
-        baseUrl: state.lastHealthSuccess.baseUrl,
-        version: state.lastHealthSuccess.version,
-        time: state.lastHealthSuccess.time
-      };
-    } else {
-      state.healthStatus = { state: 'idle' };
-    }
-    renderHealthStatus();
-  };
-
-  if (openSettingsBtn) {
-    openSettingsBtn.addEventListener('click', () => {
-      populate();
-      toggleSettingsModal(true);
-    });
-  }
-
-  if (settingsCancelBtn) {
-    settingsCancelBtn.addEventListener('click', () => {
-      toggleSettingsModal(false);
-    });
-  }
-
-  if (settingsTestBtn && settingsBaseUrlInput) {
-    settingsTestBtn.addEventListener('click', async () => {
-      const baseUrlValue = settingsBaseUrlInput.value.trim();
-      if (!baseUrlValue) {
-        if (settingsErrorEl) {
-          settingsErrorEl.textContent = 'Enter a URL to test.';
-        }
-        return;
-      }
-
-      if (settingsErrorEl) {
-        settingsErrorEl.textContent = '';
-        settingsErrorEl.innerHTML = '';
-      }
-
-      state.healthStatus = { state: 'testing', baseUrl: baseUrlValue };
-      renderHealthStatus();
-
-      settingsTestBtn.disabled = true;
-
-      const buildHealthUrl = () => {
-        try {
-          return new URL('/api/health', baseUrlValue).toString();
-        } catch (_error) {
-          return null;
-        }
-      };
-
-      const healthUrl = buildHealthUrl();
-      if (!healthUrl) {
-        state.healthStatus = { state: 'error', baseUrl: baseUrlValue, detail: 'Invalid server URL.' };
-        renderHealthStatus();
-        settingsTestBtn.disabled = false;
-        return;
-      }
-
-      try {
-        const response = await window.fetch(healthUrl, { method: 'GET' });
-        if (!response.ok) {
-          const detail = `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`;
-          state.healthStatus = { state: 'error', baseUrl: baseUrlValue, detail };
-          renderHealthStatus();
-          return;
-        }
-
-        const data = (await response.json()) as { ok?: boolean; version?: string; time?: string };
-        if (!data?.ok || typeof data.version !== 'string' || typeof data.time !== 'string') {
-          state.healthStatus = {
-            state: 'error',
-            baseUrl: baseUrlValue,
-            detail: 'Invalid health response.'
-          };
-          renderHealthStatus();
-          return;
-        }
-
-        const parsedTime = new Date(data.time);
-        if (Number.isNaN(parsedTime.getTime())) {
-          state.healthStatus = {
-            state: 'error',
-            baseUrl: baseUrlValue,
-            detail: 'Invalid timestamp in response.'
-          };
-          renderHealthStatus();
-          return;
-        }
-
-        state.healthStatus = {
-          state: 'success',
-          baseUrl: baseUrlValue,
-          version: data.version,
-          time: parsedTime
-        };
-        state.lastHealthSuccess = {
-          baseUrl: baseUrlValue,
-          version: data.version,
-          time: parsedTime
-        };
-        renderHealthStatus();
-      } catch (error) {
-        const detail = error instanceof Error ? `Network error: ${error.message}` : 'Network error.';
-        state.healthStatus = { state: 'error', baseUrl: baseUrlValue, detail };
-        renderHealthStatus();
-      } finally {
-        settingsTestBtn.disabled = false;
-      }
-    });
-  }
-
-  if (settingsForm) {
-    settingsForm.addEventListener('submit', async (event) => {
-      event.preventDefault();
-
-      const baseUrlValue = settingsBaseUrlInput?.value.trim() ?? '';
-      const workEmailValue = settingsEmailInput?.value.trim().toLowerCase() ?? '';
-      if (!baseUrlValue) {
-        if (settingsErrorEl) {
-          settingsErrorEl.textContent = 'Server URL is required.';
-        }
-        return;
-      }
-
-      if (!workEmailValue) {
-        if (settingsErrorEl) {
-          settingsErrorEl.textContent = 'Work email is required.';
-        }
-        return;
-      }
-
-      try {
-        const updatedConfig = await window.attendance.updateSettings({
-          serverBaseUrl: baseUrlValue,
-          workEmail: workEmailValue || null
-        });
-        state.settings = updatedConfig;
-        if (state.bootstrap) {
-          state.bootstrap.baseUrl = updatedConfig.serverBaseUrl;
-        }
-        apiClient.setBaseUrl(updatedConfig.serverBaseUrl);
-        state.email = updatedConfig.workEmail ?? state.email;
-        if (loginEmailInput && updatedConfig.workEmail) {
-          loginEmailInput.value = updatedConfig.workEmail;
-        }
-        void offlineQueue.process();
-        state.lastHealthSuccess = null;
-        state.healthStatus = { state: 'idle' };
-        renderHealthStatus();
-        if (settingsSuccessEl) {
-          settingsSuccessEl.textContent = 'Settings updated.';
-        }
-        if (settingsErrorEl) {
-          settingsErrorEl.textContent = '';
-        }
-        toggleSettingsModal(false);
-      } catch (error) {
-        if (settingsErrorEl) {
-          settingsErrorEl.textContent = 'Failed to update server URL.';
-        }
-        console.error('Settings update failed', error);
-      }
-    });
-  }
-};
-
-const initRequestHandlers = () => {
-  if (openRequestsBtn) {
-    openRequestsBtn.addEventListener('click', async () => {
-      if (!state.token) {
-        const authenticated = await ensureAuthenticated();
-        if (!authenticated) {
-          return;
-        }
-      }
-      await fetchRequests();
-      toggleRequestModal(true);
-    });
-  }
-
-  if (requestCancelBtn) {
-    requestCancelBtn.addEventListener('click', () => {
-      toggleRequestModal(false);
-    });
-  }
-
-  if (requestForm) {
-    requestForm.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      await submitRequest();
-    });
-  }
-
-  if (refreshRequestsBtn) {
-    refreshRequestsBtn.addEventListener('click', () => {
-      void fetchRequests();
-    });
-  }
-};
-
-const initTimesheetHandlers = () => {
-  ensureTimesheetFormDefaults();
-
-  if (openTimesheetBtn) {
-    openTimesheetBtn.addEventListener('click', async () => {
-      const authenticated = state.token ? true : await ensureAuthenticated();
-      if (!authenticated) {
-        return;
-      }
-      toggleTimesheetModal(true);
-    });
-  }
-
-  if (timesheetCloseBtn) {
-    timesheetCloseBtn.addEventListener('click', () => {
-      toggleTimesheetModal(false);
-    });
-  }
-
-  if (timesheetViewSelect) {
-    timesheetViewSelect.addEventListener('change', () => {
-      const view = timesheetViewSelect.value as TimesheetView;
-      updateTimesheetInputVisibility(view);
-      state.timesheetView = view;
-      state.timesheetReference = view === 'monthly'
-        ? timesheetMonthInput?.value?.trim() ?? null
-        : timesheetDateInput?.value?.trim() ?? null;
-    });
-  }
-
-  if (timesheetFilterForm) {
-    timesheetFilterForm.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const { view, date, month } = getTimesheetRequestValues();
-      await fetchTimesheet({ view, date: date ?? undefined, month: month ?? undefined });
-    });
-  }
-
-  if (timesheetRefreshBtn) {
-    timesheetRefreshBtn.addEventListener('click', async () => {
-      const { view, date, month } = getTimesheetRequestValues();
-      await fetchTimesheet({ view, date: date ?? undefined, month: month ?? undefined });
-    });
-  }
-
-  if (timesheetRequestsRefreshBtn) {
-    timesheetRequestsRefreshBtn.addEventListener('click', async () => {
-      const { view, date, month } = getTimesheetRequestValues();
-      await fetchTimesheet({ view, date: date ?? undefined, month: month ?? undefined, silent: true });
-    });
-  }
-
-  if (timesheetTableBody) {
-    timesheetTableBody.addEventListener('click', (event) => {
-      const target = event.target as HTMLElement | null;
-      if (!target || !target.matches('[data-action="timesheet-request-edit"]')) {
-        return;
-      }
-      const date = target.getAttribute('data-date');
-      const label = target.getAttribute('data-label') ?? (date ? formatLocalDate(date) : 'Selected day');
-      if (date) {
-        openTimesheetEditRequest(date, label);
-      }
-    });
-  }
-
-  if (timesheetEditCancelBtn) {
-    timesheetEditCancelBtn.addEventListener('click', () => {
-      toggleTimesheetEditModal(false);
-    });
-  }
-
-  if (timesheetEditForm) {
-    timesheetEditForm.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      if (!pendingTimesheetEdit || !state.timesheet) {
-        return;
-      }
-
-      const reason = timesheetEditReasonInput?.value.trim() ?? '';
-      if (!reason) {
-        if (timesheetEditErrorEl) {
-          timesheetEditErrorEl.textContent = 'Reason is required.';
-        }
-        if (timesheetEditSuccessEl) {
-          timesheetEditSuccessEl.textContent = '';
-        }
-        return;
-      }
-
-      const hoursValueRaw = timesheetEditHoursInput?.value.trim() ?? '';
-      let requestedMinutes: number | undefined;
-      if (hoursValueRaw) {
-        const parsed = Number.parseFloat(hoursValueRaw);
-        if (Number.isNaN(parsed) || parsed < 0) {
-          if (timesheetEditErrorEl) {
-            timesheetEditErrorEl.textContent = 'Hours must be zero or greater.';
-          }
-          if (timesheetEditSuccessEl) {
-            timesheetEditSuccessEl.textContent = '';
-          }
-          return;
-        }
-        if (parsed > 0) {
-          requestedMinutes = Math.round(parsed * 60);
-        }
-      }
-
-      if (timesheetEditErrorEl) {
-        timesheetEditErrorEl.textContent = '';
-      }
-      if (timesheetEditSuccessEl) {
-        timesheetEditSuccessEl.textContent = 'Submitting...';
-      }
-
-      const payload: Record<string, unknown> = {
-        view: state.timesheet.view,
-        rangeStart: state.timesheet.rangeStart,
-        targetDate: pendingTimesheetEdit.date,
-        reason
-      };
-      if (requestedMinutes && requestedMinutes > 0) {
-        payload.requestedMinutes = requestedMinutes;
-      }
-
-      const result = await sendOrQueue({
-        path: '/api/timesheets/edit-requests',
-        body: payload,
-        requiresAuth: true,
-        description: 'Submit Timesheet Edit'
-      });
-
-      if (result.ok) {
-        if (timesheetEditSuccessEl) {
-          timesheetEditSuccessEl.textContent = 'Edit request submitted.';
-        }
-        showToast('Edit request submitted', 'success');
-        toggleTimesheetEditModal(false);
-        await fetchTimesheet({
-          view: state.timesheet.view,
-          date: state.timesheet.view === 'monthly' ? undefined : state.timesheetReference ?? undefined,
-          month: state.timesheet.view === 'monthly' ? state.timesheetReference ?? undefined : undefined,
-          silent: true
-        });
-      } else if (result.queued) {
-        if (timesheetEditSuccessEl) {
-          timesheetEditSuccessEl.textContent = 'Offline: request queued and will submit automatically.';
-        }
-        toggleTimesheetEditModal(false);
-      } else {
-        const parsed = parseApiError(result.error);
-        if (timesheetEditErrorEl) {
-          timesheetEditErrorEl.textContent = parsed.message;
-        }
-        if (timesheetEditSuccessEl) {
-          timesheetEditSuccessEl.textContent = '';
-        }
-      }
-    });
-  }
-};
-
-const initActionButtons = () => {
-  buttons.forEach((button) => {
-    const actionKey = button.dataset.action;
-    if (!actionKey) {
-      return;
-    }
-
-    button.addEventListener('click', async () => {
-      console.info('[ui]', {
-        event: 'button_click',
-        action: actionKey,
-        sessionId: state.sessionId,
-        tokenPresent: Boolean(state.token)
-      });
-      window.attendance.logAction(actionKey);
-      switch (actionKey) {
-        case 'log-in':
-          if (await ensureAuthenticated()) {
-            if (!state.sessionId) {
-              await startSession();
-            }
-          }
-          break;
-        case 'start-break':
-          await requireSessionAndSend('/api/events/break/start', 'Start Break');
-          break;
-        case 'end-break':
-          await requireSessionAndSend('/api/events/break/end', 'End Break');
-          break;
-        case 'start-lunch':
-          await requireSessionAndSend('/api/events/lunch/start', 'Start Lunch');
-          break;
-        case 'end-lunch':
-          await requireSessionAndSend('/api/events/lunch/end', 'End Lunch');
-          break;
-        case 'log-out':
-          await endSession();
-          break;
-        default:
-          console.warn(`Unknown action: ${actionKey}`);
-      }
-    });
-  });
-};
-
-const bootstrap = async () => {
-  const bootstrapData = await window.attendance.getBootstrap();
-  state.bootstrap = bootstrapData;
-
-  const uiMode = bootstrapData.presenceUiMode;
-  if (uiMode === 'overlay' || uiMode === 'popup' || uiMode === 'both') {
-    presenceUiMode = uiMode;
-  } else {
-    presenceUiMode = 'both';
-  }
-
-  const settings = await window.attendance.getSettings();
-  state.settings = settings;
-  state.email = settings.workEmail ?? state.email;
-  if (loginEmailInput && state.email) {
-    loginEmailInput.value = state.email;
-  }
-
-  const baseUrl = settings.serverBaseUrl ?? bootstrapData.baseUrl;
-  bootstrapData.baseUrl = baseUrl;
-
-  apiClient = new ApiClient(baseUrl);
-  offlineQueue = new OfflineQueue(apiClient);
-  await offlineQueue.initialize();
-
-  window.addEventListener('online', () => {
-    void offlineQueue.process();
-    void fetchRequests();
-  });
-};
-
-const init = async () => {
-  await bootstrap();
-  initActivityTracking();
-  initPresenceHandlers();
-  initSettingsHandlers();
-  initRequestHandlers();
-  initTimesheetHandlers();
-  initActionButtons();
-  updateStatus();
+  dom.requestForm.reset();
+  dom.requestHours.value = '1';
+  showToast('Request submitted.', 'success');
+  pushActivity(`Submitted ${requestLabel(type)}`, 'request');
   renderRequests();
-  void fetchSystemStatus();
+  renderSnapshot();
+  logAction('request_submit');
 };
 
-export const __test = {
-  resolvePresencePrompt,
-  shouldDisplayPresencePrompt,
-  showPresencePrompt,
-  confirmPresence,
-  acknowledgePresencePrompt,
-  getPresenceModal: () => presenceModal,
-  getPresenceConfirmButton: () => presenceConfirmBtn,
-  getState: () => state,
-  setSendOrQueueHandler,
-  resetSendOrQueueHandler,
-  setPresenceUiMode: (mode: PresenceUiMode) => {
-    presenceUiMode = mode;
-  }
+const handleTimesheetChange = () => {
+  state.timesheet.view = dom.timesheetView.value as TimesheetView;
+  renderTimesheet();
 };
 
-void init();
+const handleDownload = () => {
+  const period = state.timesheet.periods[state.timesheet.view];
+  const header = ['Date', 'Active Hours', 'Idle Hours', 'Breaks', 'Lunches', 'Presence Misses', 'Note'];
+  const rows = period.days.map((day) => [
+    day.label,
+    formatHours(day.activeHours),
+    formatHours(day.idleHours),
+    `${day.breaks}`,
+    `${day.lunches}`,
+    `${day.presenceMisses}`,
+    day.note ?? ''
+  ]);
+
+  const csv = [header, ...rows]
+    .map((line) => line.map((value) => `"${value.replace(/"/g, '""')}"`).join(','))
+    .join('
+');
+
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  const slug = period.label.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  link.download = `timesheet-${slug}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  showToast('Timesheet exported.', 'info');
+};
+
+const initialize = () => {
+  updateTimesheetFromToday();
+  render();
+
+  dom.clockToggle.addEventListener('click', handleClockToggle);
+  dom.breakToggle.addEventListener('click', handleBreakToggle);
+  dom.lunchToggle.addEventListener('click', handleLunchToggle);
+  dom.presenceButton.addEventListener('click', handlePresence);
+  dom.requestForm.addEventListener('submit', handleRequestSubmit);
+  dom.timesheetView.addEventListener('change', handleTimesheetChange);
+  dom.downloadButton.addEventListener('click', handleDownload);
+
+  window.setInterval(renderHero, 30_000);
+  window.addEventListener('focus', renderHero);
+};
+
+initialize();
