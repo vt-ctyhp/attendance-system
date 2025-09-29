@@ -105,9 +105,9 @@ type SessionRecord = {
   status: string;
   startedAt: Date;
   endedAt: Date | null;
-  user: { name: string; email: string };
-  minuteStats: Array<{ active: boolean; idle: boolean }>;
-  events: Array<{ type: string }>;
+  user: { name: string; email: string; role: string };
+  minuteStats: Array<{ minuteStart: Date; active: boolean; idle: boolean }>;
+  events: Array<{ type: string; ts: Date }>;
   pauses: Array<{ type: string; sequence: number; startedAt: Date; endedAt: Date | null; durationMinutes: number | null }>;
 };
 
@@ -121,6 +121,52 @@ type PauseEntry = {
   startedAt: Date;
   endedAt: Date | null;
   durationMinutes: number;
+};
+
+type RosterStatusKey =
+  | 'active'
+  | 'break'
+  | 'lunch'
+  | 'logged_out'
+  | 'not_logged_in'
+  | 'pto'
+  | 'day_off'
+  | 'make_up';
+
+type TodayRosterRow = {
+  userId: number;
+  name: string;
+  email: string;
+  role: string;
+  statusKey: RosterStatusKey;
+  statusLabel: string;
+  statusDetail?: string;
+  statusSince: Date | null;
+  idleSince: Date | null;
+  currentIdleMinutes: number;
+  totalIdleMinutes: number;
+  breakCount: number;
+  totalBreakMinutes: number;
+  lunchCount: number;
+  totalLunchMinutes: number;
+  firstLogin: Date | null;
+  presenceMisses: number;
+  requestBadges: RequestBadge[];
+};
+
+type TodayRosterTotals = {
+  totalIdleMinutes: number;
+  breakCount: number;
+  totalBreakMinutes: number;
+  lunchCount: number;
+  totalLunchMinutes: number;
+  presenceMisses: number;
+};
+
+type TodayRosterData = {
+  rows: TodayRosterRow[];
+  totals: TodayRosterTotals;
+  hasComputedNotice: boolean;
 };
 
 type RequestBadge = {
@@ -154,6 +200,7 @@ const formatFullDate = (value: Date) => formatInTimeZone(value, DASHBOARD_TIME_Z
 const formatShortDate = (value: Date) => formatInTimeZone(value, DASHBOARD_TIME_ZONE, 'MMM d');
 const formatIsoDateTime = (value: Date) => formatInTimeZone(value, DASHBOARD_TIME_ZONE, ISO_DATE_TIME);
 const formatIsoDate = (value: Date) => formatInTimeZone(value, DASHBOARD_TIME_ZONE, ISO_DATE);
+const formatTimeOfDay = (value: Date) => formatInTimeZone(value, DASHBOARD_TIME_ZONE, 'h:mm a');
 
 const minutesFormatter = (value: number) => `${value} min`;
 
@@ -773,13 +820,466 @@ const collectPauseEntries = (sessions: SessionRecord[], now: Date): PauseEntry[]
           userName: session.user.name,
           userEmail: session.user.email,
           type: (pause.type === 'break' ? 'break' : 'lunch') as PauseEntry['type'],
-        sequence: pause.sequence,
-        startedAt: pause.startedAt,
-        endedAt: pause.endedAt,
-        durationMinutes: computePauseDuration(pause, now)
+          sequence: pause.sequence,
+          startedAt: pause.startedAt,
+          endedAt: pause.endedAt,
+          durationMinutes: computePauseDuration(pause, now)
         }))
     )
     .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime());
+
+const MINUTE_MS = 60_000;
+
+type Interval = { start: Date; end: Date };
+
+const clampIntervalToRange = (
+  start: Date,
+  end: Date | null,
+  now: Date,
+  rangeStart: Date,
+  rangeEnd: Date
+): Interval | null => {
+  const effectiveEnd = end ?? now;
+  const clampedStart = start < rangeStart ? rangeStart : start;
+  const clampedEnd = effectiveEnd > rangeEnd ? rangeEnd : effectiveEnd;
+  if (clampedEnd <= clampedStart) {
+    return null;
+  }
+  return { start: clampedStart, end: clampedEnd };
+};
+
+const intervalOverlaps = (intervals: Interval[], start: Date, end: Date) =>
+  intervals.some((interval) => start < interval.end && end > interval.start);
+
+const sumIntervalsInMinutes = (intervals: Interval[]) =>
+  intervals.reduce((total, interval) => total + Math.max(0, Math.ceil((interval.end.getTime() - interval.start.getTime()) / MINUTE_MS)), 0);
+
+const resolveIdleStreak = (
+  session: SessionRecord,
+  now: Date,
+  dayStart: Date,
+  exclusionIntervals: Interval[]
+): { minutes: number; since: Date | null } => {
+  const sortedStats = session.minuteStats
+    .filter((stat) => stat.minuteStart >= dayStart && stat.minuteStart <= now && stat.active)
+    .sort((a, b) => a.minuteStart.getTime() - b.minuteStart.getTime());
+
+  let idleStart: Date | null = null;
+  for (let index = sortedStats.length - 1; index >= 0; index -= 1) {
+    const stat = sortedStats[index];
+    if (!stat.idle) {
+      break;
+    }
+    const minuteStart = stat.minuteStart;
+    const minuteEnd = new Date(minuteStart.getTime() + MINUTE_MS);
+    if (intervalOverlaps(exclusionIntervals, minuteStart, minuteEnd)) {
+      break;
+    }
+    idleStart = minuteStart;
+  }
+
+  if (!idleStart) {
+    return { minutes: 0, since: null };
+  }
+
+  const elapsedMinutes = Math.max(0, Math.ceil((now.getTime() - idleStart.getTime()) / MINUTE_MS));
+  return { minutes: elapsedMinutes, since: idleStart };
+};
+
+const computeIdleMinutes = (
+  sessions: SessionRecord[],
+  dayStart: Date,
+  dayEnd: Date,
+  now: Date,
+  exclusionIntervals: Interval[]
+) => {
+  let total = 0;
+  for (const session of sessions) {
+    for (const stat of session.minuteStats) {
+      if (!stat.idle || !stat.active) {
+        continue;
+      }
+      const minuteStart = stat.minuteStart;
+      if (minuteStart < dayStart || minuteStart >= dayEnd) {
+        continue;
+      }
+      const minuteEnd = new Date(minuteStart.getTime() + MINUTE_MS);
+      if (intervalOverlaps(exclusionIntervals, minuteStart, minuteEnd)) {
+        continue;
+      }
+      total += 1;
+    }
+  }
+  return total;
+};
+
+const resolveTimeAwayStatus = (
+  requests: Array<{ type: string; status: string; startDate: Date; endDate: Date }>,
+  dayStart: Date
+): { key: RosterStatusKey; label: string; since: Date } | null => {
+  const priority: Record<RosterStatusKey, number> = {
+    lunch: 99,
+    break: 98,
+    active: 97,
+    logged_out: 96,
+    not_logged_in: 95,
+    pto: 0,
+    day_off: 1,
+    make_up: 2
+  };
+
+  const mapped = requests
+    .filter((request) => request.status === 'approved')
+    .map((request) => {
+      if (request.type === 'pto') {
+        return { key: 'pto' as const, startDate: request.startDate };
+      }
+      if (request.type === 'non_pto') {
+        return { key: 'day_off' as const, startDate: request.startDate };
+      }
+      if (request.type === 'make_up') {
+        return { key: 'make_up' as const, startDate: request.startDate };
+      }
+      return null;
+    })
+    .filter((value): value is { key: 'pto' | 'day_off' | 'make_up'; startDate: Date } => value !== null);
+
+  if (!mapped.length) {
+    return null;
+  }
+
+  mapped.sort((a, b) => {
+    const rankA = priority[a.key];
+    const rankB = priority[b.key];
+    if (rankA !== rankB) {
+      return rankA - rankB;
+    }
+    return a.startDate.getTime() - b.startDate.getTime();
+  });
+
+  const selection = mapped[0];
+  const since = selection.startDate > dayStart ? selection.startDate : dayStart;
+  const label = selection.key === 'pto' ? 'PTO' : selection.key === 'day_off' ? 'Day Off' : 'Make up Hours';
+  return { key: selection.key, label, since };
+};
+
+const buildRosterRow = (
+  user: { id: number; name: string; email: string; role: string },
+  sessions: SessionRecord[],
+  requests: Array<{ type: string; status: string; startDate: Date; endDate: Date }>,
+  badges: RequestBadge[],
+  dayStart: Date,
+  dayEnd: Date,
+  now: Date
+): TodayRosterRow => {
+  const sortedSessions = sessions
+    .filter((session) => session.userId === user.id)
+    .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime());
+
+  let presenceMisses = 0;
+  let firstLogin: Date | null = null;
+
+  for (const session of sortedSessions) {
+    for (const event of session.events) {
+      if (event.ts < dayStart || event.ts > dayEnd) {
+        continue;
+      }
+      if (event.type === 'presence_miss') {
+        presenceMisses += 1;
+      }
+      if (event.type === 'login') {
+        if (!firstLogin || event.ts < firstLogin) {
+          firstLogin = event.ts;
+        }
+      }
+    }
+  }
+
+  if (!firstLogin) {
+    const fallback = sortedSessions
+      .map((session) => session.startedAt)
+      .filter((startedAt) => startedAt >= dayStart && startedAt <= dayEnd)
+      .sort((a, b) => a.getTime() - b.getTime())[0];
+    if (fallback) {
+      firstLogin = fallback;
+    }
+  }
+
+  const breakIntervals: Interval[] = [];
+  const lunchIntervals: Interval[] = [];
+  let breakCount = 0;
+  let lunchCount = 0;
+
+  for (const session of sortedSessions) {
+    for (const pause of session.pauses) {
+      if (pause.type !== 'break' && pause.type !== 'lunch') {
+        continue;
+      }
+      if (pause.type === 'break' && pause.startedAt >= dayStart && pause.startedAt <= dayEnd) {
+        breakCount += 1;
+      }
+      if (pause.type === 'lunch' && pause.startedAt >= dayStart && pause.startedAt <= dayEnd) {
+        lunchCount += 1;
+      }
+      const interval = clampIntervalToRange(pause.startedAt, pause.endedAt, now, dayStart, dayEnd);
+      if (!interval) {
+        continue;
+      }
+      if (pause.type === 'break') {
+        breakIntervals.push(interval);
+      } else {
+        lunchIntervals.push(interval);
+      }
+    }
+  }
+
+  const totalBreakMinutes = sumIntervalsInMinutes(breakIntervals);
+  const totalLunchMinutes = sumIntervalsInMinutes(lunchIntervals);
+  const pauseIntervals = [...breakIntervals, ...lunchIntervals];
+  const totalIdleMinutes = computeIdleMinutes(sortedSessions, dayStart, dayEnd, now, pauseIntervals);
+
+  const activeSession = sortedSessions
+    .filter((session) => session.status === 'active')
+    .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime())
+    .pop() ?? null;
+
+  let statusKey: RosterStatusKey = 'not_logged_in';
+  let statusLabel = 'Not Logged In';
+  let statusSince: Date | null = null;
+  let idleSince: Date | null = null;
+  let currentIdleMinutes = 0;
+
+  if (activeSession) {
+    const activeLunch = activeSession.pauses.find((pause) => pause.type === 'lunch' && !pause.endedAt);
+    const activeBreak = activeSession.pauses.find((pause) => pause.type === 'break' && !pause.endedAt);
+
+    if (activeLunch) {
+      statusKey = 'lunch';
+      const lunchNumber = activeLunch.sequence;
+      statusLabel = lunchNumber >= 2 ? `On Lunch (x${lunchNumber})` : 'On Lunch';
+      statusSince = activeLunch.startedAt;
+    } else if (activeBreak) {
+      statusKey = 'break';
+      statusLabel = `On Break (#${activeBreak.sequence})`;
+      statusSince = activeBreak.startedAt;
+    } else {
+      statusKey = 'active';
+      statusLabel = 'Active';
+      const lastPauseEnd = activeSession.pauses
+        .filter((pause) => pause.endedAt && pause.endedAt <= now)
+        .reduce<Date | null>((latest, pause) => {
+          if (!pause.endedAt) {
+            return latest;
+          }
+          if (!latest || pause.endedAt > latest) {
+            return pause.endedAt;
+          }
+          return latest;
+        }, null);
+      statusSince = lastPauseEnd && lastPauseEnd > activeSession.startedAt ? lastPauseEnd : activeSession.startedAt;
+      const idleResult = resolveIdleStreak(activeSession, now, dayStart, pauseIntervals);
+      currentIdleMinutes = idleResult.minutes;
+      idleSince = idleResult.since;
+    }
+  } else {
+    const timeAway = resolveTimeAwayStatus(requests, dayStart);
+    if (timeAway) {
+      statusKey = timeAway.key;
+      statusLabel = timeAway.label;
+      statusSince = timeAway.since;
+    } else {
+      const completedSessions = sortedSessions
+        .filter((session) => session.endedAt && session.endedAt >= dayStart && session.endedAt <= dayEnd)
+        .sort((a, b) => (a.endedAt && b.endedAt ? a.endedAt.getTime() - b.endedAt.getTime() : 0));
+      const latestCompleted = completedSessions[completedSessions.length - 1];
+      if (latestCompleted && latestCompleted.endedAt) {
+        statusKey = 'logged_out';
+        statusLabel = 'Logged Out';
+        statusSince = latestCompleted.endedAt;
+      } else {
+        statusKey = 'not_logged_in';
+        statusLabel = 'Not Logged In';
+        statusSince = null;
+      }
+    }
+  }
+
+  return {
+    userId: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    statusKey,
+    statusLabel,
+    statusSince,
+    idleSince,
+    currentIdleMinutes,
+    totalIdleMinutes,
+    breakCount,
+    totalBreakMinutes,
+    lunchCount,
+    totalLunchMinutes,
+    firstLogin,
+    presenceMisses,
+    requestBadges: badges
+  };
+};
+
+const fetchTodayRosterData = async (referenceDate: Date, sessions: SessionRecord[]): Promise<TodayRosterData> => {
+  const dayStart = zonedStartOfDay(referenceDate);
+  const dayEnd = zonedEndOfDay(referenceDate);
+  const now = new Date();
+
+  const users = await prisma.user.findMany({
+    where: { active: true },
+    orderBy: { name: 'asc' },
+    select: { id: true, name: true, email: true, role: true }
+  });
+
+  if (!users.length) {
+    return {
+      rows: [],
+      totals: {
+        totalIdleMinutes: 0,
+        breakCount: 0,
+        totalBreakMinutes: 0,
+        lunchCount: 0,
+        totalLunchMinutes: 0,
+        presenceMisses: 0
+      },
+      hasComputedNotice: false
+    };
+  }
+
+  const userIds = users.map((user) => user.id);
+  const userIdSet = new Set(userIds);
+
+  const relevantSessions = sessions.filter((session) => userIdSet.has(session.userId));
+
+  const requests = await prisma.timeRequest.findMany({
+    where: {
+      userId: { in: userIds },
+      status: 'approved',
+      startDate: { lte: dayEnd },
+      endDate: { gte: dayStart }
+    },
+    orderBy: { startDate: 'asc' }
+  });
+
+  const requestsByUser = new Map<number, Array<{ type: string; status: string; startDate: Date; endDate: Date }>>();
+  for (const request of requests) {
+    const bucket = requestsByUser.get(request.userId) ?? [];
+    bucket.push(request);
+    requestsByUser.set(request.userId, bucket);
+  }
+
+  const badgeMap = await collectRequestBadges(userIds, dayStart, dayEnd);
+
+  const rows = users.map((user) =>
+    buildRosterRow(
+      user,
+      relevantSessions,
+      requestsByUser.get(user.id) ?? [],
+      badgeMap.get(user.id) ?? [],
+      dayStart,
+      dayEnd,
+      now
+    )
+  );
+
+  const totals = rows.reduce<TodayRosterTotals>(
+    (acc, row) => ({
+      totalIdleMinutes: acc.totalIdleMinutes + row.totalIdleMinutes,
+      breakCount: acc.breakCount + row.breakCount,
+      totalBreakMinutes: acc.totalBreakMinutes + row.totalBreakMinutes,
+      lunchCount: acc.lunchCount + row.lunchCount,
+      totalLunchMinutes: acc.totalLunchMinutes + row.totalLunchMinutes,
+      presenceMisses: acc.presenceMisses + row.presenceMisses
+    }),
+    {
+      totalIdleMinutes: 0,
+      breakCount: 0,
+      totalBreakMinutes: 0,
+      lunchCount: 0,
+      totalLunchMinutes: 0,
+      presenceMisses: 0
+    }
+  );
+
+  return {
+    rows,
+    totals,
+    hasComputedNotice: rows.length > 0
+  };
+};
+
+const renderSinceCell = (since: Date | null) => {
+  if (!since) {
+    return '—';
+  }
+  const iso = formatIsoDateTime(since);
+  const label = formatTimeOfDay(since);
+  const tooltip = formatDateTime(since);
+  return `<span class="since" data-since="${iso}" title="${escapeHtml(tooltip)}"><span class="since__time">${escapeHtml(label)}</span><span class="since__elapsed" data-elapsed></span></span>`;
+};
+
+const renderIdleCell = (row: TodayRosterRow) => {
+  if (row.statusKey !== 'active') {
+    return '—';
+  }
+  if (!row.idleSince) {
+    return String(row.currentIdleMinutes);
+  }
+  const iso = formatIsoDateTime(row.idleSince);
+  return `<span data-idle-since="${iso}" data-idle-minutes="${row.currentIdleMinutes}">${row.currentIdleMinutes}</span>`;
+};
+
+const renderTimeCell = (value: Date | null) => {
+  if (!value) {
+    return '—';
+  }
+  const tooltip = formatDateTime(value);
+  return `<span title="${escapeHtml(tooltip)}">${escapeHtml(formatTimeOfDay(value))}</span>`;
+};
+
+const buildTodayRosterRowHtml = (row: TodayRosterRow, dateParam: string): string => {
+  const statusClass = `status status--${row.statusKey.replace(/_/g, '-')}`;
+  return `<tr data-user-id="${row.userId}">
+    <td>
+      ${detailLink(row.userId, dateParam, row.name)}
+      ${renderRequestBadges(row.requestBadges)}
+    </td>
+    <td><span class="${statusClass}">${escapeHtml(row.statusLabel)}</span></td>
+    <td>${renderSinceCell(row.statusSince)}</td>
+    <td data-idle-cell>${renderIdleCell(row)}</td>
+    <td>${row.totalIdleMinutes}</td>
+    <td>${row.breakCount}</td>
+    <td>${row.totalBreakMinutes}</td>
+    <td>${row.lunchCount}</td>
+    <td>${row.totalLunchMinutes}</td>
+    <td>${renderTimeCell(row.firstLogin)}</td>
+    <td>${row.presenceMisses}</td>
+  </tr>`;
+};
+
+const renderTodayRosterRows = (rows: TodayRosterRow[], dateParam: string) =>
+  rows.map((row) => buildTodayRosterRowHtml(row, dateParam)).join('\n');
+
+const renderRosterTotalsRow = (totals: TodayRosterTotals) => `
+  <tfoot data-roster-totals>
+    <tr class="totals">
+      <th colspan="4">Totals</th>
+      <th>${totals.totalIdleMinutes}</th>
+      <th>${totals.breakCount}</th>
+      <th>${totals.totalBreakMinutes}</th>
+      <th>${totals.lunchCount}</th>
+      <th>${totals.totalLunchMinutes}</th>
+      <th>—</th>
+      <th>${totals.presenceMisses}</th>
+    </tr>
+  </tfoot>
+`;
+
 
 export const fetchDailySummaries = async (referenceDate: Date) => {
   const dayStart = zonedStartOfDay(referenceDate);
@@ -787,10 +1287,8 @@ export const fetchDailySummaries = async (referenceDate: Date) => {
   const now = new Date();
   const sessions = (await prisma.session.findMany({
     where: {
-      startedAt: {
-        gte: dayStart,
-        lte: dayEnd
-      }
+      startedAt: { lte: dayEnd },
+      OR: [{ endedAt: null }, { endedAt: { gte: dayStart } }]
     },
     orderBy: { startedAt: 'asc' },
     include: {
@@ -822,7 +1320,8 @@ export const fetchDailySummaries = async (referenceDate: Date) => {
     summaries,
     totals: computeTotals(summaries),
     requestBadges,
-    pauses
+    pauses,
+    sessions
   };
 };
 
@@ -945,6 +1444,8 @@ const baseStyles = `
   .print-button { background: #6b7280; }
   .print-button:hover { background: #4b5563; }
   .meta { color: #4b5563; margin-bottom: 0.75rem; }
+  .meta--admin { font-size: 0.8rem; color: #2563eb; display: inline-flex; align-items: center; gap: 0.35rem; }
+  .meta--admin::before { content: 'ℹ️'; }
   .tz-note { margin: 0.75rem 0 1.25rem; font-size: 0.9rem; color: #4b5563; }
   a { color: #2563eb; }
   a:hover { text-decoration: underline; }
@@ -961,6 +1462,19 @@ const baseStyles = `
   .badge-status-pending { border-style: dashed; border-color: currentColor; }
   .badge-status-approved { border-color: rgba(0,0,0,0.05); }
   .badge-status-denied { opacity: 0.6; text-decoration: line-through; }
+  .status { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.2rem 0.6rem; border-radius: 999px; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; background: rgba(148,163,184,0.18); color: #334155; }
+  .status--active { background: rgba(34,197,94,0.18); color: #047857; }
+  .status--break { background: rgba(251,191,36,0.2); color: #b45309; }
+  .status--lunch { background: rgba(59,130,246,0.18); color: #1d4ed8; }
+  .status--logged-out { background: rgba(148,163,184,0.2); color: #475569; }
+  .status--not-logged-in { background: rgba(148,163,184,0.2); color: #475569; }
+  .status--pto { background: rgba(251,191,36,0.24); color: #92400e; }
+  .status--day-off { background: rgba(203,213,225,0.35); color: #1f2937; }
+  .status--make-up { background: rgba(14,165,233,0.18); color: #0369a1; }
+  .since { display: inline-flex; align-items: baseline; gap: 0.35rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .since__time { font-weight: 600; color: #0f172a; }
+  .since__elapsed { font-size: 0.75rem; color: #64748b; }
+  td[data-idle-cell] { font-variant-numeric: tabular-nums; }
   .action-buttons { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
   .action-buttons form { margin: 0; }
   .inline-form { display: inline; }
@@ -1335,10 +1849,10 @@ dashboardRouter.get('/today', async (req, res) => {
   const timezoneNote = renderTimezoneNote(dayStart, dayEnd);
 
   const html = `
-    <!doctype html>
-    <html lang="en">
-      <head>
-        <meta charset="utf-8" />
+      <!doctype html>
+      <html lang="en">
+        <head>
+          <meta charset="utf-8" />
         <title>Attendance Dashboard – ${escapeHtml(label)}</title>
         <style>${baseStyles}</style>
       </head>
@@ -2349,12 +2863,14 @@ dashboardRouter.get('/overview', async (req, res) => {
       ? weeklyData.windowEnd
       : monthlyData.monthEnd;
 
-  const todayRows = dailyData.summaries
-    .map((summary) =>
-      buildTodayRow(summary, dailyData.dateParam, dailyData.requestBadges.get(summary.userId) ?? [])
-    )
-    .join('\n');
-  const todayTotals = renderTotalsRow(dailyData.totals, 3);
+  const rosterData = await fetchTodayRosterData(dateInput, dailyData.sessions);
+  const todayRows = renderTodayRosterRows(rosterData.rows, dailyData.dateParam);
+  const todayTotals = rosterData.rows.length ? renderRosterTotalsRow(rosterData.totals) : '';
+  const computedNotice = rosterData.hasComputedNotice
+    ? '<p class="meta meta--admin">Idle, break, and lunch totals are computed from today\'s activity history.</p>'
+    : '';
+  const hasRosterRows = rosterData.rows.length > 0;
+  const noticeHiddenClass = rosterData.hasComputedNotice ? '' : ' hidden';
   const weeklyRows = weeklyData.summaries
     .map((summary, index) =>
       buildWeeklyRow(summary, index, weeklyData.startParam, weeklyData.requestBadges.get(summary.userId) ?? [])
@@ -2409,32 +2925,31 @@ dashboardRouter.get('/overview', async (req, res) => {
           </div>
         </div>
         <div class="card__body">
-          ${
-            todayRows
-              ? `<div class="table-scroll">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>User</th>
-                        <th>Email</th>
-                        <th>Started At</th>
-                        <th>Active Minutes</th>
-                        <th>Idle Minutes</th>
-                        <th>Breaks</th>
-                        <th>Break Minutes</th>
-                        <th>Lunches</th>
-                        <th>Lunch Minutes</th>
-                        <th>Presence Misses</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      ${todayRows}
-                    </tbody>
-                    ${todayTotals}
-                  </table>
-                </div>`
-              : '<div class="empty">No sessions recorded for this date.</div>'
-          }
+          <div data-roster-notice class="${noticeHiddenClass}">${computedNotice}</div>
+          <div class="table-scroll${hasRosterRows ? '' : ' hidden'}" data-roster-container>
+            <table data-roster-table data-date-param="${dailyData.dateParam}">
+              <thead>
+                <tr>
+                  <th>User</th>
+                  <th>Current Status</th>
+                  <th>Since</th>
+                  <th>Current Idle (min)</th>
+                  <th>Total Idle Today (min)</th>
+                  <th>Break # Today</th>
+                  <th>Total Break Minutes</th>
+                  <th>Lunch Count</th>
+                  <th>Total Lunch Minutes</th>
+                  <th>First Login</th>
+                  <th>Presence Misses</th>
+                </tr>
+              </thead>
+              <tbody data-roster-body>
+                ${todayRows}
+              </tbody>
+              ${todayTotals}
+            </table>
+          </div>
+          <div class="empty${hasRosterRows ? ' hidden' : ''}" data-roster-empty>No users available for this date.</div>
         </div>
       </section>
     `;
@@ -2582,11 +3097,130 @@ dashboardRouter.get('/overview', async (req, res) => {
               ${monthlySection}
             </div>
           </main>
+          <script>
+            (() => {
+              const table = document.querySelector('[data-roster-table]');
+              if (!table) return;
+              const body = table.querySelector('[data-roster-body]');
+              const notice = document.querySelector('[data-roster-notice]');
+              const scroll = document.querySelector('[data-roster-container]');
+              const empty = document.querySelector('[data-roster-empty]');
+
+              const formatElapsed = (seconds) => {
+                if (!Number.isFinite(seconds) || seconds <= 0) return '0m';
+                const minutes = Math.floor(seconds / 60);
+                if (minutes <= 0) return '0m';
+                const hours = Math.floor(minutes / 60);
+                const remaining = Math.max(0, minutes % 60);
+                const parts = [];
+                if (hours > 0) parts.push(hours + 'h');
+                parts.push(remaining + 'm');
+                return parts.join(' ');
+              };
+
+              const updateTimers = () => {
+                const now = Date.now();
+                document.querySelectorAll('[data-since]').forEach((el) => {
+                  const iso = el.getAttribute('data-since');
+                  if (!iso) return;
+                  const since = Date.parse(iso);
+                  if (Number.isNaN(since)) return;
+                  const elapsedSeconds = Math.max(0, Math.floor((now - since) / 1000));
+                  const elapsedEl = el.querySelector('.since__elapsed');
+                  if (elapsedEl) {
+                    elapsedEl.textContent = '· ' + formatElapsed(elapsedSeconds);
+                  }
+                });
+                document.querySelectorAll('[data-idle-since]').forEach((el) => {
+                  const iso = el.getAttribute('data-idle-since');
+                  if (!iso) return;
+                  const since = Date.parse(iso);
+                  if (Number.isNaN(since)) return;
+                  const minutes = Math.max(0, Math.ceil((now - since) / 60000));
+                  el.textContent = String(minutes);
+                });
+              };
+
+              const applyPayload = (payload) => {
+                if (payload && typeof payload.dateParam === 'string') {
+                  table.setAttribute('data-date-param', payload.dateParam);
+                }
+                if (body && payload) {
+                  body.innerHTML = payload.rowsHtml || '';
+                }
+                const totalsHtml = payload ? payload.totalsHtml || '' : '';
+                const existingTotals = table.querySelector('[data-roster-totals]');
+                if (totalsHtml) {
+                  if (existingTotals) {
+                    existingTotals.outerHTML = totalsHtml;
+                  } else {
+                    table.insertAdjacentHTML('beforeend', totalsHtml);
+                  }
+                } else if (existingTotals) {
+                  existingTotals.remove();
+                }
+                if (notice && payload) {
+                  const html = payload.noticeHtml || '';
+                  notice.innerHTML = html;
+                  notice.classList.toggle('hidden', !html.trim().length);
+                }
+                const hasRows = Boolean(payload && payload.rowsHtml && payload.rowsHtml.trim().length);
+                if (scroll) {
+                  scroll.classList.toggle('hidden', !hasRows);
+                }
+                if (empty) {
+                  empty.classList.toggle('hidden', hasRows);
+                }
+                updateTimers();
+              };
+
+              const refresh = async () => {
+                try {
+                  const dateParam = table.getAttribute('data-date-param') || '';
+                  const url = new URL('/dashboard/overview/today.json', window.location.origin);
+                  if (dateParam) {
+                    url.searchParams.set('date', dateParam);
+                  }
+                  const response = await fetch(url.toString(), { headers: { 'Accept': 'application/json' } });
+                  if (!response.ok) return;
+                  const data = await response.json();
+                  applyPayload(data);
+                } catch (error) {
+                  console.error('dashboard.roster.refresh_failed', error);
+                }
+              };
+
+              updateTimers();
+              setInterval(updateTimers, 1000);
+              refresh();
+              setInterval(refresh, 30000);
+            })();
+          </script>
         </body>
       </html>
     `;
 
     res.type('html').send(html);
+});
+
+dashboardRouter.get('/overview/today.json', async (req, res) => {
+  const dateInput = typeof req.query.date === 'string' ? parseDateParam(req.query.date) : zonedStartOfDay(new Date());
+  const dailyData = await fetchDailySummaries(dateInput);
+  const rosterData = await fetchTodayRosterData(dateInput, dailyData.sessions);
+  const rowsHtml = renderTodayRosterRows(rosterData.rows, dailyData.dateParam);
+  const totalsHtml = rosterData.rows.length ? renderRosterTotalsRow(rosterData.totals) : '';
+  const noticeHtml = rosterData.hasComputedNotice
+    ? '<p class="meta meta--admin">Idle, break, and lunch totals are computed from today\'s activity history.</p>'
+    : '';
+
+  res.json({
+    dateParam: dailyData.dateParam,
+    label: dailyData.label,
+    rowsHtml,
+    totalsHtml,
+    noticeHtml,
+    generatedAt: new Date().toISOString()
+  });
 });
 
 
