@@ -4,3 +4,7 @@ node_modules/
 
 # MacOS artifacts
 .DS_Store
+
+# Local development artifacts
+server-dev.log
+server/local-pg/
