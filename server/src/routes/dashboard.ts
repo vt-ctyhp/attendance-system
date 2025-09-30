@@ -2003,6 +2003,59 @@ const baseStyles = `
     body.dashboard .alert.error { background: rgba(220,38,38,0.14); color: #dc2626; }
     body.dashboard .empty { background: rgba(15,23,42,0.03); color: #64748b; border-radius: 16px; }
     body.dashboard--payroll .cards-grid--payroll { grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); }
+    body.dashboard--payroll .cards-grid--summary { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+    body.dashboard--payroll .summary-card--neutral {
+      background: #fff;
+      color: #0f172a;
+      border: 1px solid rgba(148,163,184,0.18);
+      box-shadow: 0 18px 32px rgba(15,23,42,0.1);
+    }
+    body.dashboard--payroll .summary-card--neutral .summary-title { color: #64748b; }
+    body.dashboard--payroll .summary-card__value {
+      margin: 0;
+      font-size: clamp(1.6rem, 4vw, 2.1rem);
+      font-weight: 700;
+      color: #0f172a;
+    }
+    body.dashboard--payroll .summary-card__status {
+      display: inline-flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.9rem;
+      color: #475569;
+    }
+    body.dashboard--payroll .summary-card__status span { margin: 0; }
+    body.dashboard--payroll .summary-card__meta {
+      margin: 0;
+      font-size: 0.85rem;
+      color: #475569;
+    }
+    body.dashboard--payroll .summary-card__action { margin-top: auto; }
+    body.dashboard--payroll .step-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 1rem;
+    }
+    body.dashboard--payroll .step-list li {
+      background: rgba(37,99,235,0.08);
+      border-radius: 16px;
+      padding: 1rem;
+      display: grid;
+      gap: 0.6rem;
+    }
+    body.dashboard--payroll .step-list strong {
+      margin: 0;
+      font-size: 1rem;
+      letter-spacing: -0.01em;
+      color: #0f172a;
+    }
+    body.dashboard--payroll .step-list span { font-size: 0.9rem; color: #475569; }
+    body.dashboard--payroll .step-list form { margin: 0; }
+    body.dashboard--payroll .step-list .stack-form { max-width: none; }
+    body.dashboard--payroll .step-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
     body.dashboard--payroll .status-chip { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.25rem 0.6rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; background: rgba(148,163,184,0.18); color: #334155; }
     body.dashboard--payroll .status-chip--draft { background: rgba(148,163,184,0.3); color: #334155; }
     body.dashboard--payroll .status-chip--approved { background: rgba(34,197,94,0.2); color: #047857; }
@@ -5221,6 +5274,117 @@ dashboardRouter.get('/payroll', async (req, res) => {
   const messageAlert = message ? `<div class="alert success">${escapeHtml(message)}</div>` : '';
   const errorAlert = error ? `<div class="alert error">${escapeHtml(error)}</div>` : '';
 
+  const nextPayDateLabel = formatFullDate(parsedWizardPayDate);
+  const latestPeriod = periods[0];
+  let latestStatusValue: PayrollStatus | null = null;
+  let latestStatusChip = '<span class="status-chip status-chip--pending">Not Started</span>';
+  if (latestPeriod) {
+    latestStatusValue = normalizePayrollStatus(latestPeriod.status);
+    latestStatusChip = `<span class="${payrollStatusClasses[latestStatusValue]}">${escapeHtml(
+      payrollStatusLabels[latestStatusValue]
+    )}</span>`;
+  }
+  const latestPeriodDateLabel = latestPeriod ? formatFullDate(latestPeriod.payDate) : 'No runs yet';
+  const latestLinesLabel = latestPeriod
+    ? `${latestPeriod._count.lines} ${latestPeriod._count.lines === 1 ? 'employee line' : 'employee lines'}`
+    : 'Run payroll to generate employee lines.';
+  const latestComputedLabel = latestPeriod?.computedAt
+    ? `Computed ${formatDateTime(latestPeriod.computedAt)}`
+    : 'Not computed yet';
+  let latestNextStep = 'Use Run Payroll to start your first pay period.';
+  if (latestStatusValue === 'draft') {
+    latestNextStep = 'Review totals and approve when everything looks good.';
+  } else if (latestStatusValue === 'approved') {
+    latestNextStep = 'Mark the period as paid once deposits are complete.';
+  } else if (latestStatusValue === 'paid') {
+    latestNextStep = 'All set. Prepare for the next pay run when needed.';
+  }
+  const nextRunStatusLine =
+    latestStatusValue && latestPeriod && latestStatusValue !== 'paid'
+      ? `Finish the ${formatFullDate(latestPeriod.payDate)} period before recalculating.`
+      : 'Next eligible pay date from your payroll schedule.';
+  const nextRunHint =
+    latestStatusValue && latestStatusValue !== 'paid'
+      ? 'Complete the current period before calculating the next one.'
+      : 'Run the calculation once attendance looks good.';
+  const attendanceMonthDate = parseDateInput(`${selectedFactsMonth}-01`);
+  const attendanceMonthLabel = attendanceMonthDate
+    ? formatInTimeZone(attendanceMonthDate, DASHBOARD_TIME_ZONE, 'MMMM yyyy')
+    : selectedFactsMonth;
+  const perfectCount = attendanceFacts.filter((fact) => fact.isPerfect).length;
+  const reviewCount = attendanceFacts.length - perfectCount;
+  const attendanceInsight = attendanceFacts.length
+    ? `${perfectCount} perfect · ${reviewCount} needs review`
+    : 'No attendance facts yet.';
+  const attendanceActionHint = attendanceFacts.length
+    ? 'Spot-check employees flagged for review before approving payroll.'
+    : 'Re-run attendance to refresh supporting hours.';
+  const attendanceActionLink = attendanceFacts.length ? '#attendance-facts' : '#attendance-tools';
+  const attendanceActionText = attendanceFacts.length ? 'View attendance facts' : 'Open attendance tools';
+  const bonusDateLabel = formatFullDate(bonusDateValue);
+  const pendingKpiCount = kpiCandidates.filter((candidate) => candidate.status === 'pending').length;
+  const decidedKpiCount = kpiCandidates.length - pendingKpiCount;
+  const bonusValue = kpiCandidates.length
+    ? `${pendingKpiCount}/${kpiCandidates.length} KPI pending`
+    : otherBonuses.length
+      ? `${otherBonuses.length} automatic bonuses`
+      : 'No bonuses yet';
+  const bonusSummaryParts: string[] = [];
+  if (decidedKpiCount > 0) {
+    bonusSummaryParts.push(`${decidedKpiCount} KPI decided`);
+  }
+  if (pendingKpiCount > 0) {
+    bonusSummaryParts.push(`${pendingKpiCount} KPI pending`);
+  }
+  if (otherBonuses.length > 0) {
+    bonusSummaryParts.push(`${otherBonuses.length} automatic ready`);
+  }
+  const bonusInsight = bonusSummaryParts.length ? bonusSummaryParts.join(' • ') : 'Bonuses populate after you run payroll.';
+  const bonusActionHint = kpiCandidates.length
+    ? 'Confirm KPI decisions so they export with payroll.'
+    : otherBonuses.length
+      ? 'Automatic attendance bonuses will export with payroll.'
+      : 'Run payroll to populate upcoming bonuses.';
+  const bonusActionLink = kpiCandidates.length || otherBonuses.length ? '#bonus-review' : '#run-payroll';
+  const bonusActionText = kpiCandidates.length || otherBonuses.length ? 'Open bonus review' : 'Go to run payroll';
+  const summaryCards = `
+    <div class="cards-grid cards-grid--payroll cards-grid--summary">
+      <section class="card summary-card summary-card--neutral">
+        <p class="summary-title">Next pay run</p>
+        <p class="summary-card__value">${escapeHtml(nextPayDateLabel)}</p>
+        <div class="summary-card__status"><span>${escapeHtml(nextRunStatusLine)}</span></div>
+        <p class="summary-card__meta">${escapeHtml(nextRunHint)}</p>
+        <p class="summary-card__meta">${escapeHtml(`Times shown in ${DASHBOARD_TIME_ZONE}.`)}</p>
+        <a class="button summary-card__action" href="#run-payroll">Run payroll</a>
+      </section>
+      <section class="card summary-card summary-card--neutral">
+        <p class="summary-title">Latest period</p>
+        <p class="summary-card__value">${escapeHtml(latestPeriodDateLabel)}</p>
+        <div class="summary-card__status">
+          ${latestStatusChip}
+          <span>${escapeHtml(latestComputedLabel)}</span>
+        </div>
+        <p class="summary-card__meta">${escapeHtml(latestLinesLabel)}</p>
+        <p class="summary-card__meta">${escapeHtml(latestNextStep)}</p>
+        <a class="button button-secondary summary-card__action" href="#payroll-periods">Review pay history</a>
+      </section>
+      <section class="card summary-card summary-card--neutral">
+        <p class="summary-title">Attendance month</p>
+        <p class="summary-card__value">${escapeHtml(attendanceMonthLabel)}</p>
+        <div class="summary-card__status"><span>${escapeHtml(attendanceInsight)}</span></div>
+        <p class="summary-card__meta">${escapeHtml(attendanceActionHint)}</p>
+        <a class="button button-secondary summary-card__action" href="${attendanceActionLink}">${escapeHtml(attendanceActionText)}</a>
+      </section>
+      <section class="card summary-card summary-card--neutral">
+        <p class="summary-title">Bonuses for ${escapeHtml(bonusDateLabel)}</p>
+        <p class="summary-card__value">${escapeHtml(bonusValue)}</p>
+        <p class="summary-card__meta">${escapeHtml(bonusInsight)}</p>
+        <p class="summary-card__meta">${escapeHtml(bonusActionHint)}</p>
+        <a class="button button-secondary summary-card__action" href="${bonusActionLink}">${escapeHtml(bonusActionText)}</a>
+      </section>
+    </div>
+  `;
+
   const html = `
     <!doctype html>
     <html lang="en">
@@ -5244,8 +5408,9 @@ dashboardRouter.get('/payroll', async (req, res) => {
           </header>
           ${messageAlert}
           ${errorAlert}
+          ${summaryCards}
           <div class="cards-grid cards-grid--payroll">
-            <section class="card card--table">
+            <section class="card card--table" id="payroll-periods">
               <div class="card__header">
                 <div>
                   <h2 class="card__title">Payroll Periods</h2>
@@ -5256,44 +5421,58 @@ dashboardRouter.get('/payroll', async (req, res) => {
                 ${payrollTable}
               </div>
             </section>
-            <section class="card">
+            <section class="card" id="run-payroll">
               <div class="card__header">
                 <div>
                   <h2 class="card__title">Run Payroll</h2>
-                  <p class="card__subtitle">Pick a pay date (15th or end-of-month) to generate or refresh the period.</p>
+                  <p class="card__subtitle">Follow the guided checklist to keep your pay run, attendance, and bonuses aligned.</p>
                 </div>
               </div>
               <div class="card__body">
-                <form data-async="true" data-kind="payroll-run" data-success-message="Payroll recalculation queued." class="stack-form">
-                  <label>
-                    <span>Pay Date</span>
-                    <input type="date" name="payDate" value="${wizardDefaultPayDate}" required />
-                  </label>
-                  <p class="meta">After success the page refreshes with updated totals.</p>
-                  <p class="form-error" data-error></p>
-                  <button type="submit">Calculate</button>
-                </form>
-                <div class="divider"></div>
-                <div class="secondary-form">
-                  <h3 class="secondary-form__title">Attendance Recalculation</h3>
-                  <form data-async="true" data-kind="attendance-recalc" data-success-message="Attendance recalculation started." class="stack-form">
-                    <label>
-                      <span>Month</span>
-                      <input type="month" name="month" value="${selectedFactsMonth}" required />
-                    </label>
-                    <p class="form-error" data-error></p>
-                    <button type="submit" class="button-secondary">Re-run Attendance</button>
-                  </form>
-                </div>
+                <ol class="step-list">
+                  <li>
+                    <strong>1. Calculate pay run</strong>
+                    <span>Pick a pay date (15th or end-of-month) to generate or refresh the period.</span>
+                    <form data-async="true" data-kind="payroll-run" data-success-message="Payroll recalculation queued." class="stack-form">
+                      <label>
+                        <span>Pay Date</span>
+                        <input type="date" name="payDate" value="${wizardDefaultPayDate}" required />
+                      </label>
+                      <p class="meta">After success the page refreshes with updated totals.</p>
+                      <p class="form-error" data-error></p>
+                      <button type="submit">Calculate</button>
+                    </form>
+                  </li>
+                  <li id="attendance-tools">
+                    <strong>2. Refresh attendance</strong>
+                    <span>Re-run the target month so monthly and quarterly bonuses stay accurate.</span>
+                    <form data-async="true" data-kind="attendance-recalc" data-success-message="Attendance recalculation started." class="stack-form">
+                      <label>
+                        <span>Month</span>
+                        <input type="month" name="month" value="${selectedFactsMonth}" required />
+                      </label>
+                      <p class="form-error" data-error></p>
+                      <button type="submit" class="button-secondary">Re-run Attendance</button>
+                    </form>
+                  </li>
+                  <li>
+                    <strong>3. Final checks</strong>
+                    <span>Verify supporting data before approving or paying the period.</span>
+                    <div class="step-actions">
+                      <a href="#attendance-facts" class="button button-secondary">Attendance facts</a>
+                      <a href="#bonus-review" class="button button-secondary">Bonus review</a>
+                    </div>
+                  </li>
+                </ol>
               </div>
             </section>
           </div>
           <div class="cards-grid cards-grid--payroll">
-            <section class="card card--table">
+            <section class="card card--table" id="attendance-facts">
               <div class="card__header">
                 <div>
                   <h2 class="card__title">Attendance Facts</h2>
-                  <p class="card__subtitle">Use the month picker to load supporting attendance summaries.</p>
+                  <p class="card__subtitle">Spot-check the selected month before approving payroll.</p>
                 </div>
                 <div class="card__actions no-print">
                   <form method="get" action="/dashboard/payroll" class="filters">
@@ -5448,11 +5627,11 @@ dashboardRouter.get('/payroll', async (req, res) => {
             </section>
           </div>
           <div class="cards-grid cards-grid--payroll">
-            <section class="card card--table">
+            <section class="card card--table" id="bonus-review">
               <div class="card__header">
                 <div>
                   <h2 class="card__title">Bonus Review</h2>
-                  <p class="card__subtitle">Review monthly, quarterly, and KPI bonuses for a pay date.</p>
+                  <p class="card__subtitle">Confirm monthly, quarterly, and KPI bonuses before final approval.</p>
                 </div>
                 <div class="card__actions no-print">
                   <form method="get" action="/dashboard/payroll" class="filters">
