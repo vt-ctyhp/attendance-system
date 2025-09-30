@@ -202,6 +202,10 @@ type TodayRosterData = {
   hasComputedNotice: boolean;
 };
 
+type RosterLegendKey = 'working' | 'break' | 'lunch' | 'offline';
+
+type RosterLegendCounts = Record<RosterLegendKey, number>;
+
 type RequestBadge = {
   id: string;
   userId: number;
@@ -1580,27 +1584,6 @@ const fetchTodayRosterData = async (referenceDate: Date, sessions: SessionRecord
   };
 };
 
-const renderSinceCell = (since: Date | null) => {
-  if (!since) {
-    return '—';
-  }
-  const iso = formatIsoDateTime(since);
-  const label = formatTimeOfDay(since);
-  const tooltip = formatDateTime(since);
-  return `<span class="since" data-since="${iso}" title="${escapeHtml(tooltip)}"><span class="since__time">${escapeHtml(label)}</span><span class="since__elapsed" data-elapsed></span></span>`;
-};
-
-const renderIdleCell = (row: TodayRosterRow) => {
-  if (row.statusKey !== 'active') {
-    return '—';
-  }
-  if (!row.idleSince) {
-    return String(row.currentIdleMinutes);
-  }
-  const iso = formatIsoDateTime(row.idleSince);
-  return `<span data-idle-since="${iso}" data-idle-minutes="${row.currentIdleMinutes}">${row.currentIdleMinutes}</span>`;
-};
-
 const renderTimeCell = (value: Date | null) => {
   if (!value) {
     return '—';
@@ -1612,12 +1595,98 @@ const renderTimeCell = (value: Date | null) => {
 const escapeAttr = (value: string | number | null | undefined) =>
   value === null || value === undefined ? '' : escapeHtml(String(value));
 
+const toRosterLegendKey = (status: RosterStatusKey): RosterLegendKey => {
+  switch (status) {
+    case 'active':
+      return 'working';
+    case 'break':
+      return 'break';
+    case 'lunch':
+      return 'lunch';
+    default:
+      return 'offline';
+  }
+};
+
+const computeRosterLegendCounts = (rows: TodayRosterRow[]): RosterLegendCounts =>
+  rows.reduce<RosterLegendCounts>(
+    (acc, row) => {
+      const key = toRosterLegendKey(row.statusKey);
+      acc[key] += 1;
+      return acc;
+    },
+    { working: 0, break: 0, lunch: 0, offline: 0 }
+  );
+
+const renderRosterLegend = (counts: RosterLegendCounts) => {
+  const entries: { key: RosterLegendKey; label: string }[] = [
+    { key: 'working', label: 'Working' },
+    { key: 'break', label: 'Break' },
+    { key: 'lunch', label: 'Lunch' },
+    { key: 'offline', label: 'Offline' }
+  ];
+  return `
+    <ul class="live-roster-legend" data-roster-legend>
+      ${entries
+        .map(
+          ({ key, label }) => `
+            <li class="live-roster-legend__item" data-legend-item="${key}">
+              <span class="live-roster-legend__dot live-roster-legend__dot--${key}" aria-hidden="true"></span>
+              <span class="live-roster-legend__label">${label}</span>
+              <span class="live-roster-legend__value" data-legend-count>${counts[key]}</span>
+            </li>
+          `
+        )
+        .join('')}
+    </ul>
+  `;
+};
+
+const formatRosterMinutes = (value: number | null | undefined) => {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return '—';
+  }
+  const rounded = Math.max(0, Math.round(value));
+  return `${rounded}m`;
+};
+
+const formatRosterCount = (value: number | null | undefined) => {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return '—';
+  }
+  return String(Math.max(0, Math.round(value)));
+};
+
+const buildRosterInitials = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return '?';
+  }
+  const parts = trimmed.split(/\s+/).slice(0, 2);
+  const initials = parts.map((part) => part[0]?.toUpperCase()).filter(Boolean).join('');
+  return initials || trimmed[0]?.toUpperCase() || '?';
+};
+
 const buildTodayRosterRowHtml = (row: TodayRosterRow, dateParam: string): string => {
   const statusClass = `status status--${row.statusKey.replace(/_/g, '-')}`;
   const statusSince = row.statusSince ? formatIsoDateTime(row.statusSince) : '';
   const idleSince = row.idleSince ? formatIsoDateTime(row.idleSince) : '';
   const firstLoginIso = row.firstLogin ? formatIsoDateTime(row.firstLogin) : '';
   const detailHref = `/dashboard/user/${row.userId}?date=${dateParam}`;
+  const initials = buildRosterInitials(row.name);
+  const roleLabel = row.role?.trim().length ? row.role : '—';
+  const statusDetail = row.statusDetail ? `<span class="roster-status__meta">${escapeHtml(row.statusDetail)}</span>` : '';
+  const statusSinceMeta = row.statusSince
+    ? `<span class="roster-status__meta since" data-since="${escapeAttr(statusSince)}" title="${escapeHtml(
+        formatDateTime(row.statusSince)
+      )}"><span class="since__time">Since ${escapeHtml(formatTimeOfDay(row.statusSince))}</span><span class="since__elapsed" data-elapsed></span></span>`
+    : '';
+  const currentIdleContent =
+    row.statusKey === 'active'
+      ? `<span class="roster-cell__metric" data-idle-since="${escapeAttr(
+          idleSince
+        )}" data-idle-minutes="${row.currentIdleMinutes}">${formatRosterMinutes(row.currentIdleMinutes)}</span>`
+      : '—';
   return `<tr
     data-user-id="${row.userId}"
     data-user-name="${escapeAttr(row.name)}"
@@ -1637,41 +1706,38 @@ const buildTodayRosterRowHtml = (row: TodayRosterRow, dateParam: string): string
     data-first-login="${escapeAttr(firstLoginIso)}"
     data-presence-misses="${row.presenceMisses}"
     data-detail-url="${escapeAttr(detailHref)}"
+    data-status-category="${toRosterLegendKey(row.statusKey)}"
   >
-    <td>
-      ${detailLink(row.userId, dateParam, row.name)}
-      ${renderRequestBadges(row.requestBadges)}
+    <td class="roster-cell roster-cell--user">
+      <div class="roster-user">
+        <span class="roster-avatar" aria-hidden="true">${escapeHtml(initials)}</span>
+        <div class="roster-user__content">
+          <a class="roster-user__name" href="${escapeAttr(detailHref)}">${escapeHtml(row.name)}</a>
+          <span class="roster-user__role">${escapeHtml(roleLabel)}</span>
+          ${row.requestBadges.length ? `<div class="roster-user__badges">${renderRequestBadges(row.requestBadges)}</div>` : ''}
+        </div>
+      </div>
     </td>
-    <td><span class="${statusClass}">${escapeHtml(row.statusLabel)}</span></td>
-    <td>${renderSinceCell(row.statusSince)}</td>
-    <td data-idle-cell>${renderIdleCell(row)}</td>
-    <td>${row.totalIdleMinutes}</td>
-    <td>${row.breakCount}</td>
-    <td>${row.totalBreakMinutes}</td>
-    <td>${row.lunchCount}</td>
-    <td>${row.totalLunchMinutes}</td>
-    <td>${renderTimeCell(row.firstLogin)}</td>
-    <td>${row.presenceMisses}</td>
+    <td class="roster-cell">
+      <div class="roster-status">
+        <span class="${statusClass}">${escapeHtml(row.statusLabel)}</span>
+        ${statusDetail}
+        ${statusSinceMeta}
+      </div>
+    </td>
+    <td class="roster-cell roster-cell--numeric" data-idle-cell>${currentIdleContent}</td>
+    <td class="roster-cell roster-cell--numeric">${formatRosterMinutes(row.totalIdleMinutes)}</td>
+    <td class="roster-cell roster-cell--numeric">${formatRosterCount(row.breakCount)}</td>
+    <td class="roster-cell roster-cell--numeric">${formatRosterMinutes(row.totalBreakMinutes)}</td>
+    <td class="roster-cell roster-cell--numeric">${formatRosterCount(row.lunchCount)}</td>
+    <td class="roster-cell roster-cell--numeric">${formatRosterMinutes(row.totalLunchMinutes)}</td>
+    <td class="roster-cell roster-cell--numeric">${renderTimeCell(row.firstLogin)}</td>
+    <td class="roster-cell roster-cell--numeric">${formatRosterCount(row.presenceMisses)}</td>
   </tr>`;
 };
 
 const renderTodayRosterRows = (rows: TodayRosterRow[], dateParam: string) =>
   rows.map((row) => buildTodayRosterRowHtml(row, dateParam)).join('\n');
-
-const renderRosterTotalsRow = (totals: TodayRosterTotals) => `
-  <tfoot data-roster-totals>
-    <tr class="totals">
-      <th colspan="4">Totals</th>
-      <th>${totals.totalIdleMinutes}</th>
-      <th>${totals.breakCount}</th>
-      <th>${totals.totalBreakMinutes}</th>
-      <th>${totals.lunchCount}</th>
-      <th>${totals.totalLunchMinutes}</th>
-      <th>—</th>
-      <th>${totals.presenceMisses}</th>
-    </tr>
-  </tfoot>
-`;
 
 
 export const fetchDailySummaries = async (referenceDate: Date) => {
@@ -1888,6 +1954,54 @@ const baseStyles = `
   .muted { color: #6b7280; font-size: 0.8rem; }
   .table-scroll { overflow-x: auto; max-width: 100%; }
   .table-scroll table { min-width: 720px; }
+  .table-scroll .live-roster-table { min-width: 960px; }
+  .live-roster-card { position: relative; background: #fff; border-radius: 18px; box-shadow: 0 20px 40px rgba(15,23,42,0.08); border: 1px solid #e2e8f0; overflow: hidden; }
+  .live-roster-card__header { position: sticky; top: 0; display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; padding: 1rem 1.5rem; background: #f1f5f9; border-bottom: 1px solid #d8dee9; z-index: 1; }
+  .live-roster-card__heading { display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap; }
+  .live-roster-card__title { margin: 0; font-size: 1.05rem; font-weight: 700; color: #0f172a; letter-spacing: -0.01em; }
+  .live-roster-card__body { padding: 1rem 1.5rem 1.25rem; display: flex; flex-direction: column; gap: 1rem; }
+  .live-roster-card__notice .meta { margin: 0; }
+  .live-roster-card__table-scroll { border-radius: 12px; }
+  .live-roster-legend { list-style: none; display: flex; align-items: center; gap: 1.15rem; margin: 0; padding: 0; flex-wrap: wrap; }
+  .live-roster-legend__item { display: inline-flex; align-items: center; gap: 0.45rem; font-size: 0.78rem; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: 0.06em; }
+  .live-roster-legend__label { white-space: nowrap; }
+  .live-roster-legend__dot { width: 0.6rem; height: 0.6rem; border-radius: 999px; display: inline-block; box-shadow: 0 0 0 2px rgba(255,255,255,0.7); }
+  .live-roster-legend__dot--working { background: #34d399; }
+  .live-roster-legend__dot--break { background: #fbbf24; }
+  .live-roster-legend__dot--lunch { background: #60a5fa; }
+  .live-roster-legend__dot--offline { background: #cbd5f5; }
+  .live-roster-legend__value { font-variant-numeric: tabular-nums; color: #0f172a; }
+  .live-roster-refresh { border: none; background: #0f172a; color: #fff; border-radius: 999px; width: 2.5rem; height: 2.5rem; display: inline-flex; align-items: center; justify-content: center; font-size: 1.1rem; cursor: pointer; transition: transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease; box-shadow: 0 12px 24px rgba(15,23,42,0.18); }
+  .live-roster-refresh:hover:not(:disabled) { background: #1e293b; transform: translateY(-1px); }
+  .live-roster-refresh:disabled { opacity: 0.6; cursor: not-allowed; box-shadow: none; }
+  .live-roster-refresh.is-refreshing span { animation: live-roster-spin 0.9s linear infinite; }
+  @keyframes live-roster-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  .live-roster-table { width: 100%; min-width: 960px; border-collapse: separate; border-spacing: 0; margin: 0; background: transparent; box-shadow: none; }
+  .live-roster-table thead th { position: sticky; top: 0; background: #f8fafc; color: #475569; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; padding: 0.75rem 1rem; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
+  .live-roster-table tbody td { padding: 0.75rem 1rem; border-bottom: 1px solid #e2e8f0; background: #fff; }
+  .live-roster-table tbody tr:last-child td { border-bottom: none; }
+  .live-roster-table tbody tr { transition: background 0.18s ease; }
+  .live-roster-table tbody tr:hover td { background: #f8fafc; }
+  .roster-cell { font-size: 0.9rem; color: #1f2933; }
+  .roster-cell--numeric { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .roster-cell--user { min-width: 220px; }
+  .roster-cell__metric { display: inline-block; min-width: 3ch; }
+  .roster-user { display: flex; align-items: center; gap: 0.75rem; }
+  .roster-avatar { display: inline-flex; align-items: center; justify-content: center; width: 2.25rem; height: 2.25rem; border-radius: 50%; background: #dbeafe; color: #1d4ed8; font-weight: 700; font-size: 0.95rem; text-transform: uppercase; box-shadow: inset 0 0 0 1px rgba(59,130,246,0.25); }
+  .roster-user__content { display: flex; flex-direction: column; gap: 0.2rem; }
+  .roster-user__name { font-weight: 700; color: #0f172a; text-decoration: none; }
+  .roster-user__name:hover { text-decoration: underline; }
+  .roster-user__role { font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; }
+  .roster-user__badges { margin-top: 0.35rem; }
+  .roster-status { display: flex; flex-direction: column; gap: 0.25rem; align-items: flex-start; }
+  .roster-status__meta { font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.06em; }
+  .live-roster-card__body .empty { margin: 0; border-radius: 12px; border: 1px dashed #cbd5f5; background: #f8fafc; padding: 1.5rem; color: #475569; }
+  @media (max-width: 768px) {
+    .live-roster-card__header { align-items: flex-start; }
+    .live-roster-card__heading { flex-direction: column; align-items: flex-start; gap: 0.75rem; }
+    .live-roster-card__title { font-size: 1rem; }
+    .live-roster-refresh { width: 2.25rem; height: 2.25rem; font-size: 1rem; }
+  }
   .balances-detail { margin-top: 2rem; background: #fff; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 8px rgba(15,23,42,0.05); }
   .balances-detail h2 { margin-top: 0; }
   .balances-detail-actions { gap: 0.5rem; flex-wrap: wrap; }
@@ -3381,7 +3495,7 @@ dashboardRouter.get('/overview', async (req, res) => {
 
   const rosterData = await fetchTodayRosterData(dateInput, dailyData.sessions);
   const todayRows = renderTodayRosterRows(rosterData.rows, dailyData.dateParam);
-  const todayTotals = rosterData.rows.length ? renderRosterTotalsRow(rosterData.totals) : '';
+  const rosterLegend = renderRosterLegend(computeRosterLegendCounts(rosterData.rows));
   const computedNotice = rosterData.hasComputedNotice
     ? '<p class="meta meta--admin">Idle, break, and lunch totals are computed from today\'s activity history.</p>'
     : '';
@@ -3441,31 +3555,42 @@ dashboardRouter.get('/overview', async (req, res) => {
           </div>
         </div>
         <div class="card__body">
-          <div data-roster-notice class="${noticeHiddenClass}">${computedNotice}</div>
-          <div class="table-scroll${hasRosterRows ? '' : ' hidden'}" data-roster-container>
-            <table data-roster-table data-date-param="${dailyData.dateParam}">
-              <thead>
-                <tr>
-                  <th>User</th>
-                  <th>Current Status</th>
-                  <th>Since</th>
-                  <th>Current Idle (min)</th>
-                  <th>Total Idle Today (min)</th>
-                  <th>Break # Today</th>
-                  <th>Total Break Minutes</th>
-                  <th>Lunch Count</th>
-                  <th>Total Lunch Minutes</th>
-                  <th>First Login</th>
-                  <th>Presence Misses</th>
-                </tr>
-              </thead>
-              <tbody data-roster-body>
-                ${todayRows}
-              </tbody>
-              ${todayTotals}
-            </table>
+          <div class="live-roster-card">
+            <div class="live-roster-card__header">
+              <div class="live-roster-card__heading">
+                <h3 class="live-roster-card__title">Live Roster</h3>
+                ${rosterLegend}
+              </div>
+              <button type="button" class="live-roster-refresh" data-roster-refresh aria-label="Refresh roster">
+                <span aria-hidden="true">⟳</span>
+              </button>
+            </div>
+            <div class="live-roster-card__body">
+              <div class="live-roster-card__notice${noticeHiddenClass ? ' hidden' : ''}" data-roster-notice>${computedNotice}</div>
+              <div class="live-roster-card__table-scroll table-scroll${hasRosterRows ? '' : ' hidden'}" data-roster-container>
+                <table class="live-roster-table" data-roster-table data-date-param="${dailyData.dateParam}">
+                  <thead>
+                    <tr>
+                      <th>User</th>
+                      <th>Current Status</th>
+                      <th>Current Idle (min)</th>
+                      <th>Total Idle Today (min)</th>
+                      <th>Break # Today</th>
+                      <th>Total Break Minutes</th>
+                      <th>Lunch Count</th>
+                      <th>Total Lunch Minutes</th>
+                      <th>Log In Time (h:mm AM/PM)</th>
+                      <th>Presence Misses</th>
+                    </tr>
+                  </thead>
+                  <tbody data-roster-body>
+                    ${todayRows}
+                  </tbody>
+                </table>
+              </div>
+              <div class="empty${hasRosterRows ? ' hidden' : ''}" data-roster-empty>No users available for this date.</div>
+            </div>
           </div>
-          <div class="empty${hasRosterRows ? ' hidden' : ''}" data-roster-empty>No users available for this date.</div>
         </div>
       </section>
     `;
@@ -3630,6 +3755,8 @@ dashboardRouter.get('/overview', async (req, res) => {
           <script>
             (() => {
               const table = document.querySelector('[data-roster-table]');
+              const legend = document.querySelector('[data-roster-legend]');
+              const refreshButton = document.querySelector('[data-roster-refresh]');
               const shell = document.querySelector('[data-drilldown-shell]');
               const panel = shell ? shell.querySelector('[data-drilldown-panel]') : null;
               const backdrop = shell ? shell.querySelector('[data-drilldown-backdrop]') : null;
@@ -3670,7 +3797,7 @@ dashboardRouter.get('/overview', async (req, res) => {
 
               const formatMinutesValue = (value) => {
                 if (value === null || value === undefined) return '—';
-                return String(value) + ' min';
+                return String(value) + 'm';
               };
 
               const formatCountValue = (value) => {
@@ -3933,6 +4060,17 @@ dashboardRouter.get('/overview', async (req, res) => {
               const notice = document.querySelector('[data-roster-notice]');
               const scroll = document.querySelector('[data-roster-container]');
               const empty = document.querySelector('[data-roster-empty]');
+              const legendCounts = { working: 0, break: 0, lunch: 0, offline: 0 };
+              const statusToLegend = {
+                active: 'working',
+                break: 'break',
+                lunch: 'lunch',
+                logged_out: 'offline',
+                not_logged_in: 'offline',
+                pto: 'offline',
+                day_off: 'offline',
+                make_up: 'offline'
+              };
 
               const formatElapsedSeconds = (seconds) => {
                 if (!Number.isFinite(seconds) || seconds <= 0) return '0m';
@@ -3959,14 +4097,39 @@ dashboardRouter.get('/overview', async (req, res) => {
                     elapsedEl.textContent = '· ' + formatElapsedSeconds(elapsedSeconds);
                   }
                 });
-                document.querySelectorAll('[data-idle-since]').forEach((el) => {
+                table.querySelectorAll('[data-idle-cell] [data-idle-since]').forEach((el) => {
                   const iso = el.getAttribute('data-idle-since');
                   if (!iso) return;
                   const since = Date.parse(iso);
                   if (Number.isNaN(since)) return;
                   const minutes = Math.max(0, Math.ceil((now - since) / 60000));
-                  el.textContent = String(minutes);
+                  el.textContent = String(minutes) + 'm';
                 });
+              };
+
+              const applyLegendCounts = (counts) => {
+                if (!legend) return;
+                Object.keys(counts).forEach((key) => {
+                  const selector = '[data-legend-item="' + key + '"]';
+                  const item = legend.querySelector(selector);
+                  const valueEl = item ? item.querySelector('[data-legend-count]') : null;
+                  if (valueEl) {
+                    valueEl.textContent = String(counts[key]);
+                  }
+                });
+              };
+
+              const updateLegendFromRows = () => {
+                const nextCounts = { working: 0, break: 0, lunch: 0, offline: 0 };
+                if (body) {
+                  Array.from(body.querySelectorAll('tr[data-status-key]')).forEach((row) => {
+                    const status = row.getAttribute('data-status-key') || 'offline';
+                    const legendKey = statusToLegend[status] || 'offline';
+                    nextCounts[legendKey] += 1;
+                  });
+                }
+                Object.assign(legendCounts, nextCounts);
+                applyLegendCounts(legendCounts);
               };
 
               const applyPayload = (payload) => {
@@ -3976,17 +4139,7 @@ dashboardRouter.get('/overview', async (req, res) => {
                 if (body && payload) {
                   body.innerHTML = payload.rowsHtml || '';
                 }
-                const totalsHtml = payload ? payload.totalsHtml || '' : '';
-                const existingTotals = table.querySelector('[data-roster-totals]');
-                if (totalsHtml) {
-                  if (existingTotals) {
-                    existingTotals.outerHTML = totalsHtml;
-                  } else {
-                    table.insertAdjacentHTML('beforeend', totalsHtml);
-                  }
-                } else if (existingTotals) {
-                  existingTotals.remove();
-                }
+                updateLegendFromRows();
                 if (notice && payload) {
                   const html = payload.noticeHtml || '';
                   notice.innerHTML = html;
@@ -4002,7 +4155,21 @@ dashboardRouter.get('/overview', async (req, res) => {
                 updateTimers();
               };
 
+              let refreshInFlight = false;
+
+              const setRefreshing = (state) => {
+                if (!refreshButton) return;
+                refreshButton.classList.toggle('is-refreshing', state);
+                refreshButton.disabled = state;
+                refreshButton.setAttribute('aria-busy', state ? 'true' : 'false');
+              };
+
               const refresh = async () => {
+                if (refreshInFlight) {
+                  return;
+                }
+                refreshInFlight = true;
+                setRefreshing(true);
                 try {
                   const dateParam = table.getAttribute('data-date-param') || '';
                   const url = new URL('/dashboard/overview/today.json', window.location.origin);
@@ -4018,11 +4185,21 @@ dashboardRouter.get('/overview', async (req, res) => {
                   applyPayload(data);
                 } catch (error) {
                   console.error('dashboard.roster.refresh_failed', error);
+                } finally {
+                  refreshInFlight = false;
+                  setRefreshing(false);
                 }
               };
 
+              if (refreshButton) {
+                refreshButton.addEventListener('click', () => {
+                  refresh();
+                });
+              }
+
               updateTimers();
               setInterval(updateTimers, 1000);
+              updateLegendFromRows();
               refresh();
               setInterval(refresh, 30000);
             })();
@@ -4039,7 +4216,6 @@ dashboardRouter.get('/overview/today.json', async (req, res) => {
   const dailyData = await fetchDailySummaries(dateInput);
   const rosterData = await fetchTodayRosterData(dateInput, dailyData.sessions);
   const rowsHtml = renderTodayRosterRows(rosterData.rows, dailyData.dateParam);
-  const totalsHtml = rosterData.rows.length ? renderRosterTotalsRow(rosterData.totals) : '';
   const noticeHtml = rosterData.hasComputedNotice
     ? '<p class="meta meta--admin">Idle, break, and lunch totals are computed from today\'s activity history.</p>'
     : '';
@@ -4048,7 +4224,6 @@ dashboardRouter.get('/overview/today.json', async (req, res) => {
     dateParam: dailyData.dateParam,
     label: dailyData.label,
     rowsHtml,
-    totalsHtml,
     noticeHtml,
     generatedAt: new Date().toISOString()
   });
