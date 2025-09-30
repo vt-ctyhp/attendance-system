@@ -8,3 +8,8 @@ node_modules/
 # Local development artifacts
 server-dev.log
 server/local-pg/
+
+# Ignore nested repos/worktrees
+/attendance-system/
+/integrate-worktree/
+/main-merge/

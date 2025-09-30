@@ -2552,6 +2552,13 @@ const baseStyles = `
     body.dashboard .empty { background: rgba(15,23,42,0.03); color: #64748b; border-radius: 16px; }
     body.dashboard--payroll .cards-grid--payroll { grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); }
     body.dashboard--payroll .cards-grid--summary { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+    body.dashboard--payroll-summary .cards-grid--summary { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+    body.dashboard--payroll-summary .totals-table { width: 100%; border-collapse: collapse; margin: 0; background: transparent; box-shadow: none; }
+    body.dashboard--payroll-summary .totals-table th { text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.7rem; color: #64748b; padding: 0.5rem 0; background: transparent; }
+    body.dashboard--payroll-summary .totals-table td { text-align: right; font-weight: 700; color: #0f172a; font-variant-numeric: tabular-nums; padding: 0.5rem 0; border-bottom: 1px solid rgba(148,163,184,0.2); }
+    body.dashboard--payroll-summary .totals-table tbody tr:first-child th, body.dashboard--payroll-summary .totals-table tbody tr:first-child td { padding-top: 0; }
+    body.dashboard--payroll-summary .totals-table tbody tr:last-child td { border-bottom: none; padding-bottom: 0; }
+    body.dashboard--payroll-summary .summary-cards { margin: 0; }
     body.dashboard--payroll .summary-card--neutral {
       background: #fff;
       color: #0f172a;
@@ -7073,6 +7080,9 @@ dashboardRouter.get('/payroll/summary/:payDate', async (req, res) => {
       nonPtoHours: number;
       makeUpHours: number;
       tardyMinutes: number;
+      tardyEvents: number;
+      scheduledDays: number;
+      onTimeDays: number;
     };
     totalHours: number;
     onTimePercent: number | null;
@@ -7120,7 +7130,10 @@ dashboardRouter.get('/payroll/summary/:payDate', async (req, res) => {
           ptoHours: Math.round(totals.ptoHours * 100) / 100,
           nonPtoHours: Math.round(totals.nonPtoHours * 100) / 100,
           makeUpHours: Math.round(totals.makeUpHours * 100) / 100,
-          tardyMinutes: totals.tardyMinutes
+          tardyMinutes: totals.tardyMinutes,
+          tardyEvents: totals.tardyEvents,
+          scheduledDays: totals.scheduledDays,
+          onTimeDays: totals.onTimeDays
         },
         totalHours,
         onTimePercent,
@@ -7135,6 +7148,47 @@ dashboardRouter.get('/payroll/summary/:payDate', async (req, res) => {
   const attendanceBonusTotal =
     periodTotals.monthlyAttendance + periodTotals.monthlyDeferred + periodTotals.quarterlyAttendance;
   const teamTotalHours = employeeSummaries.reduce((acc, entry) => acc + entry.totalHours, 0);
+
+  const teamAttendanceTotals = employeeSummaries.reduce(
+    (acc, entry) => ({
+      scheduledDays: acc.scheduledDays + entry.totals.scheduledDays,
+      onTimeDays: acc.onTimeDays + entry.totals.onTimeDays,
+      tardyMinutes: acc.tardyMinutes + entry.totals.tardyMinutes,
+      tardyEvents: acc.tardyEvents + entry.totals.tardyEvents
+    }),
+    { scheduledDays: 0, onTimeDays: 0, tardyMinutes: 0, tardyEvents: 0 }
+  );
+
+  const teamBehaviorTotals = employeeSummaries.reduce(
+    (acc, entry) => ({
+      lunchMinutes: acc.lunchMinutes + entry.behavior.lunchMinutes,
+      lunchCount: acc.lunchCount + entry.behavior.lunchCount,
+      breakMinutes: acc.breakMinutes + entry.behavior.breakMinutes,
+      breakCount: acc.breakCount + entry.behavior.breakCount,
+      idleMinutes: acc.idleMinutes + entry.behavior.idleMinutes,
+      idleDays: acc.idleDays + entry.behavior.idleDays
+    }),
+    { lunchMinutes: 0, lunchCount: 0, breakMinutes: 0, breakCount: 0, idleMinutes: 0, idleDays: 0 }
+  );
+
+  const teamOnTimePercent = teamAttendanceTotals.scheduledDays
+    ? (teamAttendanceTotals.onTimeDays / teamAttendanceTotals.scheduledDays) * 100
+    : null;
+  const teamAverageTardy = teamAttendanceTotals.tardyEvents
+    ? teamAttendanceTotals.tardyMinutes / teamAttendanceTotals.tardyEvents
+    : null;
+  const teamAverageLunch = teamBehaviorTotals.lunchCount
+    ? teamBehaviorTotals.lunchMinutes / teamBehaviorTotals.lunchCount
+    : null;
+  const teamAverageBreak = teamBehaviorTotals.breakCount
+    ? teamBehaviorTotals.breakMinutes / teamBehaviorTotals.breakCount
+    : null;
+  const teamAverageIdle = teamBehaviorTotals.idleDays
+    ? teamBehaviorTotals.idleMinutes / teamBehaviorTotals.idleDays
+    : null;
+
+  const hasSummaries = employeeSummaries.length > 0;
+  const noSummariesMessage = 'No payroll lines have been computed for this period.';
 
   const formatPercent = (value: number | null) => {
     if (value === null || !Number.isFinite(value)) return '—';
@@ -7211,19 +7265,86 @@ dashboardRouter.get('/payroll/summary/:payDate', async (req, res) => {
       </div>`
     : '';
 
-  const emptyState = employeeSummaries.length
+  const employeeEmptyState = hasSummaries
     ? ''
-    : '<div class="empty" data-summary-empty>No payroll lines have been computed for this period.</div>';
+    : `<div class="empty" data-summary-empty>${escapeHtml(noSummariesMessage)}</div>`;
 
-  const totalsGrid = `
-    <dl class="totals-grid">
-      <div><dt>Gross</dt><dd>${formatCurrency(periodTotals.finalAmount)}</dd></div>
-      <div><dt>Base Pay</dt><dd>${formatCurrency(periodTotals.base)}</dd></div>
-      <div><dt>Attendance Bonus</dt><dd>${formatCurrency(attendanceBonusTotal)}</dd></div>
-      <div><dt>KPI Bonus</dt><dd>${formatCurrency(periodTotals.kpiBonus)}</dd></div>
-      <div><dt>Total Hours</dt><dd>${formatHours(Math.round(teamTotalHours * 100) / 100)} h</dd></div>
-    </dl>
+  const teamHoursLabel = `${formatHours(Math.round(teamTotalHours * 100) / 100)} h`;
+
+  const teamTotalsTable = `
+    <table class="totals-table">
+      <tbody>
+        <tr><th scope="row">Gross</th><td>${formatCurrency(periodTotals.finalAmount)}</td></tr>
+        <tr><th scope="row">Base</th><td>${formatCurrency(periodTotals.base)}</td></tr>
+        <tr><th scope="row">Attendance Bonus</th><td>${formatCurrency(attendanceBonusTotal)}</td></tr>
+        <tr><th scope="row">KPI Bonus</th><td>${formatCurrency(periodTotals.kpiBonus)}</td></tr>
+      </tbody>
+    </table>
   `;
+
+  const teamTotalsEmptyState = hasSummaries
+    ? ''
+    : `<div class="empty" data-totals-empty>${escapeHtml(noSummariesMessage)}</div>`;
+
+  const teamTotalsContent = hasSummaries
+    ? `<div data-totals-content hidden>
+        ${teamTotalsTable}
+        <p class="meta">Team logged ${escapeHtml(teamHoursLabel)} total hours.</p>
+      </div>`
+    : '';
+
+  const teamMetricsCards = hasSummaries
+    ? (() => {
+        const onTimeMeta = teamAttendanceTotals.scheduledDays
+          ? `${teamAttendanceTotals.onTimeDays} of ${teamAttendanceTotals.scheduledDays} days on time`
+          : 'No scheduled days recorded';
+        const tardyMeta = teamAttendanceTotals.tardyEvents
+          ? `${teamAttendanceTotals.tardyEvents} tardy ${teamAttendanceTotals.tardyEvents === 1 ? 'event' : 'events'}`
+          : 'No tardy events recorded';
+        const lunchMeta = teamBehaviorTotals.lunchCount
+          ? `${teamBehaviorTotals.lunchCount} lunches tracked`
+          : 'No lunches tracked';
+        const breakMeta = teamBehaviorTotals.breakCount
+          ? `${teamBehaviorTotals.breakCount} breaks tracked`
+          : 'No breaks tracked';
+        const idleMeta = teamBehaviorTotals.idleDays
+          ? `${teamBehaviorTotals.idleDays} working ${teamBehaviorTotals.idleDays === 1 ? 'day' : 'days'}`
+          : 'No idle time tracked';
+        return `
+          <div class="summary-cards">
+            <div class="summary-card">
+              <div class="summary-title">On-Time %</div>
+              <div class="summary-value">${escapeHtml(formatPercent(teamOnTimePercent))}</div>
+              <div class="summary-meta">${escapeHtml(onTimeMeta)}</div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-title">Avg Tardy</div>
+              <div class="summary-value">${escapeHtml(formatAverageMinutes(teamAverageTardy))}</div>
+              <div class="summary-meta">${escapeHtml(tardyMeta)}</div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-title">Avg Lunch</div>
+              <div class="summary-value">${escapeHtml(formatAverageMinutes(teamAverageLunch))}</div>
+              <div class="summary-meta">${escapeHtml(lunchMeta)}</div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-title">Avg Break</div>
+              <div class="summary-value">${escapeHtml(formatAverageMinutes(teamAverageBreak))}</div>
+              <div class="summary-meta">${escapeHtml(breakMeta)}</div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-title">Avg Idle</div>
+              <div class="summary-value">${escapeHtml(formatAverageMinutes(teamAverageIdle))}</div>
+              <div class="summary-meta">${escapeHtml(idleMeta)}</div>
+            </div>
+          </div>
+        `;
+      })()
+    : '';
+
+  const teamMetricsEmptyState = hasSummaries
+    ? ''
+    : `<div class="empty" data-metrics-empty>${escapeHtml('Team metrics are unavailable without payroll lines.')}</div>`;
 
   const payDateLabel = formatFullDate(normalizedPayDate);
   const periodRangeLabel = `${formatFullDate(periodStart)} – ${formatFullDate(periodEnd)}`;
@@ -7255,8 +7376,8 @@ dashboardRouter.get('/payroll/summary/:payDate', async (req, res) => {
               <a class="button button-secondary" href="/dashboard/payroll">Back to Payroll</a>
             </div>
           </header>
-          <div class="cards-grid">
-            <section class="card">
+          <div class="cards-grid cards-grid--summary">
+            <section class="card card--table">
               <div class="card__header">
                 <div>
                   <h2 class="card__title">Team Totals</h2>
@@ -7264,7 +7385,24 @@ dashboardRouter.get('/payroll/summary/:payDate', async (req, res) => {
                 </div>
               </div>
               <div class="card__body">
-                ${totalsGrid}
+                <div data-totals-loading class="empty">Loading team totals…</div>
+                <div data-totals-error class="empty empty--error" hidden>Unable to load team totals.</div>
+                ${teamTotalsEmptyState}
+                ${teamTotalsContent}
+              </div>
+            </section>
+            <section class="card">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Team Metrics</h2>
+                  <p class="card__subtitle">Punctuality and behavior insights for the pay period.</p>
+                </div>
+              </div>
+              <div class="card__body">
+                <div data-metrics-loading class="empty">Loading team metrics…</div>
+                <div data-metrics-error class="empty empty--error" hidden>Unable to load team metrics.</div>
+                ${teamMetricsEmptyState}
+                ${hasSummaries ? `<div data-metrics-content hidden>${teamMetricsCards}</div>` : ''}
               </div>
             </section>
           </div>
@@ -7279,7 +7417,7 @@ dashboardRouter.get('/payroll/summary/:payDate', async (req, res) => {
               <div class="card__body">
                 <div data-summary-loading class="empty">Loading payroll summary…</div>
                 <div data-summary-error class="empty empty--error" hidden>Unable to load payroll summary.</div>
-                ${emptyState}
+                ${employeeEmptyState}
                 ${employeeSummaries.length ? `<div data-summary-content hidden>${employeeTable}</div>` : ''}
                 <noscript>${employeeSummaries.length ? employeeTable : '<div class="empty">No payroll lines have been computed for this period.</div>'}</noscript>
               </div>
@@ -7288,14 +7426,17 @@ dashboardRouter.get('/payroll/summary/:payDate', async (req, res) => {
         </main>
         <script>
           (() => {
-            const loading = document.querySelector('[data-summary-loading]');
-            const content = document.querySelector('[data-summary-content]');
-            if (loading) {
-              loading.setAttribute('hidden', 'true');
-            }
-            if (content) {
-              content.removeAttribute('hidden');
-            }
+            const reveal = (key) => {
+              const loading = document.querySelector('[data-' + key + '-loading]');
+              const content = document.querySelector('[data-' + key + '-content]');
+              if (loading) {
+                loading.setAttribute('hidden', 'true');
+              }
+              if (content) {
+                content.removeAttribute('hidden');
+              }
+            };
+            ['summary', 'totals', 'metrics'].forEach(reveal);
           })();
         </script>
       </body>
