@@ -4232,6 +4232,16 @@ dashboardRouter.get('/user/:userId', async (req, res) => {
 
   const dateLabel = formatFullDate(dayStart);
   const detailRows = details.map((detail) => buildDetailRow(detail)).join('\n');
+  const timezoneNote = renderTimezoneNote(dayStart, dayEnd);
+  const subtitleParts = [user.email ? escapeHtml(user.email) : null, escapeHtml(dateLabel)]
+    .filter((value): value is string => Boolean(value))
+    .join(' • ');
+  const sessionSubtitle = details.length
+    ? `${escapeHtml(dateLabel)} • ${details.length} ${details.length === 1 ? 'session' : 'sessions'} recorded`
+    : `${escapeHtml(dateLabel)} • No sessions recorded`;
+  const pauseSubtitle = pauseEntries.length
+    ? `${pauseEntries.length} ${pauseEntries.length === 1 ? 'pause' : 'pauses'} captured`
+    : 'No pauses captured for this date.';
 
   const html = `
     <!doctype html>
@@ -4241,56 +4251,81 @@ dashboardRouter.get('/user/:userId', async (req, res) => {
         <title>${escapeHtml(user.name)} – ${dateLabel}</title>
         <style>${baseStyles}</style>
       </head>
-      <body>
+      <body class="dashboard dashboard--user-detail">
         ${renderNav('user')}
-        ${renderTimezoneNote(dayStart, dayEnd)}
-        <a href="/dashboard/today" class="no-print">← Back to Today</a>
-        <h1>${escapeHtml(user.name)}</h1>
-        <div class="meta">${escapeHtml(user.email)}</div>
-        <h2>${dateLabel}</h2>
-        <div class="actions no-print">
-          <form method="get" action="/dashboard/user/${userId}" class="filters">
-            <label>
-              <span>Date</span>
-              <input type="date" name="date" value="${dateParam}" />
-            </label>
-            <button type="submit">Apply</button>
-          </form>
-          <form method="get" action="/dashboard/user/${userId}">
-            <input type="hidden" name="date" value="${dateParam}" />
-            <input type="hidden" name="download" value="csv" />
-            <button type="submit">Download CSV</button>
-          </form>
-          <button type="button" class="print-button" onclick="window.print()">Print</button>
-        </div>
-        ${
-          detailRows
-            ? `<div class="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Session Start</th>
-                      <th>Session End</th>
-                      <th>Active Minutes</th>
-                      <th>Idle Minutes</th>
-                      <th>Breaks</th>
-                      <th>Break Minutes</th>
-                      <th>Lunches</th>
-                      <th>Lunch Minutes</th>
-                      <th>Presence Misses</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${detailRows}
-                  </tbody>
-                </table>
-              </div>`
-            : '<div class="empty">No sessions recorded for this date.</div>'
-        }
-        <section class="card">
-          <h2>Breaks and Lunches</h2>
-          ${renderPauseTable(pauseEntries)}
-        </section>
+        <main class="page-shell">
+          <header class="page-header">
+            <div class="page-header__content">
+              <p class="page-header__eyebrow">User timeline</p>
+              <h1 class="page-header__title">${escapeHtml(user.name)}</h1>
+              <p class="page-header__subtitle">${subtitleParts}</p>
+            </div>
+            <div class="page-header__meta">
+              <a href="/dashboard/today" class="button button-secondary no-print">Back to Today</a>
+              ${timezoneNote}
+            </div>
+          </header>
+          <section class="card card--table">
+            <div class="card__header">
+              <div>
+                <h2 class="card__title">Session timeline</h2>
+                <p class="card__subtitle">${sessionSubtitle}</p>
+              </div>
+              <div class="card__actions no-print">
+                <form method="get" action="/dashboard/user/${userId}" class="filters">
+                  <label>
+                    <span>Date</span>
+                    <input type="date" name="date" value="${dateParam}" />
+                  </label>
+                  <button type="submit">Apply</button>
+                </form>
+                <form method="get" action="/dashboard/user/${userId}">
+                  <input type="hidden" name="date" value="${dateParam}" />
+                  <input type="hidden" name="download" value="csv" />
+                  <button type="submit">Download CSV</button>
+                </form>
+                <button type="button" class="print-button" onclick="window.print()">Print</button>
+              </div>
+            </div>
+            <div class="card__body">
+              ${
+                detailRows
+                  ? `<div class="table-scroll">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Session Start</th>
+                            <th>Session End</th>
+                            <th>Active Minutes</th>
+                            <th>Idle Minutes</th>
+                            <th>Breaks</th>
+                            <th>Break Minutes</th>
+                            <th>Lunches</th>
+                            <th>Lunch Minutes</th>
+                            <th>Presence Misses</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          ${detailRows}
+                        </tbody>
+                      </table>
+                    </div>`
+                  : '<div class="empty">No sessions recorded for this date.</div>'
+              }
+            </div>
+          </section>
+          <section class="card card--detail">
+            <div class="card__header">
+              <div>
+                <h2 class="card__title">Breaks and Lunches</h2>
+                <p class="card__subtitle">${pauseSubtitle}</p>
+              </div>
+            </div>
+            <div class="card__body">
+              ${renderPauseTable(pauseEntries)}
+            </div>
+          </section>
+        </main>
       </body>
     </html>
   `;
