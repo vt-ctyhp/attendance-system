@@ -26,6 +26,15 @@ model User {
   reviewedTimesheetEdits TimesheetEditRequest[] @relation("TimesheetEditReviewer")
   balanceLedgerEntries BalanceLedger[] @relation("BalanceLedgerUser")
   createdBalanceLedgerEntries BalanceLedger[] @relation("BalanceLedgerCreatedBy")
+  payrollConfigs EmployeeCompConfig[]
+  attendanceFacts AttendanceMonthFact[]
+  bonusCandidates BonusCandidate[] @relation("BonusCandidateUser")
+  approvedBonusCandidates BonusCandidate[] @relation("BonusCandidateApprovedBy")
+  payrollLines PayrollLine[]
+  approvedPayrollPeriods PayrollPeriod[] @relation("PayrollApprovedBy")
+  paidPayrollPeriods PayrollPeriod[] @relation("PayrollPaidBy")
+  createdHolidays Holiday[] @relation("HolidayCreatedBy")
+  createdAuditLogs PayrollAuditLog[] @relation("PayrollAuditCreatedBy")
 }
 
 model Session {
@@ -97,6 +106,139 @@ model TimeRequest {
   approvedAt    DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+}
+
+model EmployeeCompConfig {
+  id                       Int       @id @default(autoincrement())
+  userId                   Int
+  user                     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  effectiveOn              DateTime
+  baseSemiMonthlySalary    Decimal   @db.Decimal(12, 2)
+  monthlyAttendanceBonus   Decimal   @db.Decimal(12, 2)
+  quarterlyAttendanceBonus Decimal   @db.Decimal(12, 2)
+  kpiEligible              Boolean   @default(false)
+  defaultKpiBonus          Decimal?  @db.Decimal(12, 2)
+  schedule                 Json
+  accrualEnabled           Boolean   @default(false)
+  accrualMethod            String?
+  ptoBalanceHours          Decimal   @default(0) @db.Decimal(10, 2)
+  nonPtoBalanceHours       Decimal   @default(0) @db.Decimal(10, 2)
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  @@unique([userId, effectiveOn])
+  @@index([effectiveOn])
+}
+
+model Holiday {
+  id          Int      @id @default(autoincrement())
+  name        String
+  observedOn  DateTime
+  createdById Int?
+  createdBy   User?    @relation("HolidayCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([observedOn])
+  @@index([observedOn])
+}
+
+model AttendanceMonthFact {
+  id                     Int      @id @default(autoincrement())
+  userId                 Int
+  user                   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  monthKey               String
+  rangeStart             DateTime
+  rangeEnd               DateTime
+  assignedHours          Decimal  @db.Decimal(10, 2)
+  workedHours            Decimal  @db.Decimal(10, 2)
+  ptoHours               Decimal  @db.Decimal(10, 2)
+  nonPtoAbsenceHours     Decimal  @db.Decimal(10, 2)
+  tardyMinutes           Int
+  matchedMakeUpHours     Decimal  @db.Decimal(10, 2)
+  isPerfect              Boolean
+  reasons                Json
+  snapshot               Json
+  computedAt             DateTime @default(now())
+
+  @@unique([userId, monthKey])
+  @@index([monthKey])
+}
+
+model BonusCandidate {
+  id              Int      @id @default(autoincrement())
+  userId          Int
+  user            User     @relation("BonusCandidateUser", fields: [userId], references: [id], onDelete: Cascade)
+  type            String
+  periodKey       String
+  eligiblePayDate DateTime
+  amount          Decimal   @db.Decimal(12, 2)
+  status          String    @default("pending")
+  finalAmount     Decimal?  @db.Decimal(12, 2)
+  notes           String?
+  snapshot        Json
+  computedAt      DateTime  @default(now())
+  approvedAt      DateTime?
+  approvedById    Int?
+  approvedBy      User?     @relation("BonusCandidateApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+
+  @@unique([userId, type, periodKey])
+  @@index([eligiblePayDate])
+  @@index([type])
+}
+
+model PayrollPeriod {
+  id           Int          @id @default(autoincrement())
+  periodKey    String       @unique
+  periodStart  DateTime
+  periodEnd    DateTime
+  payDate      DateTime
+  status       String       @default("draft")
+  totals       Json
+  computedAt   DateTime     @default(now())
+  approvedAt   DateTime?
+  approvedById Int?
+  approvedBy   User?        @relation("PayrollApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  paidAt       DateTime?
+  paidById     Int?
+  paidBy       User?        @relation("PayrollPaidBy", fields: [paidById], references: [id], onDelete: SetNull)
+  lines        PayrollLine[]
+
+  @@index([payDate])
+}
+
+model PayrollLine {
+  id                    Int      @id @default(autoincrement())
+  payrollPeriodId       Int
+  payrollPeriod         PayrollPeriod @relation(fields: [payrollPeriodId], references: [id], onDelete: Cascade)
+  userId                Int
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  baseAmount            Decimal  @db.Decimal(12, 2)
+  monthlyAttendance     Decimal  @db.Decimal(12, 2)
+  monthlyDeferred       Decimal  @db.Decimal(12, 2)
+  quarterlyAttendance   Decimal  @db.Decimal(12, 2)
+  kpiBonus              Decimal  @db.Decimal(12, 2)
+  finalAmount           Decimal  @db.Decimal(12, 2)
+  snapshot              Json
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([payrollPeriodId, userId])
+}
+
+model PayrollAuditLog {
+  id          Int      @id @default(autoincrement())
+  actorId     Int?
+  actor       User?    @relation("PayrollAuditCreatedBy", fields: [actorId], references: [id], onDelete: SetNull)
+  scope       String
+  target      String
+  action      String
+  details     Json
+  createdAt   DateTime @default(now())
+
+  @@index([scope])
+  @@index([action])
+  @@index([createdAt])
 }
 
 model PtoBalance {

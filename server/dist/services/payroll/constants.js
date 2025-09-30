@@ -1,0 +1,11 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.BONUS_TYPE_KPI = exports.BONUS_TYPE_QUARTERLY = exports.BONUS_TYPE_MONTHLY = exports.MAX_TARDY_MINUTES_FOR_BONUS = exports.MAX_MAKEUP_HOURS_PER_MONTH = exports.DATE_KEY_FORMAT = exports.MONTH_KEY_FORMAT = exports.PAYROLL_TIME_ZONE = void 0;
+exports.PAYROLL_TIME_ZONE = 'America/Los_Angeles';
+exports.MONTH_KEY_FORMAT = 'yyyy-MM';
+exports.DATE_KEY_FORMAT = 'yyyy-MM-dd';
+exports.MAX_MAKEUP_HOURS_PER_MONTH = 8;
+exports.MAX_TARDY_MINUTES_FOR_BONUS = 90;
+exports.BONUS_TYPE_MONTHLY = 'monthly_attendance';
+exports.BONUS_TYPE_QUARTERLY = 'quarterly_attendance';
+exports.BONUS_TYPE_KPI = 'kpi';

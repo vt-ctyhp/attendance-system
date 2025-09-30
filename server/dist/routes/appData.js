@@ -23,6 +23,69 @@ const isoDate = (date) => formatDate(date, 'yyyy-MM-dd');
 const dayLabel = (date) => formatDate(date, 'EEE, MMM d');
 const longDate = (date) => formatDate(date, 'LLLL d, yyyy');
 const roundHours = (minutes) => Math.round((minutes / 60) * 100) / 100;
+const MINUTE_MS = 60000;
+const buildIdleActivities = (minuteStats, pauses, reference) => {
+    if (!minuteStats.length) {
+        return [];
+    }
+    const pauseWindows = pauses
+        .map((pause) => ({ start: pause.startedAt, end: pause.endedAt ?? reference }))
+        .filter((window) => window.end.getTime() > window.start.getTime());
+    const isDuringPause = (minuteStart) => pauseWindows.some((pause) => minuteStart >= pause.start && minuteStart < pause.end);
+    const sortedIdleMinutes = minuteStats
+        .filter((stat) => stat.idle)
+        .sort((a, b) => a.minuteStart.getTime() - b.minuteStart.getTime());
+    if (!sortedIdleMinutes.length) {
+        return [];
+    }
+    const activities = [];
+    let streakStart = null;
+    let streakEnd = null;
+    let streakMinutes = 0;
+    const flushStreak = () => {
+        if (!streakStart || !streakEnd || streakMinutes <= 0) {
+            streakStart = null;
+            streakEnd = null;
+            streakMinutes = 0;
+            return;
+        }
+        const minutesLabel = streakMinutes === 1 ? '1 minute' : `${streakMinutes} minutes`;
+        const rangeLabel = `${formatDate(streakStart, 'h:mm a')} – ${formatDate(streakEnd, 'h:mm a')}`;
+        activities.push({
+            id: `idle-${streakStart.toISOString()}`,
+            timestamp: streakEnd.toISOString(),
+            message: `Idle from ${rangeLabel} (${minutesLabel}).`,
+            category: 'idle'
+        });
+        streakStart = null;
+        streakEnd = null;
+        streakMinutes = 0;
+    };
+    for (const stat of sortedIdleMinutes) {
+        if (isDuringPause(stat.minuteStart)) {
+            flushStreak();
+            continue;
+        }
+        const minuteEnd = new Date(stat.minuteStart.getTime() + MINUTE_MS);
+        if (!streakStart || !streakEnd) {
+            streakStart = stat.minuteStart;
+            streakEnd = minuteEnd;
+            streakMinutes = 1;
+            continue;
+        }
+        if (stat.minuteStart.getTime() === streakEnd.getTime()) {
+            streakEnd = minuteEnd;
+            streakMinutes += 1;
+            continue;
+        }
+        flushStreak();
+        streakStart = stat.minuteStart;
+        streakEnd = minuteEnd;
+        streakMinutes = 1;
+    }
+    flushStreak();
+    return activities;
+};
 const toTimesheetPeriod = async (userId, view, reference) => {
     const summary = await (0, timesheets_1.getUserTimesheet)(userId, view, reference);
     return {
@@ -204,7 +267,7 @@ exports.getAppOverview = (0, asyncHandler_1.asyncHandler)(async (req, res) => {
             session: { userId: user.id },
             minuteStart: { gte: todayStart, lt: todayEnd }
         },
-        select: { active: true, idle: true }
+        select: { minuteStart: true, active: true, idle: true }
     });
     const pauses = await prisma_1.prisma.sessionPause.findMany({
         where: {
@@ -269,7 +332,12 @@ exports.getAppOverview = (0, asyncHandler_1.asyncHandler)(async (req, res) => {
         (0, timeRequestPolicy_1.getMakeupCapHoursPerMonth)(),
         (0, timeRequestPolicy_1.getApprovedMakeupHoursThisMonth)(prisma_1.prisma, user.id)
     ]);
-    const activity = [...events.map(eventToActivity), ...requests.map(requestToActivity)]
+    const idleActivities = buildIdleActivities(minuteStats, pauses, now);
+    const activity = [
+        ...events.map(eventToActivity),
+        ...requests.map(requestToActivity),
+        ...idleActivities
+    ]
         .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
         .slice(0, 12);
     res.json({

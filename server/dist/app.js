@@ -43,6 +43,7 @@ const balances_1 = require("./routes/balances");
 const adminSettings_1 = require("./routes/adminSettings");
 const timesheets_1 = require("./routes/timesheets");
 const health_1 = require("./routes/health");
+const payroll_1 = require("./routes/payroll");
 const appData_1 = require("./routes/appData");
 const errorHandler_1 = require("./middleware/errorHandler");
 const extractSessionId = (req) => {
@@ -137,6 +138,7 @@ const buildApp = () => {
     apiRouter.use('/timesheets', timesheets_1.timesheetsRouter);
     apiRouter.use('/admin', adminSettings_1.adminSettingsRouter);
     apiRouter.use('/app', appData_1.appDataRouter);
+    apiRouter.use('/payroll', payroll_1.payrollRouter);
     app.use('/api', apiRouter);
     app.use('/dashboard', dashboard_1.dashboardRouter);
     app.use(errorHandler_1.errorHandler);

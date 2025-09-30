@@ -37,3 +37,12 @@ export type TimesheetView = (typeof TIMESHEET_VIEWS)[number];
 
 export const TIMESHEET_EDIT_STATUSES = ['pending', 'approved', 'denied'] as const;
 export type TimesheetEditStatus = (typeof TIMESHEET_EDIT_STATUSES)[number];
+
+export const BONUS_TYPES = ['monthly_attendance', 'quarterly_attendance', 'kpi'] as const;
+export type BonusType = (typeof BONUS_TYPES)[number];
+
+export const BONUS_STATUSES = ['pending', 'earned', 'approved', 'denied'] as const;
+export type BonusStatus = (typeof BONUS_STATUSES)[number];
+
+export const PAYROLL_STATUSES = ['draft', 'approved', 'paid'] as const;
+export type PayrollStatus = (typeof PAYROLL_STATUSES)[number];

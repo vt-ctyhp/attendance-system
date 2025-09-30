@@ -15,6 +15,10 @@ const asyncHandler_1 = require("../middleware/asyncHandler");
 const errors_1 = require("../errors");
 const timesheets_1 = require("../services/timesheets");
 const balances_1 = require("../services/balances");
+const config_1 = require("../services/payroll/config");
+const constants_1 = require("../services/payroll/constants");
+const attendance_1 = require("../services/payroll/attendance");
+const bonuses_1 = require("../services/payroll/bonuses");
 const timeRequestPolicy_1 = require("../services/timeRequestPolicy");
 const DASHBOARD_TIME_ZONE = process.env.DASHBOARD_TIME_ZONE ?? 'America/Los_Angeles';
 const ISO_DATE_TIME = "yyyy-MM-dd'T'HH:mm:ssXXX";
@@ -332,6 +336,119 @@ const formatHours = (value) => {
 };
 const minutesToHoursValue = (minutes) => Math.round((minutes / 60) * 100) / 100;
 const formatHoursFromMinutes = (minutes) => formatHours(minutesToHoursValue(minutes));
+const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+const formatCurrency = (value) => currencyFormatter.format(Number.isFinite(value) ? value : 0);
+const toNumber = (value, fallback = 0) => {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return value;
+    }
+    if (typeof value === 'string') {
+        const parsed = Number.parseFloat(value);
+        if (Number.isFinite(parsed)) {
+            return parsed;
+        }
+    }
+    return fallback;
+};
+const payrollStatusLabels = {
+    draft: 'Draft',
+    approved: 'Approved',
+    paid: 'Paid'
+};
+const payrollStatusClasses = {
+    draft: 'status-chip status-chip--draft',
+    approved: 'status-chip status-chip--approved',
+    paid: 'status-chip status-chip--paid'
+};
+const normalizePayrollStatus = (status) => types_1.PAYROLL_STATUSES.includes(status)
+    ? status
+    : 'draft';
+const bonusTypeLabels = {
+    [constants_1.BONUS_TYPE_MONTHLY]: 'Monthly Attendance',
+    [constants_1.BONUS_TYPE_QUARTERLY]: 'Quarterly Attendance',
+    [constants_1.BONUS_TYPE_KPI]: 'KPI Bonus'
+};
+const weekdayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const formatDayRange = (start, end) => start === end ? weekdayLabels[start] : `${weekdayLabels[start]}–${weekdayLabels[end]}`;
+const formatDayList = (days) => {
+    if (!days.length) {
+        return '—';
+    }
+    const sorted = days.slice().sort((a, b) => a - b);
+    const ranges = [];
+    let rangeStart = sorted[0];
+    let prev = sorted[0];
+    for (let index = 1; index < sorted.length; index += 1) {
+        const current = sorted[index];
+        if (current === prev + 1) {
+            prev = current;
+            continue;
+        }
+        ranges.push([rangeStart, prev]);
+        rangeStart = current;
+        prev = current;
+    }
+    ranges.push([rangeStart, prev]);
+    return ranges.map(([start, end]) => formatDayRange(start, end)).join(', ');
+};
+const summarizeSchedule = (schedule) => {
+    const normalized = (0, config_1.ensureSchedule)(schedule);
+    const groups = new Map();
+    for (const [dayKey, entry] of Object.entries(normalized)) {
+        const day = Number.parseInt(dayKey, 10);
+        if (!Number.isFinite(day))
+            continue;
+        if (!entry.enabled)
+            continue;
+        const groupKey = `${entry.start}-${entry.end}-${entry.expectedHours}`;
+        const existing = groups.get(groupKey);
+        if (existing) {
+            existing.days.push(day);
+        }
+        else {
+            groups.set(groupKey, {
+                start: entry.start,
+                end: entry.end,
+                hours: entry.expectedHours,
+                days: [day]
+            });
+        }
+    }
+    if (!groups.size) {
+        return 'No scheduled days';
+    }
+    const lines = [];
+    for (const group of groups.values()) {
+        const hoursLabel = Number.isInteger(group.hours)
+            ? `${group.hours}`
+            : group.hours.toFixed(2);
+        lines.push(`${formatDayList(group.days)} · ${group.start} – ${group.end} · ${hoursLabel}h`);
+    }
+    return lines.join('<br />');
+};
+const computeNextPayrollPayDate = () => {
+    const nowZoned = zoned(new Date());
+    const currentDay = nowZoned.getDate();
+    const endOfMonthDate = (0, date_fns_1.endOfMonth)(nowZoned);
+    const fifteenth = new Date(nowZoned);
+    fifteenth.setDate(15);
+    fifteenth.setHours(0, 0, 0, 0);
+    const nextZoned = currentDay <= 15 ? fifteenth : endOfMonthDate;
+    nextZoned.setHours(0, 0, 0, 0);
+    return formatIsoDate((0, date_fns_tz_1.zonedTimeToUtc)(nextZoned, DASHBOARD_TIME_ZONE));
+};
+const toPayDateParam = (value) => formatIsoDate((0, date_fns_tz_1.zonedTimeToUtc)(value, DASHBOARD_TIME_ZONE));
+const parsePeriodTotals = (value) => {
+    const record = (value && typeof value === 'object') ? value : {};
+    return {
+        base: Math.round(toNumber(record.base) * 100) / 100,
+        monthlyAttendance: Math.round(toNumber(record.monthlyAttendance) * 100) / 100,
+        monthlyDeferred: Math.round(toNumber(record.monthlyDeferred) * 100) / 100,
+        quarterlyAttendance: Math.round(toNumber(record.quarterlyAttendance) * 100) / 100,
+        kpiBonus: Math.round(toNumber(record.kpiBonus) * 100) / 100,
+        finalAmount: Math.round(toNumber(record.finalAmount) * 100) / 100
+    };
+};
 const formatTimesheetStatus = (status) => status ? `${status.charAt(0).toUpperCase()}${status.slice(1)}` : status;
 const timesheetViewLabel = (view) => {
     switch (view) {
@@ -1106,6 +1223,7 @@ const baseStyles = `
   .actions { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-end; margin: 1rem 0; }
   .filters { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
   .filters label { font-size: 0.9rem; color: #374151; display: flex; flex-direction: column; gap: 0.25rem; min-width: 180px; }
+  .form-error { margin: 0; min-height: 1.1rem; font-size: 0.85rem; color: #dc2626; font-weight: 500; }
   input[type="date"], input[type="month"], select { padding: 0.4rem 0.6rem; border: 1px solid #d1d5db; border-radius: 4px; font-size: 0.95rem; background: #fff; color: #1f2933; }
   button, .button { padding: 0.5rem 1rem; border: none; background: #2563eb; color: #fff; border-radius: 4px; cursor: pointer; font-size: 0.95rem; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; font-weight: 500; }
   button:hover, .button:hover { background: #1d4ed8; text-decoration: none; }
@@ -1277,6 +1395,34 @@ const baseStyles = `
     body.dashboard .alert.success { background: rgba(22,163,74,0.14); color: #16a34a; }
     body.dashboard .alert.error { background: rgba(220,38,38,0.14); color: #dc2626; }
     body.dashboard .empty { background: rgba(15,23,42,0.03); color: #64748b; border-radius: 16px; }
+    body.dashboard--payroll .cards-grid--payroll { grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); }
+    body.dashboard--payroll .status-chip { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.25rem 0.6rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; background: rgba(148,163,184,0.18); color: #334155; }
+    body.dashboard--payroll .status-chip--draft { background: rgba(148,163,184,0.3); color: #334155; }
+    body.dashboard--payroll .status-chip--approved { background: rgba(34,197,94,0.2); color: #047857; }
+    body.dashboard--payroll .status-chip--paid { background: rgba(37,99,235,0.18); color: #1d4ed8; }
+    body.dashboard--payroll .status-chip--pending { background: rgba(251,191,36,0.24); color: #b45309; }
+    body.dashboard--payroll .status-chip--earned { background: rgba(22,163,74,0.18); color: #15803d; }
+    body.dashboard--payroll .status-chip--denied { background: rgba(220,38,38,0.18); color: #991b1b; }
+    body.dashboard--payroll .status-chip--warn { background: rgba(251,191,36,0.24); color: #b45309; }
+    body.dashboard--payroll .totals-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 0.6rem; }
+    body.dashboard--payroll .totals-grid dt { margin: 0; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; }
+    body.dashboard--payroll .totals-grid dd { margin: 0.25rem 0 0; font-weight: 600; color: #0f172a; font-size: 0.95rem; }
+    body.dashboard--payroll .divider { height: 1px; background: rgba(15,23,42,0.08); margin: 1.5rem 0; }
+    body.dashboard--payroll .secondary-form { display: flex; flex-direction: column; gap: 0.75rem; }
+    body.dashboard--payroll .secondary-form__title { margin: 0; font-size: 1rem; font-weight: 600; }
+    body.dashboard--payroll .checkbox-field { display: inline-flex; gap: 0.4rem; align-items: center; font-weight: 600; }
+    body.dashboard--payroll .schedule-fieldset { border: 1px solid rgba(37,99,235,0.18); padding: 0.85rem; border-radius: 14px; display: flex; flex-direction: column; gap: 0.75rem; }
+    body.dashboard--payroll .schedule-fieldset legend { font-weight: 600; font-size: 0.9rem; color: #2563eb; }
+    body.dashboard--payroll .schedule-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem; }
+    body.dashboard--payroll .schedule-days { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+    body.dashboard--payroll .schedule-option { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.35rem 0.6rem; border-radius: 999px; background: rgba(15,23,42,0.05); font-size: 0.85rem; }
+    body.dashboard--payroll .holiday-form { margin-top: 1.25rem; }
+    body.dashboard--payroll .kpi-card { background: rgba(37,99,235,0.08); border-radius: 16px; padding: 1rem; display: flex; flex-direction: column; gap: 0.75rem; }
+    body.dashboard--payroll .kpi-card__header { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; }
+    body.dashboard--payroll .kpi-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem; }
+    body.dashboard--payroll .kpi-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    body.dashboard--payroll .kpi-card h3 { margin: 0; font-size: 1rem; }
+    body.dashboard--payroll .kpi-card .meta { margin: 0; }
     @media (max-width: 960px) {
       body.dashboard .page-header { text-align: center; flex-direction: column; align-items: stretch; }
       body.dashboard .page-header__meta { text-align: center; justify-items: center; }
@@ -1304,6 +1450,7 @@ const renderNav = (active) => {
         link('/dashboard/timesheets', 'Timesheets', 'timesheets'),
         link('/dashboard/requests', 'Requests', 'requests'),
         link('/dashboard/balances', 'Balances', 'balances'),
+        link('/dashboard/payroll', 'Payroll', 'payroll'),
         link('/dashboard/settings', 'Settings', 'settings')
     ];
     return `<nav class="nav no-print">
@@ -2765,11 +2912,11 @@ exports.dashboardRouter.get('/overview', async (req, res) => {
                     '    ' + buildStat('Current idle', formatMinutesValue(data.idleMinutes), currentIdleMeta),
                     '  </div>',
                     '</div>'
-                  ].join('\n');
+                  ].join('\\n');
 
                   const activitySection = [
                     '<div class="drilldown-section">',
-                    '  <h3>Today\'s activity</h3>',
+                    '  <h3>Today&#39;s activity</h3>',
                     '  <div class="drilldown-grid">',
                     '    ' + buildStat('Idle total', formatMinutesValue(data.idleTotal)),
                     '    ' + buildStat('Breaks', formatCountValue(data.breakCount), data.breakMinutes !== null ? formatMinutesValue(data.breakMinutes) : ''),
@@ -2777,7 +2924,7 @@ exports.dashboardRouter.get('/overview', async (req, res) => {
                     '    ' + buildStat('Presence misses', formatCountValue(data.presenceMisses)),
                     '  </div>',
                     '</div>'
-                  ].join('\n');
+                  ].join('\\n');
 
                   const timelineParts = [
                     '<div class="drilldown-section">',
@@ -2790,9 +2937,9 @@ exports.dashboardRouter.get('/overview', async (req, res) => {
                   }
                   timelineParts.push('  </div>');
                   timelineParts.push('</div>');
-                  const timelineSection = timelineParts.join('\n');
+                  const timelineSection = timelineParts.join('\\n');
 
-                  content.innerHTML = [statusSection, activitySection, timelineSection].join('\n');
+                  content.innerHTML = [statusSection, activitySection, timelineSection].join('\\n');
                   footer.innerHTML = data.detailUrl
                     ? '<a class="button" href="' + escapeHtmlClient(data.detailUrl) + '" data-drilldown-detail>Open timeline</a>'
                     : '';
@@ -3640,6 +3787,16 @@ exports.dashboardRouter.get('/user/:userId', async (req, res) => {
     }
     const dateLabel = formatFullDate(dayStart);
     const detailRows = details.map((detail) => buildDetailRow(detail)).join('\n');
+    const timezoneNote = renderTimezoneNote(dayStart, dayEnd);
+    const subtitleParts = [user.email ? escapeHtml(user.email) : null, escapeHtml(dateLabel)]
+        .filter((value) => Boolean(value))
+        .join(' • ');
+    const sessionSubtitle = details.length
+        ? `${escapeHtml(dateLabel)} • ${details.length} ${details.length === 1 ? 'session' : 'sessions'} recorded`
+        : `${escapeHtml(dateLabel)} • No sessions recorded`;
+    const pauseSubtitle = pauseEntries.length
+        ? `${pauseEntries.length} ${pauseEntries.length === 1 ? 'pause' : 'pauses'} captured`
+        : 'No pauses captured for this date.';
     const html = `
     <!doctype html>
     <html lang="en">
@@ -3648,54 +3805,1219 @@ exports.dashboardRouter.get('/user/:userId', async (req, res) => {
         <title>${escapeHtml(user.name)} – ${dateLabel}</title>
         <style>${baseStyles}</style>
       </head>
-      <body>
+      <body class="dashboard dashboard--user-detail">
         ${renderNav('user')}
-        ${renderTimezoneNote(dayStart, dayEnd)}
-        <a href="/dashboard/today" class="no-print">← Back to Today</a>
-        <h1>${escapeHtml(user.name)}</h1>
-        <div class="meta">${escapeHtml(user.email)}</div>
-        <h2>${dateLabel}</h2>
-        <div class="actions no-print">
-          <form method="get" action="/dashboard/user/${userId}" class="filters">
-            <label>
-              <span>Date</span>
-              <input type="date" name="date" value="${dateParam}" />
-            </label>
-            <button type="submit">Apply</button>
-          </form>
-          <form method="get" action="/dashboard/user/${userId}">
-            <input type="hidden" name="date" value="${dateParam}" />
-            <input type="hidden" name="download" value="csv" />
-            <button type="submit">Download CSV</button>
-          </form>
-          <button type="button" class="print-button" onclick="window.print()">Print</button>
-        </div>
-        ${detailRows
+        <main class="page-shell">
+          <header class="page-header">
+            <div class="page-header__content">
+              <p class="page-header__eyebrow">User timeline</p>
+              <h1 class="page-header__title">${escapeHtml(user.name)}</h1>
+              <p class="page-header__subtitle">${subtitleParts}</p>
+            </div>
+            <div class="page-header__meta">
+              <a href="/dashboard/today" class="button button-secondary no-print">Back to Today</a>
+              ${timezoneNote}
+            </div>
+          </header>
+          <section class="card card--table">
+            <div class="card__header">
+              <div>
+                <h2 class="card__title">Session timeline</h2>
+                <p class="card__subtitle">${sessionSubtitle}</p>
+              </div>
+              <div class="card__actions no-print">
+                <form method="get" action="/dashboard/user/${userId}" class="filters">
+                  <label>
+                    <span>Date</span>
+                    <input type="date" name="date" value="${dateParam}" />
+                  </label>
+                  <button type="submit">Apply</button>
+                </form>
+                <form method="get" action="/dashboard/user/${userId}">
+                  <input type="hidden" name="date" value="${dateParam}" />
+                  <input type="hidden" name="download" value="csv" />
+                  <button type="submit">Download CSV</button>
+                </form>
+                <button type="button" class="print-button" onclick="window.print()">Print</button>
+              </div>
+            </div>
+            <div class="card__body">
+              ${detailRows
         ? `<div class="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Session Start</th>
-                      <th>Session End</th>
-                      <th>Active Minutes</th>
-                      <th>Idle Minutes</th>
-                      <th>Breaks</th>
-                      <th>Break Minutes</th>
-                      <th>Lunches</th>
-                      <th>Lunch Minutes</th>
-                      <th>Presence Misses</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${detailRows}
-                  </tbody>
-                </table>
-              </div>`
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Session Start</th>
+                            <th>Session End</th>
+                            <th>Active Minutes</th>
+                            <th>Idle Minutes</th>
+                            <th>Breaks</th>
+                            <th>Break Minutes</th>
+                            <th>Lunches</th>
+                            <th>Lunch Minutes</th>
+                            <th>Presence Misses</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          ${detailRows}
+                        </tbody>
+                      </table>
+                    </div>`
         : '<div class="empty">No sessions recorded for this date.</div>'}
-        <section class="card">
-          <h2>Breaks and Lunches</h2>
-          ${renderPauseTable(pauseEntries)}
-        </section>
+            </div>
+          </section>
+          <section class="card card--detail">
+            <div class="card__header">
+              <div>
+                <h2 class="card__title">Breaks and Lunches</h2>
+                <p class="card__subtitle">${pauseSubtitle}</p>
+              </div>
+            </div>
+            <div class="card__body">
+              ${renderPauseTable(pauseEntries)}
+            </div>
+          </section>
+        </main>
+      </body>
+    </html>
+  `;
+    res.type('html').send(html);
+});
+exports.dashboardRouter.get('/payroll', async (req, res) => {
+    const toOptionalString = (value) => typeof value === 'string' && value.trim().length ? value.trim() : undefined;
+    const message = toOptionalString(req.query.message);
+    const error = toOptionalString(req.query.error);
+    const factsMonthRaw = toOptionalString(req.query.factsMonth);
+    const bonusDateRaw = toOptionalString(req.query.bonusDate);
+    const employeePrefRaw = toOptionalString(req.query.employeeId);
+    const factsMonthKey = factsMonthRaw && /^\d{4}-\d{2}$/.test(factsMonthRaw) ? factsMonthRaw : undefined;
+    const now = new Date();
+    const defaultMonthParam = (0, date_fns_tz_1.formatInTimeZone)(zonedStartOfMonth(now), DASHBOARD_TIME_ZONE, 'yyyy-MM');
+    const selectedFactsMonth = factsMonthKey ?? defaultMonthParam;
+    const wizardDefaultPayDate = computeNextPayrollPayDate();
+    const parsedWizardPayDate = parseDateInput(wizardDefaultPayDate) ?? zonedStartOfDay(now);
+    const bonusDateCandidate = bonusDateRaw ? parseDateInput(bonusDateRaw) : undefined;
+    const bonusDateValue = bonusDateCandidate ?? parsedWizardPayDate;
+    const bonusDateParam = formatIsoDate(bonusDateValue);
+    const employeeIdCandidate = employeePrefRaw && /^\d+$/.test(employeePrefRaw)
+        ? Number.parseInt(employeePrefRaw, 10)
+        : undefined;
+    const baseDataPromise = Promise.all([
+        prisma_1.prisma.payrollPeriod.findMany({
+            orderBy: { payDate: 'desc' },
+            take: 12,
+            include: {
+                approvedBy: { select: { id: true, name: true } },
+                paidBy: { select: { id: true, name: true } },
+                _count: { select: { lines: true } }
+            }
+        }),
+        prisma_1.prisma.user.findMany({
+            where: { role: 'employee' },
+            orderBy: { name: 'asc' },
+            select: { id: true, name: true, email: true, active: true }
+        }),
+        (0, config_1.listEmployeeConfigs)(),
+        (0, config_1.listHolidays)(now, (0, date_fns_1.addMonths)(now, 12))
+    ]);
+    const baseData = await baseDataPromise;
+    const attendanceData = await (0, attendance_1.listAttendanceFactsForMonth)(selectedFactsMonth);
+    const bonusCandidates = await (0, bonuses_1.listBonusesForPayDate)(bonusDateValue);
+    const [periods, employees, configSnapshots, holidays] = baseData;
+    const employeeLookup = new Map(employees.map((employee) => [employee.id, employee]));
+    const normalizedEmployeeId = employeeIdCandidate && employeeLookup.has(employeeIdCandidate)
+        ? employeeIdCandidate
+        : undefined;
+    const latestConfigByUser = new Map();
+    for (const snapshot of configSnapshots) {
+        if (!latestConfigByUser.has(snapshot.userId)) {
+            latestConfigByUser.set(snapshot.userId, snapshot);
+        }
+    }
+    const latestConfigs = Array.from(latestConfigByUser.values()).sort((a, b) => {
+        const userA = employeeLookup.get(a.userId);
+        const userB = employeeLookup.get(b.userId);
+        return (userA?.name ?? '').localeCompare(userB?.name ?? '');
+    });
+    const selectedConfig = normalizedEmployeeId ? latestConfigByUser.get(normalizedEmployeeId) : undefined;
+    const buildStatusMeta = (period) => {
+        const parts = [];
+        if (period.approvedBy && period.approvedAt) {
+            parts.push(`Approved by ${escapeHtml(period.approvedBy.name)} on ${escapeHtml(formatDateTime(period.approvedAt))}`);
+        }
+        if (period.paidBy && period.paidAt) {
+            parts.push(`Paid by ${escapeHtml(period.paidBy.name)} on ${escapeHtml(formatDateTime(period.paidAt))}`);
+        }
+        return parts.length ? `<div class="meta">${parts.join(' • ')}</div>` : '';
+    };
+    const periodRows = periods
+        .map((period) => {
+        const totals = parsePeriodTotals(period.totals);
+        const status = normalizePayrollStatus(period.status);
+        const payDateIso = formatIsoDate(period.payDate);
+        const totalsEntries = [
+            { key: 'base', label: 'Base' },
+            { key: 'monthlyAttendance', label: 'Monthly' },
+            { key: 'monthlyDeferred', label: 'Deferred' },
+            { key: 'quarterlyAttendance', label: 'Quarterly' },
+            { key: 'kpiBonus', label: 'KPI' },
+            { key: 'finalAmount', label: 'Total' }
+        ];
+        const totalsGrid = totalsEntries
+            .map(({ key, label }) => `<div><dt>${escapeHtml(label)}</dt><dd>${formatCurrency(totals[key])}</dd></div>`)
+            .join('');
+        const linesCount = period._count.lines;
+        const linesMeta = `${linesCount} ${linesCount === 1 ? 'line' : 'lines'}`;
+        const computedMeta = period.computedAt
+            ? `<div class="meta">Computed ${escapeHtml(formatDateTime(period.computedAt))}</div>`
+            : '';
+        const statusChip = `<span class="${payrollStatusClasses[status]}">${escapeHtml(payrollStatusLabels[status])}</span>`;
+        const disableRecalc = status === 'paid' ? ' disabled' : '';
+        const disableApprove = status !== 'draft' ? ' disabled' : '';
+        const disablePay = status !== 'approved' ? ' disabled' : '';
+        const errorTargetId = `period-error-${period.id}`;
+        const rowId = `period-row-${period.id}`;
+        return `
+        <tr id="${rowId}" data-period-row="${payDateIso}">
+          <td>
+            <strong>${escapeHtml(formatFullDate(period.payDate))}</strong>
+            <div class="meta">${escapeHtml(linesMeta)}</div>
+            ${computedMeta}
+          </td>
+          <td>
+            ${statusChip}
+            ${buildStatusMeta(period)}
+          </td>
+          <td>
+            <dl class="totals-grid">${totalsGrid}</dl>
+          </td>
+          <td>
+            <div class="action-buttons">
+              <button
+                type="button"
+                class="button"
+                data-payroll-action
+                data-method="POST"
+                data-url="/api/payroll/payruns/${payDateIso}/recalc"
+                data-success-message="Payroll recalculated."
+                data-error-target="${errorTargetId}"
+                ${disableRecalc}
+              >Recalculate</button>
+              <button
+                type="button"
+                class="button"
+                data-payroll-action
+                data-method="POST"
+                data-url="/api/payroll/payruns/${payDateIso}/approve"
+                data-success-message="Payroll approved."
+                data-confirm="Approve this payroll period?"
+                data-error-target="${errorTargetId}"
+                ${disableApprove}
+              >Approve</button>
+              <button
+                type="button"
+                class="button button-danger"
+                data-payroll-action
+                data-method="POST"
+                data-url="/api/payroll/payruns/${payDateIso}/pay"
+                data-success-message="Payroll marked as paid."
+                data-confirm="Mark this payroll period as paid?"
+                data-error-target="${errorTargetId}"
+                ${disablePay}
+              >Mark Paid</button>
+              <a
+                class="button button-secondary"
+                href="/api/payroll/payruns/${payDateIso}/export"
+                target="_blank"
+                rel="noopener"
+              >Export CSV</a>
+              <button
+                type="button"
+                class="button button-secondary"
+                data-payroll-detail
+                data-pay-date="${payDateIso}"
+                data-period-title="${escapeHtml(formatFullDate(period.payDate))}"
+                data-error-target="${errorTargetId}"
+              >View Details</button>
+            </div>
+            <p class="form-error" id="${errorTargetId}" role="alert"></p>
+          </td>
+        </tr>
+      `;
+    })
+        .join('\n');
+    const payrollTable = periods.length
+        ? `<div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Pay Date</th>
+              <th>Status</th>
+              <th>Totals</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${periodRows}
+          </tbody>
+        </table>
+      </div>`
+        : '<div class="empty">No payroll periods have been calculated yet.</div>';
+    const attendanceFacts = attendanceData?.facts ?? [];
+    const attendanceRows = attendanceFacts
+        .map((fact) => {
+        const employee = employeeLookup.get(fact.userId);
+        const reasons = Array.isArray(fact.reasons)
+            ? fact.reasons.map((reason) => String(reason)).filter((reason) => reason.trim().length)
+            : [];
+        const scheduleNotes = reasons.length ? reasons.join('; ') : '—';
+        const statusChip = fact.isPerfect
+            ? '<span class="status-chip status-chip--approved">Perfect</span>'
+            : '<span class="status-chip status-chip--warn">Review</span>';
+        return `
+        <tr>
+          <td>
+            ${escapeHtml(employee?.name ?? `User ${fact.userId}`)}
+            <div class="meta">${escapeHtml(employee?.email ?? '')}</div>
+          </td>
+          <td>${formatHours(toNumber(fact.assignedHours))} h</td>
+          <td>${formatHours(toNumber(fact.workedHours))} h</td>
+          <td>${formatHours(toNumber(fact.ptoHours))} h</td>
+          <td>${formatHours(toNumber(fact.nonPtoAbsenceHours))} h</td>
+          <td>${formatHours(toNumber(fact.matchedMakeUpHours))} h</td>
+          <td>${fact.tardyMinutes}</td>
+          <td>${statusChip}</td>
+          <td>${escapeHtml(scheduleNotes)}</td>
+        </tr>
+      `;
+    })
+        .join('\n');
+    const attendanceTable = attendanceFacts.length
+        ? `<div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Employee</th>
+              <th>Assigned</th>
+              <th>Worked</th>
+              <th>PTO</th>
+              <th>Non-PTO</th>
+              <th>Make-Up</th>
+              <th>Tardy (m)</th>
+              <th>Status</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${attendanceRows}
+          </tbody>
+        </table>
+      </div>`
+        : `<div class="empty">No attendance facts computed for ${escapeHtml(selectedFactsMonth)}.</div>`;
+    const attendanceRangeNote = attendanceData
+        ? renderTimezoneNote(attendanceData.rangeStart, attendanceData.rangeEnd)
+        : '';
+    const holidayRows = holidays
+        .map((holiday) => {
+        const iso = formatIsoDate(holiday.observedOn);
+        return `
+        <tr>
+          <td>${escapeHtml(holiday.name)}</td>
+          <td>${escapeHtml(formatFullDate(holiday.observedOn))}</td>
+          <td>
+            <button
+              type="button"
+              class="button button-danger"
+              data-holiday-delete
+              data-date="${iso}"
+              data-name="${escapeHtml(holiday.name)}"
+              data-success-message="Holiday removed."
+              data-error-target="holiday-error"
+            >Remove</button>
+          </td>
+        </tr>
+      `;
+    })
+        .join('\n');
+    const holidayTable = holidays.length
+        ? `<div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Date</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${holidayRows}
+          </tbody>
+        </table>
+      </div>`
+        : '<div class="empty">No upcoming holidays recorded.</div>';
+    const employeeOptions = buildSelectOptions([
+        { value: '', label: 'Select employee' },
+        ...employees.map((employee) => ({
+            value: String(employee.id),
+            label: employee.active ? employee.name : `${employee.name} (inactive)`
+        }))
+    ], normalizedEmployeeId ? String(normalizedEmployeeId) : '');
+    const makeNumberValue = (value) => Number.isFinite(value) ? String(value) : '';
+    const scheduleTemplate = (() => {
+        const baseSchedule = selectedConfig ? (0, config_1.ensureSchedule)(selectedConfig.schedule) : (0, config_1.ensureSchedule)({});
+        let enabledDays = Object.entries(baseSchedule)
+            .filter(([, entry]) => entry.enabled)
+            .map(([day]) => day);
+        if (!selectedConfig && enabledDays.length === 0) {
+            enabledDays = ['1', '2', '3', '4', '5'];
+        }
+        const templateReference = enabledDays.includes('1')
+            ? baseSchedule['1']
+            : enabledDays.length
+                ? baseSchedule[enabledDays[0]]
+                : baseSchedule['1'];
+        return {
+            start: templateReference.start,
+            end: templateReference.end,
+            hours: templateReference.expectedHours,
+            enabledDays
+        };
+    })();
+    const scheduleCheckboxes = ['0', '1', '2', '3', '4', '5', '6']
+        .map((dayKey) => {
+        const label = weekdayLabels[Number(dayKey)];
+        const isChecked = scheduleTemplate.enabledDays.includes(dayKey);
+        return `
+        <label class="schedule-option">
+          <input type="checkbox" name="scheduleDay" value="${dayKey}" data-day="${dayKey}"${isChecked ? ' checked' : ''} />
+          <span>${escapeHtml(label)}</span>
+        </label>
+      `;
+    })
+        .join('');
+    const latestConfigRows = latestConfigs.length
+        ? latestConfigs
+            .map((config) => {
+            const employee = employeeLookup.get(config.userId);
+            const scheduleSummary = summarizeSchedule(config.schedule);
+            const kpiLabel = config.kpiEligible
+                ? `Eligible${config.defaultKpiBonus ? ` (${formatCurrency(config.defaultKpiBonus)})` : ''}`
+                : 'Not eligible';
+            const accrualLabel = config.accrualEnabled
+                ? `Enabled${config.accrualMethod ? ` – ${escapeHtml(config.accrualMethod)}` : ''}`
+                : 'Disabled';
+            return `
+            <tr>
+              <td>
+                ${escapeHtml(employee?.name ?? `User ${config.userId}`)}
+                <div class="meta">${escapeHtml(employee?.email ?? '')}</div>
+              </td>
+              <td>${escapeHtml(formatFullDate(config.effectiveOn))}</td>
+              <td>${formatCurrency(config.baseSemiMonthlySalary)}</td>
+              <td>${formatCurrency(config.monthlyAttendanceBonus)}</td>
+              <td>${formatCurrency(config.quarterlyAttendanceBonus)}</td>
+              <td>${escapeHtml(kpiLabel)}</td>
+              <td>
+                ${escapeHtml(accrualLabel)}
+                <div class="meta">PTO ${formatHours(config.ptoBalanceHours)}h • Non-PTO ${formatHours(config.nonPtoBalanceHours)}h</div>
+              </td>
+              <td>${scheduleSummary}</td>
+            </tr>
+          `;
+        })
+            .join('\n')
+        : '<tr><td colspan="8" class="empty">No compensation configurations have been recorded.</td></tr>';
+    const compensationTable = `
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Employee</th>
+            <th>Effective On</th>
+            <th>Base</th>
+            <th>Monthly Bonus</th>
+            <th>Quarterly Bonus</th>
+            <th>KPI</th>
+            <th>Accrual</th>
+            <th>Schedule</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${latestConfigRows}
+        </tbody>
+      </table>
+    </div>
+  `;
+    const bonusTypeGroup = (type) => bonusTypeLabels[type] ?? type;
+    const kpiCandidates = bonusCandidates.filter((candidate) => candidate.type === constants_1.BONUS_TYPE_KPI);
+    const otherBonuses = bonusCandidates.filter((candidate) => candidate.type !== constants_1.BONUS_TYPE_KPI);
+    const otherBonusRows = otherBonuses.length
+        ? otherBonuses
+            .map((candidate) => {
+            const employee = candidate.user;
+            const amount = candidate.finalAmount
+                ? Number(candidate.finalAmount)
+                : Number(candidate.amount);
+            return `
+            <tr>
+              <td>${escapeHtml(employee?.name ?? `User ${candidate.userId}`)}<div class="meta">${escapeHtml(employee?.email ?? '')}</div></td>
+              <td>${escapeHtml(bonusTypeGroup(candidate.type))}</td>
+              <td>${formatCurrency(amount)}</td>
+              <td><span class="status-chip status-chip--${escapeHtml(candidate.status)}">${escapeHtml(candidate.status)}</span></td>
+            </tr>
+          `;
+        })
+            .join('\n')
+        : '<tr><td colspan="4" class="empty">No non-KPI bonuses queued for this pay date.</td></tr>';
+    const kpiSections = kpiCandidates.length
+        ? kpiCandidates
+            .map((candidate) => {
+            const employee = candidate.user;
+            const amountValue = candidate.finalAmount
+                ? Number(candidate.finalAmount)
+                : Number(candidate.amount ?? 0);
+            return `
+            <article class="kpi-card" data-kpi-id="${candidate.id}">
+              <header class="kpi-card__header">
+                <div>
+                  <h3>${escapeHtml(employee?.name ?? `User ${candidate.userId}`)}</h3>
+                  <p class="meta">${escapeHtml(employee?.email ?? '')}</p>
+                </div>
+                <span class="status-chip status-chip--${escapeHtml(candidate.status)}">${escapeHtml(candidate.status)}</span>
+              </header>
+              <form data-async="true" data-kind="kpi-decision" data-success-message="KPI decision saved." data-candidate-id="${candidate.id}">
+                <div class="kpi-form-grid">
+                  <label>
+                    <span>Final Amount</span>
+                    <input type="number" name="finalAmount" step="0.01" min="0" value="${makeNumberValue(amountValue)}" />
+                  </label>
+                  <label>
+                    <span>Notes</span>
+                    <input type="text" name="notes" maxlength="500" value="${escapeHtml(candidate.notes ?? '')}" />
+                  </label>
+                </div>
+                <input type="hidden" name="status" value="${escapeHtml(candidate.status)}" />
+                <div class="kpi-actions">
+                  <button type="submit" class="button" data-kpi-status="approved" data-confirm="Approve this KPI bonus?">Approve</button>
+                  <button type="submit" class="button button-danger" data-kpi-status="denied" data-confirm="Deny this KPI bonus?">Deny</button>
+                </div>
+                <p class="form-error" data-error></p>
+              </form>
+            </article>
+          `;
+        })
+            .join('\n')
+        : '<div class="empty">No KPI bonuses pending review for this pay date.</div>';
+    const messageAlert = message ? `<div class="alert success">${escapeHtml(message)}</div>` : '';
+    const errorAlert = error ? `<div class="alert error">${escapeHtml(error)}</div>` : '';
+    const html = `
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <title>Payroll Dashboard</title>
+        <style>${baseStyles}</style>
+      </head>
+      <body class="dashboard dashboard--payroll">
+        ${renderNav('payroll')}
+        <main class="page-shell">
+          <header class="page-header">
+            <div class="page-header__content">
+              <p class="page-header__eyebrow">Payroll</p>
+              <h1 class="page-header__title">Payroll Operations</h1>
+              <p class="page-header__subtitle">Run pay periods, validate supporting data, and manage compensation from a single workspace.</p>
+            </div>
+            <div class="page-header__meta">
+              <span>${periods.length ? `${periods.length} recent ${periods.length === 1 ? 'period' : 'periods'}` : 'No periods yet'}</span>
+            </div>
+          </header>
+          ${messageAlert}
+          ${errorAlert}
+          <div class="cards-grid cards-grid--payroll">
+            <section class="card card--table">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Payroll Periods</h2>
+                  <p class="card__subtitle">Limited to the 12 most recent runs.</p>
+                </div>
+              </div>
+              <div class="card__body">
+                ${payrollTable}
+              </div>
+            </section>
+            <section class="card">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Run Payroll</h2>
+                  <p class="card__subtitle">Pick a pay date (15th or end-of-month) to generate or refresh the period.</p>
+                </div>
+              </div>
+              <div class="card__body">
+                <form data-async="true" data-kind="payroll-run" data-success-message="Payroll recalculation queued." class="stack-form">
+                  <label>
+                    <span>Pay Date</span>
+                    <input type="date" name="payDate" value="${wizardDefaultPayDate}" required />
+                  </label>
+                  <p class="meta">After success the page refreshes with updated totals.</p>
+                  <p class="form-error" data-error></p>
+                  <button type="submit">Calculate</button>
+                </form>
+                <div class="divider"></div>
+                <div class="secondary-form">
+                  <h3 class="secondary-form__title">Attendance Recalculation</h3>
+                  <form data-async="true" data-kind="attendance-recalc" data-success-message="Attendance recalculation started." class="stack-form">
+                    <label>
+                      <span>Month</span>
+                      <input type="month" name="month" value="${selectedFactsMonth}" required />
+                    </label>
+                    <p class="form-error" data-error></p>
+                    <button type="submit" class="button-secondary">Re-run Attendance</button>
+                  </form>
+                </div>
+              </div>
+            </section>
+          </div>
+          <div class="cards-grid cards-grid--payroll">
+            <section class="card card--table">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Attendance Facts</h2>
+                  <p class="card__subtitle">Use the month picker to load supporting attendance summaries.</p>
+                </div>
+                <div class="card__actions no-print">
+                  <form method="get" action="/dashboard/payroll" class="filters">
+                    <label>
+                      <span>Facts Month</span>
+                      <input type="month" name="factsMonth" value="${selectedFactsMonth}" />
+                    </label>
+                    <input type="hidden" name="bonusDate" value="${bonusDateParam}" />
+                    <input type="hidden" name="employeeId" value="${normalizedEmployeeId ? normalizedEmployeeId : ''}" />
+                    <button type="submit">Load</button>
+                  </form>
+                </div>
+              </div>
+              <div class="card__body">
+                ${attendanceRangeNote}
+                ${attendanceTable}
+              </div>
+            </section>
+            <section class="card card--table">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Compensation Configurations</h2>
+                  <p class="card__subtitle">Latest effective configuration per employee.</p>
+                </div>
+              </div>
+              <div class="card__body">
+                ${compensationTable}
+              </div>
+            </section>
+          </div>
+          <div class="cards-grid cards-grid--payroll">
+            <section class="card">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Update Compensation</h2>
+                  <p class="card__subtitle">Submit adjustments to salaries, bonuses, and accrual baselines.</p>
+                </div>
+              </div>
+              <div class="card__body">
+                <form data-async="true" data-kind="compensation" data-success-message="Compensation saved." class="stack-form">
+                  <label>
+                    <span>Employee</span>
+                    <select name="userId" required>
+                      ${employeeOptions}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Effective On</span>
+                    <input type="date" name="effectiveOn" value="${selectedConfig ? formatIsoDate(selectedConfig.effectiveOn) : wizardDefaultPayDate}" required />
+                  </label>
+                  <label>
+                    <span>Semi-Monthly Base</span>
+                    <input type="number" name="baseSemiMonthlySalary" step="0.01" min="0" value="${selectedConfig ? makeNumberValue(selectedConfig.baseSemiMonthlySalary) : ''}" required />
+                  </label>
+                  <label>
+                    <span>Monthly Attendance Bonus</span>
+                    <input type="number" name="monthlyAttendanceBonus" step="0.01" min="0" value="${selectedConfig ? makeNumberValue(selectedConfig.monthlyAttendanceBonus) : ''}" required />
+                  </label>
+                  <label>
+                    <span>Quarterly Attendance Bonus</span>
+                    <input type="number" name="quarterlyAttendanceBonus" step="0.01" min="0" value="${selectedConfig ? makeNumberValue(selectedConfig.quarterlyAttendanceBonus) : ''}" required />
+                  </label>
+                  <label class="checkbox-field">
+                    <input type="checkbox" name="kpiEligible" ${selectedConfig?.kpiEligible ? 'checked' : ''} />
+                    <span>KPI Eligible</span>
+                  </label>
+                  <label>
+                    <span>Default KPI Bonus</span>
+                    <input type="number" name="defaultKpiBonus" step="0.01" min="0" value="${selectedConfig && selectedConfig.defaultKpiBonus !== null
+        ? makeNumberValue(selectedConfig.defaultKpiBonus)
+        : ''}" />
+                  </label>
+                  <fieldset class="schedule-fieldset">
+                    <legend>Schedule Template</legend>
+                    <div class="schedule-grid">
+                      <label>
+                        <span>Start</span>
+                        <input type="time" name="scheduleStart" value="${scheduleTemplate.start}" required />
+                      </label>
+                      <label>
+                        <span>End</span>
+                        <input type="time" name="scheduleEnd" value="${scheduleTemplate.end}" required />
+                      </label>
+                      <label>
+                        <span>Expected Hours</span>
+                        <input type="number" name="scheduleHours" step="0.25" min="0" value="${makeNumberValue(scheduleTemplate.hours)}" required />
+                      </label>
+                    </div>
+                    <div class="schedule-days">${scheduleCheckboxes}</div>
+                  </fieldset>
+                  <label class="checkbox-field">
+                    <input type="checkbox" name="accrualEnabled" ${selectedConfig?.accrualEnabled ? 'checked' : ''} />
+                    <span>Accrual Enabled</span>
+                  </label>
+                  <label>
+                    <span>Accrual Method</span>
+                    <input type="text" name="accrualMethod" maxlength="100" value="${selectedConfig?.accrualMethod ? escapeHtml(selectedConfig.accrualMethod) : ''}" />
+                  </label>
+                  <label>
+                    <span>PTO Balance (hours)</span>
+                    <input type="number" name="ptoBalanceHours" step="0.25" value="${selectedConfig ? makeNumberValue(selectedConfig.ptoBalanceHours) : ''}" required />
+                  </label>
+                  <label>
+                    <span>Non-PTO Balance (hours)</span>
+                    <input type="number" name="nonPtoBalanceHours" step="0.25" value="${selectedConfig ? makeNumberValue(selectedConfig.nonPtoBalanceHours) : ''}" required />
+                  </label>
+                  <p class="form-error" data-error></p>
+                  <button type="submit">Save Configuration</button>
+                </form>
+              </div>
+            </section>
+            <section class="card card--table">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Holiday Calendar</h2>
+                  <p class="card__subtitle">Manage observed dates for the next 12 months.</p>
+                </div>
+              </div>
+              <div class="card__body">
+                ${holidayTable}
+                <form data-async="true" data-kind="holiday" data-success-message="Holiday saved." class="stack-form holiday-form">
+                  <label>
+                    <span>Name</span>
+                    <input type="text" name="name" maxlength="200" required />
+                  </label>
+                  <label>
+                    <span>Date</span>
+                    <input type="date" name="observedOn" required />
+                  </label>
+                  <p class="form-error" id="holiday-error" data-error></p>
+                  <button type="submit">Save Holiday</button>
+                </form>
+              </div>
+            </section>
+          </div>
+          <div class="cards-grid cards-grid--payroll">
+            <section class="card card--table">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Bonus Review</h2>
+                  <p class="card__subtitle">Review monthly, quarterly, and KPI bonuses for a pay date.</p>
+                </div>
+                <div class="card__actions no-print">
+                  <form method="get" action="/dashboard/payroll" class="filters">
+                    <label>
+                      <span>Pay Date</span>
+                      <input type="date" name="bonusDate" value="${bonusDateParam}" />
+                    </label>
+                    <input type="hidden" name="factsMonth" value="${selectedFactsMonth}" />
+                    <input type="hidden" name="employeeId" value="${normalizedEmployeeId ? normalizedEmployeeId : ''}" />
+                    <button type="submit">Load</button>
+                  </form>
+                </div>
+              </div>
+              <div class="card__body">
+                <h3>KPI Bonuses</h3>
+                ${kpiSections}
+                <h3>Automatic Bonuses</h3>
+                <div class="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Employee</th>
+                        <th>Type</th>
+                        <th>Amount</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${otherBonusRows}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+          </div>
+        </main>
+
+        <div class="drilldown-shell" id="payroll-drilldown" hidden>
+          <div class="drilldown-backdrop" data-close-drilldown></div>
+          <aside class="drilldown-panel" role="dialog" aria-modal="true" aria-labelledby="payroll-drilldown-title">
+            <div class="drilldown-panel__header">
+              <div class="drilldown-panel__heading">
+                <h2 id="payroll-drilldown-title">Payroll Details</h2>
+                <p id="payroll-drilldown-subtitle"></p>
+              </div>
+              <button type="button" class="drilldown-close" data-close-drilldown>&times;</button>
+            </div>
+            <div class="drilldown-panel__content" id="payroll-drilldown-content"></div>
+            <div class="drilldown-panel__footer">
+              <button type="button" class="button button-secondary" data-close-drilldown>Close</button>
+            </div>
+          </aside>
+        </div>
+
+        <script>
+          (() => {
+            const reloadWithBanner = (message, error) => {
+              const url = new URL(window.location.href);
+              if (message) {
+                url.searchParams.set('message', message);
+                url.searchParams.delete('error');
+              } else if (error) {
+                url.searchParams.set('error', error);
+                url.searchParams.delete('message');
+              } else {
+                url.searchParams.delete('message');
+                url.searchParams.delete('error');
+              }
+              window.location.href = url.toString();
+            };
+
+            const setError = (target, text) => {
+              const el = typeof target === 'string' ? document.getElementById(target) : target;
+              if (el) {
+                el.textContent = text;
+              }
+            };
+
+            document.querySelectorAll('[data-payroll-action]').forEach((button) => {
+              button.addEventListener('click', async () => {
+                if (!(button instanceof HTMLButtonElement)) return;
+                if (button.disabled) return;
+                const confirmMessage = button.dataset.confirm;
+                if (confirmMessage && !window.confirm(confirmMessage)) {
+                  return;
+                }
+                const url = button.dataset.url;
+                if (!url) return;
+                const method = button.dataset.method || 'POST';
+                const errorTarget = button.dataset.errorTarget;
+                button.disabled = true;
+                setError(errorTarget, '');
+                try {
+                  const response = await fetch(url, { method });
+                  if (!response.ok) {
+                    let message = 'Unable to process request.';
+                    try {
+                      const data = await response.json();
+                      if (data && typeof data.error === 'string') message = data.error;
+                      else if (data && typeof data.message === 'string') message = data.message;
+                    } catch (err) {}
+                    throw new Error(message);
+                  }
+                  reloadWithBanner(button.dataset.successMessage || 'Action completed.');
+                } catch (err) {
+                  const message = err instanceof Error ? err.message : 'Unable to process request.';
+                  setError(errorTarget, message);
+                  button.disabled = false;
+                }
+              });
+            });
+
+            document.querySelectorAll('[data-holiday-delete]').forEach((button) => {
+              button.addEventListener('click', async () => {
+                const date = button.getAttribute('data-date');
+                if (!date) return;
+                const name = button.getAttribute('data-name') || 'this holiday';
+                if (!window.confirm('Remove ' + name + '?')) {
+                  return;
+                }
+                const errorTarget = button.getAttribute('data-error-target');
+                setError(errorTarget, '');
+                button.setAttribute('disabled', 'true');
+                try {
+                  const response = await fetch('/api/payroll/holidays/' + date, { method: 'DELETE' });
+                  if (!response.ok) {
+                    let message = 'Unable to delete holiday.';
+                    try {
+                      const data = await response.json();
+                      if (data && typeof data.error === 'string') message = data.error;
+                      else if (data && typeof data.message === 'string') message = data.message;
+                    } catch (err) {}
+                    throw new Error(message);
+                  }
+                  reloadWithBanner(button.getAttribute('data-success-message') || 'Holiday removed.');
+                } catch (err) {
+                  const message = err instanceof Error ? err.message : 'Unable to delete holiday.';
+                  setError(errorTarget, message);
+                  button.removeAttribute('disabled');
+                }
+              });
+            });
+
+            const serializeSchedule = (form) => {
+              const start = form.querySelector('input[name="scheduleStart"]');
+              const end = form.querySelector('input[name="scheduleEnd"]');
+              const hours = form.querySelector('input[name="scheduleHours"]');
+              const startValue = start instanceof HTMLInputElement && start.value ? start.value : '09:00';
+              const endValue = end instanceof HTMLInputElement && end.value ? end.value : '17:00';
+              const hoursValue = hours instanceof HTMLInputElement ? Number.parseFloat(hours.value) : 8;
+              const schedule = {};
+              const checkboxes = form.querySelectorAll('input[name="scheduleDay"]');
+              checkboxes.forEach((input) => {
+                if (!(input instanceof HTMLInputElement)) return;
+                const day = input.dataset.day || input.value;
+                if (!day) return;
+                schedule[day] = {
+                  enabled: input.checked,
+                  start: startValue,
+                  end: endValue,
+                  expectedHours: Number.isFinite(hoursValue) ? Math.max(0, hoursValue) : 8
+                };
+              });
+              return schedule;
+            };
+
+            const asyncForms = document.querySelectorAll('form[data-async="true"]');
+            asyncForms.forEach((form) => {
+              form.addEventListener('submit', async (event) => {
+                event.preventDefault();
+                const kind = form.getAttribute('data-kind');
+                const errorEl = form.querySelector('[data-error]');
+                if (errorEl) errorEl.textContent = '';
+                const submitter = event.submitter instanceof HTMLButtonElement ? event.submitter : null;
+                if (submitter?.dataset.confirm && !window.confirm(submitter.dataset.confirm)) {
+                  return;
+                }
+                if (submitter) submitter.disabled = true;
+                try {
+                  if (kind === 'payroll-run') {
+                    const input = form.querySelector('input[name="payDate"]');
+                    if (!(input instanceof HTMLInputElement) || !/^\d{4}-\d{2}-\d{2}$/.test(input.value)) {
+                      throw new Error('Select a valid pay date.');
+                    }
+                    const date = new Date(input.value + 'T00:00:00');
+                    const day = date.getUTCDate();
+                    const endOfMonth = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate();
+                    if (day !== 15 && day !== endOfMonth) {
+                      throw new Error('Pay date must be on the 15th or the last day of the month.');
+                    }
+                    const response = await fetch('/api/payroll/payruns/' + input.value + '/recalc', {
+                      method: 'POST'
+                    });
+                    if (!response.ok) {
+                      let message = 'Unable to queue recalculation.';
+                      try {
+                        const data = await response.json();
+                        if (data && typeof data.error === 'string') message = data.error;
+                        else if (data && typeof data.message === 'string') message = data.message;
+                      } catch (err) {}
+                      throw new Error(message);
+                    }
+                    reloadWithBanner(form.getAttribute('data-success-message') || 'Payroll recalculated.');
+                    return;
+                  }
+
+                  if (kind === 'attendance-recalc') {
+                    const input = form.querySelector('input[name="month"]');
+                    if (!(input instanceof HTMLInputElement) || !/^\d{4}-\d{2}$/.test(input.value)) {
+                      throw new Error('Select a valid month.');
+                    }
+                    const response = await fetch('/api/payroll/attendance/' + input.value + '/recalc', {
+                      method: 'POST'
+                    });
+                    if (!response.ok) {
+                      let message = 'Unable to queue attendance recalculation.';
+                      try {
+                        const data = await response.json();
+                        if (data && typeof data.error === 'string') message = data.error;
+                        else if (data && typeof data.message === 'string') message = data.message;
+                      } catch (err) {}
+                      throw new Error(message);
+                    }
+                    reloadWithBanner(form.getAttribute('data-success-message') || 'Attendance recalculation started.');
+                    return;
+                  }
+
+                  if (kind === 'holiday') {
+                    const nameInput = form.querySelector('input[name="name"]');
+                    const dateInput = form.querySelector('input[name="observedOn"]');
+                    if (!(nameInput instanceof HTMLInputElement) || !nameInput.value.trim()) {
+                      throw new Error('Name is required.');
+                    }
+                    if (!(dateInput instanceof HTMLInputElement) || !/^\d{4}-\d{2}-\d{2}$/.test(dateInput.value)) {
+                      throw new Error('Date is required.');
+                    }
+                    const response = await fetch('/api/payroll/holidays', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ name: nameInput.value.trim(), observedOn: dateInput.value })
+                    });
+                    if (!response.ok) {
+                      let message = 'Unable to save holiday.';
+                      try {
+                        const data = await response.json();
+                        if (data && typeof data.error === 'string') message = data.error;
+                        else if (data && typeof data.message === 'string') message = data.message;
+                      } catch (err) {}
+                      throw new Error(message);
+                    }
+                    reloadWithBanner(form.getAttribute('data-success-message') || 'Holiday saved.');
+                    return;
+                  }
+
+                  if (kind === 'compensation') {
+                    const userSelect = form.querySelector('select[name="userId"]');
+                    const effective = form.querySelector('input[name="effectiveOn"]');
+                    const base = form.querySelector('input[name="baseSemiMonthlySalary"]');
+                    const monthly = form.querySelector('input[name="monthlyAttendanceBonus"]');
+                    const quarterly = form.querySelector('input[name="quarterlyAttendanceBonus"]');
+                    const kpiEligible = form.querySelector('input[name="kpiEligible"]');
+                    const defaultKpi = form.querySelector('input[name="defaultKpiBonus"]');
+                    const accrualEnabled = form.querySelector('input[name="accrualEnabled"]');
+                    const accrualMethod = form.querySelector('input[name="accrualMethod"]');
+                    const ptoInput = form.querySelector('input[name="ptoBalanceHours"]');
+                    const nonPtoInput = form.querySelector('input[name="nonPtoBalanceHours"]');
+
+                    if (!(userSelect instanceof HTMLSelectElement) || !userSelect.value) {
+                      throw new Error('Select an employee.');
+                    }
+                    if (!(effective instanceof HTMLInputElement) || !/^\d{4}-\d{2}-\d{2}$/.test(effective.value)) {
+                      throw new Error('Effective date is required.');
+                    }
+                    const toFinite = (input, label) => {
+                      if (!(input instanceof HTMLInputElement)) throw new Error(label + ' is required.');
+                      const value = Number.parseFloat(input.value);
+                      if (!Number.isFinite(value)) throw new Error(label + ' must be a number.');
+                      return value;
+                    };
+                    const payload = {
+                      userId: Number.parseInt(userSelect.value, 10),
+                      effectiveOn: effective.value,
+                      baseSemiMonthlySalary: toFinite(base, 'Semi-monthly base'),
+                      monthlyAttendanceBonus: toFinite(monthly, 'Monthly bonus'),
+                      quarterlyAttendanceBonus: toFinite(quarterly, 'Quarterly bonus'),
+                      kpiEligible: kpiEligible instanceof HTMLInputElement ? kpiEligible.checked : false,
+                      defaultKpiBonus:
+                        defaultKpi instanceof HTMLInputElement && defaultKpi.value.trim()
+                          ? Number.parseFloat(defaultKpi.value)
+                          : null,
+                      schedule: serializeSchedule(form),
+                      accrualEnabled: accrualEnabled instanceof HTMLInputElement ? accrualEnabled.checked : false,
+                      accrualMethod: accrualMethod instanceof HTMLInputElement ? accrualMethod.value.trim() || null : null,
+                      ptoBalanceHours: toFinite(ptoInput, 'PTO balance'),
+                      nonPtoBalanceHours: toFinite(nonPtoInput, 'Non-PTO balance')
+                    };
+                    const response = await fetch('/api/payroll/config', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(payload)
+                    });
+                    if (!response.ok) {
+                      let message = 'Unable to save configuration.';
+                      try {
+                        const data = await response.json();
+                        if (data && typeof data.error === 'string') message = data.error;
+                        else if (data && typeof data.message === 'string') message = data.message;
+                      } catch (err) {}
+                      throw new Error(message);
+                    }
+                    reloadWithBanner(form.getAttribute('data-success-message') || 'Configuration saved.');
+                    return;
+                  }
+
+                  if (kind === 'kpi-decision') {
+                    const id = form.getAttribute('data-candidate-id');
+                    if (!id) throw new Error('Invalid KPI candidate.');
+                    const statusInput = form.querySelector('input[name="status"]');
+                    const finalAmount = form.querySelector('input[name="finalAmount"]');
+                    const notes = form.querySelector('input[name="notes"]');
+                    let status = statusInput instanceof HTMLInputElement ? statusInput.value : '';
+                    if (event.submitter instanceof HTMLButtonElement && event.submitter.dataset.kpiStatus) {
+                      status = event.submitter.dataset.kpiStatus;
+                    }
+                    if (status !== 'approved' && status !== 'denied') {
+                      throw new Error('Choose approve or deny.');
+                    }
+                    const payload = { status };
+                    if (finalAmount instanceof HTMLInputElement && finalAmount.value.trim()) {
+                      const amount = Number.parseFloat(finalAmount.value);
+                      if (!Number.isFinite(amount)) throw new Error('Final amount must be a number.');
+                      payload.finalAmount = amount;
+                    }
+                    if (notes instanceof HTMLInputElement && notes.value.trim()) {
+                      payload.notes = notes.value.trim();
+                    }
+                    const response = await fetch('/api/payroll/kpi/' + id + '/decision', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(payload)
+                    });
+                    if (!response.ok) {
+                      let message = 'Unable to update KPI bonus.';
+                      try {
+                        const data = await response.json();
+                        if (data && typeof data.error === 'string') message = data.error;
+                        else if (data && typeof data.message === 'string') message = data.message;
+                      } catch (err) {}
+                      throw new Error(message);
+                    }
+                    reloadWithBanner(form.getAttribute('data-success-message') || 'KPI decision saved.');
+                    return;
+                  }
+
+                  throw new Error('Unsupported form submission.');
+                } catch (err) {
+                  const message = err instanceof Error ? err.message : 'Unable to submit form.';
+                  if (errorEl) errorEl.textContent = message;
+                } finally {
+                  if (submitter) submitter.disabled = false;
+                }
+              });
+            });
+
+            const drilldown = document.getElementById('payroll-drilldown');
+            const drilldownContent = document.getElementById('payroll-drilldown-content');
+            const drilldownTitle = document.getElementById('payroll-drilldown-title');
+            const drilldownSubtitle = document.getElementById('payroll-drilldown-subtitle');
+            const closeDrilldown = () => {
+              drilldown?.setAttribute('data-open', 'false');
+              setTimeout(() => {
+                drilldown?.setAttribute('hidden', '');
+                document.body.classList.remove('drilldown-locked');
+                document.querySelectorAll('.drilldown-row-active').forEach((row) => {
+                  row.classList.remove('drilldown-row-active');
+                });
+              }, 250);
+            };
+            drilldown?.querySelectorAll('[data-close-drilldown]').forEach((el) => {
+              el.addEventListener('click', () => closeDrilldown());
+            });
+
+            const formatCurrencyLocal = (value) => new Intl.NumberFormat('en-US', {
+              style: 'currency',
+              currency: 'USD'
+            }).format(Number(value) || 0);
+
+            const formatDateLocal = (iso) => {
+              try {
+                return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(iso));
+              } catch (err) {
+                return iso;
+              }
+            };
+
+            const formatDateTimeLocal = (iso) => {
+              try {
+                return new Intl.DateTimeFormat(undefined, {
+                  month: 'short',
+                  day: 'numeric',
+                  year: 'numeric',
+                  hour: 'numeric',
+                  minute: '2-digit'
+                }).format(new Date(iso));
+              } catch (err) {
+                return iso;
+              }
+            };
+
+            const openDrilldown = (row, period) => {
+              if (!drilldown || !drilldownContent || !drilldownTitle || !period) return;
+              document.querySelectorAll('.drilldown-row-active').forEach((active) => {
+                active.classList.remove('drilldown-row-active');
+              });
+              if (row) row.classList.add('drilldown-row-active');
+              drilldown.removeAttribute('hidden');
+              drilldown.setAttribute('data-open', 'true');
+              document.body.classList.add('drilldown-locked');
+              drilldownTitle.textContent = 'Payroll for ' + formatDateLocal(period.payDate);
+              const status = period.status ? String(period.status) : 'draft';
+              drilldownSubtitle.textContent = 'Status: ' + status.charAt(0).toUpperCase() + status.slice(1);
+              const totals = period.totals || {};
+              const summary = \`
+                <div class="drilldown-section">
+                  <h3>Summary</h3>
+                  <div class="drilldown-grid">
+                    <dl><dt>Period</dt><dd>
+                      \${formatDateLocal(period.periodStart)} – \${formatDateLocal(period.periodEnd)}
+                    </dd></dl>
+                    <dl><dt>Computed</dt><dd>\${period.computedAt ? formatDateTimeLocal(period.computedAt) : '—'}</dd></dl>
+                    <dl><dt>Base</dt><dd>\${formatCurrencyLocal(totals.base)}</dd></dl>
+                    <dl><dt>Monthly</dt><dd>\${formatCurrencyLocal(totals.monthlyAttendance)}</dd></dl>
+                    <dl><dt>Deferred</dt><dd>\${formatCurrencyLocal(totals.monthlyDeferred)}</dd></dl>
+                    <dl><dt>Quarterly</dt><dd>\${formatCurrencyLocal(totals.quarterlyAttendance)}</dd></dl>
+                    <dl><dt>KPI</dt><dd>\${formatCurrencyLocal(totals.kpiBonus)}</dd></dl>
+                    <dl><dt>Total</dt><dd>\${formatCurrencyLocal(totals.finalAmount)}</dd></dl>
+                  </div>
+                </div>
+              \`;
+              const lines = Array.isArray(period.lines) ? period.lines : [];
+              const lineRows = lines
+                .map((line) => {
+                  const employee = line.user?.name || ('User ' + line.userId);
+                  const email = line.user?.email || '';
+                  return \`
+                    <tr>
+                      <td>\${employee}<div class="meta">\${email}</div></td>
+                      <td>\${formatCurrencyLocal(line.baseAmount)}</td>
+                      <td>\${formatCurrencyLocal(line.monthlyAttendance)}</td>
+                      <td>\${formatCurrencyLocal(line.monthlyDeferred)}</td>
+                      <td>\${formatCurrencyLocal(line.quarterlyAttendance)}</td>
+                  <td>\${formatCurrencyLocal(line.kpiBonus)}</td>
+                      <td>\${formatCurrencyLocal(line.finalAmount)}</td>
+                    </tr>
+                  \`;
+                })
+                .join('');
+              const linesTable = lines.length
+                ? \`<div class="table-scroll"><table><thead><tr><th>Employee</th><th>Base</th><th>Monthly</th><th>Deferred</th><th>Quarterly</th><th>KPI</th><th>Total</th></tr></thead><tbody>\${lineRows}</tbody></table></div>\`
+                : '<div class="empty">No payroll lines found.</div>';
+              drilldownContent.innerHTML = summary + linesTable;
+            };
+
+            document.querySelectorAll('[data-payroll-detail]').forEach((button) => {
+              button.addEventListener('click', async () => {
+                const payDate = button.getAttribute('data-pay-date');
+                if (!payDate) return;
+                const errorTarget = button.getAttribute('data-error-target');
+                setError(errorTarget, '');
+                try {
+                  const response = await fetch('/api/payroll/payruns/' + payDate, {
+                    headers: { 'Accept': 'application/json' }
+                  });
+                  if (!response.ok) {
+                    let message = 'Unable to load payroll details.';
+                    try {
+                      const data = await response.json();
+                      if (data && typeof data.error === 'string') message = data.error;
+                      else if (data && typeof data.message === 'string') message = data.message;
+                    } catch (err) {}
+                    throw new Error(message);
+                  }
+                  const data = await response.json();
+                  if (!data || !data.period) throw new Error('Payroll period not found.');
+                  const row = document.querySelector('[data-period-row="' + payDate + '"]');
+                  openDrilldown(row instanceof HTMLElement ? row : null, data.period);
+                } catch (err) {
+                  const message = err instanceof Error ? err.message : 'Unable to load payroll details.';
+                  setError(errorTarget, message);
+                }
+              });
+            });
+          })();
+        </script>
       </body>
     </html>
   `;

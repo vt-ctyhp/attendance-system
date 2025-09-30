@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.TIMESHEET_EDIT_STATUSES = exports.TIMESHEET_VIEWS = exports.TIME_REQUEST_STATUSES = exports.TIME_REQUEST_TYPES = exports.isEventType = exports.isPresenceStatus = exports.PRESENCE_STATUSES = exports.EVENT_TYPES = exports.SESSION_STATUSES = exports.USER_ROLES = void 0;
+exports.PAYROLL_STATUSES = exports.BONUS_STATUSES = exports.BONUS_TYPES = exports.TIMESHEET_EDIT_STATUSES = exports.TIMESHEET_VIEWS = exports.TIME_REQUEST_STATUSES = exports.TIME_REQUEST_TYPES = exports.isEventType = exports.isPresenceStatus = exports.PRESENCE_STATUSES = exports.EVENT_TYPES = exports.SESSION_STATUSES = exports.USER_ROLES = void 0;
 exports.USER_ROLES = ['admin', 'manager', 'employee'];
 exports.SESSION_STATUSES = ['active', 'ended'];
 exports.EVENT_TYPES = [
@@ -23,3 +23,6 @@ exports.TIME_REQUEST_TYPES = ['pto', 'non_pto', 'make_up'];
 exports.TIME_REQUEST_STATUSES = ['pending', 'approved', 'denied'];
 exports.TIMESHEET_VIEWS = ['weekly', 'pay_period', 'monthly'];
 exports.TIMESHEET_EDIT_STATUSES = ['pending', 'approved', 'denied'];
+exports.BONUS_TYPES = ['monthly_attendance', 'quarterly_attendance', 'kpi'];
+exports.BONUS_STATUSES = ['pending', 'earned', 'approved', 'denied'];
+exports.PAYROLL_STATUSES = ['draft', 'approved', 'paid'];
