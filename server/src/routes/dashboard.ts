@@ -2703,8 +2703,6 @@ const renderTimezoneNote = (start: Date, end?: Date) =>
 type NavKey =
   | 'overview'
   | 'today'
-  | 'weekly'
-  | 'monthly'
   | 'timesheets'
   | 'user'
   | 'requests'
@@ -2718,8 +2716,6 @@ const renderNav = (active: NavKey) => {
   const links = [
     link('/dashboard/overview', 'Overview', 'overview'),
     link('/dashboard/today', 'Today', 'today'),
-    link('/dashboard/weekly', 'Weekly', 'weekly'),
-    link('/dashboard/monthly', 'Monthly', 'monthly'),
     link('/dashboard/timesheets', 'Timesheets', 'timesheets'),
     link('/dashboard/requests', 'Requests', 'requests'),
     link('/dashboard/balances', 'Balances', 'balances'),
@@ -3056,7 +3052,7 @@ dashboardRouter.get('/weekly', async (req, res) => {
   const today = zonedStartOfDay(new Date());
   const baseStart = typeof req.query.start === 'string' ? parseDateParam(req.query.start) : subDays(today, 6);
   const weeklyData = await fetchWeeklyAggregates(baseStart);
-  const { windowStart, windowEnd, startParam, label, summaries, totals, requestBadges } = weeklyData;
+  const { windowStart, windowEnd, startParam, summaries } = weeklyData;
 
   const wantsCsv = typeof req.query.download === 'string' && req.query.download.toLowerCase() === 'csv';
   if (wantsCsv) {
@@ -3096,98 +3092,13 @@ dashboardRouter.get('/weekly', async (req, res) => {
     return res.send(csv);
   }
 
-  const tableRows = summaries
-    .map((summary, index) => buildWeeklyRow(summary, index, startParam, requestBadges.get(summary.userId) ?? []))
-    .join('\n');
-  const totalsRow = renderTotalsRow(totals, 3);
-  const timezoneNote = renderTimezoneNote(windowStart, windowEnd);
-
-  const html = `
-    <!doctype html>
-    <html lang="en">
-      <head>
-        <meta charset="utf-8" />
-        <title>Weekly Attendance Summary</title>
-        <style>${baseStyles}</style>
-      </head>
-      <body class="dashboard dashboard--weekly">
-        ${renderNav('weekly')}
-        <main class="page-shell">
-          <header class="page-header">
-            <div class="page-header__content">
-              <p class="page-header__eyebrow">Attendance</p>
-              <h1 class="page-header__title">Weekly Summary</h1>
-              <p class="page-header__subtitle">Activity, pauses, and presence insights for the week of ${escapeHtml(label)}.</p>
-            </div>
-            <div class="page-header__meta">
-              ${timezoneNote}
-            </div>
-          </header>
-          <div class="cards-grid">
-            <section class="card card--table">
-              <div class="card__header">
-                <div>
-                  <h2 class="card__title">Team Overview</h2>
-                  <p class="card__subtitle">${summaries.length} ${summaries.length === 1 ? 'teammate' : 'teammates'} recorded during this range.</p>
-                </div>
-                <div class="card__actions no-print">
-                  <form method="get" action="/dashboard/weekly" class="filters">
-                    <label>
-                      <span>Week starting</span>
-                      <input type="date" name="start" value="${startParam}" />
-                    </label>
-                    <button type="submit">Apply</button>
-                  </form>
-                  <form method="get" action="/dashboard/weekly">
-                    <input type="hidden" name="start" value="${startParam}" />
-                    <input type="hidden" name="download" value="csv" />
-                    <button type="submit">Download CSV</button>
-                  </form>
-                  <button type="button" class="print-button" onclick="window.print()">Print</button>
-                </div>
-              </div>
-              <div class="card__body">
-                ${
-                  tableRows
-                    ? `<div class="table-scroll">
-                        <table>
-                          <thead>
-                            <tr>
-                              <th>#</th>
-                              <th>User</th>
-                              <th>Email</th>
-                              <th>Active Minutes</th>
-                              <th>Idle Minutes</th>
-                              <th>Breaks</th>
-                              <th>Break Minutes</th>
-                              <th>Lunches</th>
-                              <th>Lunch Minutes</th>
-                              <th>Presence Misses</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            ${tableRows}
-                          </tbody>
-                          ${totalsRow}
-                        </table>
-                      </div>`
-                    : '<div class="empty">No activity recorded for this range.</div>'
-                }
-              </div>
-            </section>
-          </div>
-        </main>
-      </body>
-    </html>
-  `;
-
-  res.type('html').send(html);
+  res.redirect(`/dashboard/overview?view=weekly&start=${encodeURIComponent(startParam)}`);
 });
 
 dashboardRouter.get('/monthly', async (req, res) => {
   const reference = parseMonthParam(req.query.month);
   const monthlyData = await fetchMonthlyAggregates(reference);
-  const { monthStart, monthEnd, monthParam, label, summaries, totals, requestBadges } = monthlyData;
+  const { monthStart, monthEnd, monthParam, summaries } = monthlyData;
 
   const wantsCsv = typeof req.query.download === 'string' && req.query.download.toLowerCase() === 'csv';
   if (wantsCsv) {
@@ -3227,95 +3138,7 @@ dashboardRouter.get('/monthly', async (req, res) => {
     return res.send(csv);
   }
 
-  const tableRows = summaries
-    .map((summary, index) =>
-      buildWeeklyRow(summary, index, formatIsoDate(monthStart), requestBadges.get(summary.userId) ?? [])
-    )
-    .join('\n');
-  const totalsRow = renderTotalsRow(totals, 3);
-
-  const timezoneNote = renderTimezoneNote(monthStart, monthEnd);
-
-  const html = `
-    <!doctype html>
-    <html lang="en">
-      <head>
-        <meta charset="utf-8" />
-        <title>${label} Attendance Summary</title>
-        <style>${baseStyles}</style>
-      </head>
-      <body class="dashboard dashboard--monthly">
-        ${renderNav('monthly')}
-        <main class="page-shell">
-          <header class="page-header">
-            <div class="page-header__content">
-              <p class="page-header__eyebrow">Attendance</p>
-              <h1 class="page-header__title">Monthly Summary</h1>
-              <p class="page-header__subtitle">Comprehensive metrics for ${escapeHtml(label)}.</p>
-            </div>
-            <div class="page-header__meta">
-              ${timezoneNote}
-            </div>
-          </header>
-          <div class="cards-grid">
-            <section class="card card--table">
-              <div class="card__header">
-                <div>
-                  <h2 class="card__title">Team Overview</h2>
-                  <p class="card__subtitle">${summaries.length} ${summaries.length === 1 ? 'teammate' : 'teammates'} recorded this month.</p>
-                </div>
-                <div class="card__actions no-print">
-                  <form method="get" action="/dashboard/monthly" class="filters">
-                    <label>
-                      <span>Month</span>
-                      <input type="month" name="month" value="${monthParam}" />
-                    </label>
-                    <button type="submit">Apply</button>
-                  </form>
-                  <form method="get" action="/dashboard/monthly">
-                    <input type="hidden" name="month" value="${monthParam}" />
-                    <input type="hidden" name="download" value="csv" />
-                    <button type="submit">Download CSV</button>
-                  </form>
-                  <button type="button" class="print-button" onclick="window.print()">Print</button>
-                </div>
-              </div>
-              <div class="card__body">
-                ${
-                  tableRows
-                    ? `<div class="table-scroll">
-                        <table>
-                          <thead>
-                            <tr>
-                              <th>#</th>
-                              <th>User</th>
-                              <th>Email</th>
-                              <th>Active Minutes</th>
-                              <th>Idle Minutes</th>
-                              <th>Breaks</th>
-                              <th>Break Minutes</th>
-                              <th>Lunches</th>
-                              <th>Lunch Minutes</th>
-                              <th>Presence Misses</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            ${tableRows}
-                          </tbody>
-                          ${totalsRow}
-                        </table>
-                      </div>`
-                    : '<div class="empty">No activity recorded for this month.</div>'
-                }
-              </div>
-            </section>
-          </div>
-        </main>
-      </body>
-    </html>
-  `;
-
-  res.type('html').send(html);
+  res.redirect(`/dashboard/overview?view=monthly&month=${encodeURIComponent(monthParam)}`);
 });
 
 dashboardRouter.get(
