@@ -4,3 +4,8 @@ node_modules/
 
 # MacOS artifacts
 .DS_Store
+
+# Ignore nested repos/worktrees
+/attendance-system/
+/integrate-worktree/
+/main-merge/
