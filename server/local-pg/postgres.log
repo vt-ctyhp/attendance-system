@@ -13,3 +13,37 @@
 2025-09-29 16:07:41.921 PDT [27528] LOG:  database system was shut down at 2025-09-29 16:07:10 PDT
 2025-09-29 16:07:41.924 PDT [27527] LOG:  database system is ready to accept connections
 2025-09-29 16:08:34.259 PDT [27672] FATAL:  database "viv" does not exist
+2025-09-29 17:13:41.927 PDT [38469] FATAL:  data directory "/Users/viv/attendance-system/attendance-system/server/local-pg/data" has invalid permissions
+2025-09-29 17:13:41.927 PDT [38469] DETAIL:  Permissions should be u=rwx (0700) or u=rwx,g=rx (0750).
+2025-09-29 17:14:00.438 PDT [38566] FATAL:  could not open directory "pg_notify": No such file or directory
+2025-09-29 17:14:00.438 PDT [38566] LOG:  database system is shut down
+2025-09-29 17:14:38.424 PDT [38662] LOG:  starting PostgreSQL 14.19 (Homebrew) on aarch64-apple-darwin23.6.0, compiled by Apple clang version 16.0.0 (clang-1600.0.26.6), 64-bit
+2025-09-29 17:14:38.425 PDT [38662] LOG:  listening on IPv6 address "::1", port 5433
+2025-09-29 17:14:38.425 PDT [38662] LOG:  listening on IPv4 address "127.0.0.1", port 5433
+2025-09-29 17:14:38.426 PDT [38662] LOG:  listening on Unix socket "/tmp/.s.PGSQL.5433"
+2025-09-29 17:14:38.427 PDT [38662] LOG:  could not open directory "pg_tblspc": No such file or directory
+2025-09-29 17:14:38.429 PDT [38663] LOG:  database system was interrupted; last known up at 2025-09-29 16:38:27 PDT
+2025-09-29 17:14:38.429 PDT [38663] LOG:  creating missing WAL directory "pg_wal/archive_status"
+2025-09-29 17:14:38.493 PDT [38663] LOG:  could not open directory "pg_tblspc": No such file or directory
+2025-09-29 17:14:38.494 PDT [38663] LOG:  could not open directory "pg_tblspc": No such file or directory
+2025-09-29 17:14:38.494 PDT [38663] FATAL:  could not open directory "pg_replslot": No such file or directory
+2025-09-29 17:14:38.495 PDT [38662] LOG:  startup process (PID 38663) exited with exit code 1
+2025-09-29 17:14:38.495 PDT [38662] LOG:  aborting startup due to startup process failure
+2025-09-29 17:14:38.496 PDT [38662] LOG:  database system is shut down
+2025-09-29 17:15:39.711 PDT [38803] LOG:  starting PostgreSQL 14.19 (Homebrew) on aarch64-apple-darwin23.6.0, compiled by Apple clang version 16.0.0 (clang-1600.0.26.6), 64-bit
+2025-09-29 17:15:39.713 PDT [38803] LOG:  listening on IPv6 address "::1", port 5433
+2025-09-29 17:15:39.713 PDT [38803] LOG:  listening on IPv4 address "127.0.0.1", port 5433
+2025-09-29 17:15:39.714 PDT [38803] LOG:  listening on Unix socket "/tmp/.s.PGSQL.5433"
+2025-09-29 17:15:39.716 PDT [38804] LOG:  database system was shut down at 2025-09-29 17:15:33 PDT
+2025-09-29 17:15:39.718 PDT [38803] LOG:  database system is ready to accept connections
+2025-09-29 17:19:08.767 PDT [38803] LOG:  received fast shutdown request
+2025-09-29 17:19:08.767 PDT [38803] LOG:  aborting any active transactions
+2025-09-29 17:19:08.768 PDT [38803] LOG:  background worker "logical replication launcher" (PID 38810) exited with exit code 1
+2025-09-29 17:19:08.768 PDT [38805] LOG:  shutting down
+2025-09-29 17:19:08.786 PDT [38803] LOG:  database system is shut down
+2025-09-29 17:19:21.503 PDT [39744] LOG:  starting PostgreSQL 14.19 (Homebrew) on aarch64-apple-darwin23.6.0, compiled by Apple clang version 16.0.0 (clang-1600.0.26.6), 64-bit
+2025-09-29 17:19:21.504 PDT [39744] LOG:  listening on IPv6 address "::1", port 5433
+2025-09-29 17:19:21.504 PDT [39744] LOG:  listening on IPv4 address "127.0.0.1", port 5433
+2025-09-29 17:19:21.504 PDT [39744] LOG:  listening on Unix socket "/tmp/.s.PGSQL.5433"
+2025-09-29 17:19:21.507 PDT [39745] LOG:  database system was shut down at 2025-09-29 17:19:08 PDT
+2025-09-29 17:19:21.510 PDT [39744] LOG:  database system is ready to accept connections

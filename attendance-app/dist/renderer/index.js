@@ -255,6 +255,8 @@
         return "\u{1F371}";
       case "request":
         return "\u{1F4DD}";
+      case "idle":
+        return "\u{1F4A4}";
       default:
         return "\u2022";
     }

@@ -94,6 +94,7 @@ describe('GET /api/app/overview', () => {
       today: { activeMinutes: number; breaksCount: number };
       requests: Array<{ id: string }>;
       timesheet: { periods: { weekly: { days: Array<{ date: string }> } } };
+      activity: Array<{ category: string; message: string }>;
     };
 
     expect(overview.user.email).toBe(user.email);
@@ -103,5 +104,9 @@ describe('GET /api/app/overview', () => {
     expect(overview.today.breaksCount).toBeGreaterThan(0);
     expect(overview.requests.length).toBe(1);
     expect(overview.timesheet.periods.weekly.days.length).toBeGreaterThan(0);
+
+    const idleEntries = overview.activity.filter((item) => item.category === 'idle');
+    expect(idleEntries.length).toBeGreaterThan(0);
+    expect(idleEntries[0].message.toLowerCase()).toContain('idle');
   });
 });

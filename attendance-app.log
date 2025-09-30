@@ -19,11 +19,12 @@
 > esbuild src/renderer/index.ts --bundle --platform=browser --format=iife --outfile=dist/renderer/index.js --sourcemap
 
 
-  dist/renderer/index.js      44.4kb
+  dist/renderer/index.js      44.5kb
   dist/renderer/index.js.map  78.9kb
 
-⚡ Done in 12ms
+⚡ Done in 13ms
 
 > attendance-app@0.2.0 copy:assets
 > copyfiles -u 1 "src/**/*.html" dist
 
+17:19:59.614 › log.catchErrors is deprecated. Use log.errorHandler instead

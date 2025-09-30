@@ -5,7 +5,7 @@ type RequestType = 'make_up' | 'time_off' | 'edit';
 type RequestStatus = 'pending' | 'approved' | 'denied';
 type TimesheetView = 'weekly' | 'pay_period' | 'monthly';
 
-type ActivityCategory = 'session' | 'presence' | 'break' | 'lunch' | 'request';
+type ActivityCategory = 'session' | 'presence' | 'break' | 'lunch' | 'request' | 'idle';
 
 interface TimesheetDay {
   date: string;
@@ -499,6 +499,8 @@ const categoryIcon = (category: ActivityCategory) => {
       return '🍱';
     case 'request':
       return '📝';
+    case 'idle':
+      return '💤';
     default:
       return '•';
   }
@@ -926,12 +928,18 @@ let state: AttendanceState = {
     },
     {
       id: 'activity-4',
+      timestamp: addMinutes(now, -150).toISOString(),
+      message: 'Idle from 1:55 pm – 2:05 pm (10 minutes).',
+      category: 'idle'
+    },
+    {
+      id: 'activity-5',
       timestamp: addMinutes(now, -130).toISOString(),
       message: 'Clocked in from store kiosk.',
       category: 'session'
     },
     {
-      id: 'activity-5',
+      id: 'activity-6',
       timestamp: addMinutes(now, -280).toISOString(),
       message: 'Approved time-off request for Oct 3 – Oct 4.',
       category: 'request'
