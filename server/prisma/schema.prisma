@@ -8,101 +8,113 @@ datasource db {
 }
 
 model User {
-  id           Int       @id @default(autoincrement())
-  email        String    @unique
-  name         String
-  role         String    @default("employee")
-  passwordHash String
-  active       Boolean   @default(true)
-  createdAt    DateTime  @default(now())
-  sessions     Session[]
-  balance      PtoBalance?
-  timeRequests TimeRequest[]
-  approvedRequests TimeRequest[] @relation("TimeRequestApprover")
-  accrualRule  AccrualRule?
-  refreshTokens RefreshToken[]
-  authLogs     AuthAuditLog[]
-  timesheetEditRequests TimesheetEditRequest[]
-  reviewedTimesheetEdits TimesheetEditRequest[] @relation("TimesheetEditReviewer")
-  balanceLedgerEntries BalanceLedger[] @relation("BalanceLedgerUser")
-  createdBalanceLedgerEntries BalanceLedger[] @relation("BalanceLedgerCreatedBy")
+  id                          Int                     @id @default(autoincrement())
+  email                       String                  @unique
+  name                        String
+  role                        String                  @default("employee")
+  passwordHash                String
+  active                      Boolean                 @default(true)
+  createdAt                   DateTime                @default(now())
+  sessions                    Session[]
+  balance                     PtoBalance?
+  timeRequests                TimeRequest[]
+  approvedRequests            TimeRequest[]           @relation("TimeRequestApprover")
+  accrualRule                 AccrualRule?
+  refreshTokens               RefreshToken[]
+  authLogs                    AuthAuditLog[]
+  timesheetEditRequests       TimesheetEditRequest[]
+  reviewedTimesheetEdits      TimesheetEditRequest[]  @relation("TimesheetEditReviewer")
+  balanceLedgerEntries        BalanceLedger[]         @relation("BalanceLedgerUser")
+  createdBalanceLedgerEntries BalanceLedger[]         @relation("BalanceLedgerCreatedBy")
+  payrollConfigs              PayrollEmployeeConfig[]
+  createdPayrollConfigs       PayrollEmployeeConfig[] @relation("PayrollConfigCreatedBy")
+  payrollAttendanceFacts      PayrollAttendanceFact[]
+  payrollBonuses              PayrollBonus[]
+  payrollBonusDecisions       PayrollBonus[]          @relation("PayrollBonusDecision")
+  payrollChecks               PayrollCheck[]
+  payrollChecksApproved       PayrollCheck[]          @relation("PayrollCheckApprovedBy")
+  payrollChecksPaid           PayrollCheck[]          @relation("PayrollCheckPaidBy")
+  payrollPeriodsApproved      PayrollPeriod[]         @relation("PayrollPeriodApprovedBy")
+  payrollPeriodsPaid          PayrollPeriod[]         @relation("PayrollPeriodPaidBy")
+  payrollAuditEvents          PayrollAuditLog[]       @relation("PayrollAuditActor")
+  payrollHolidays             PayrollHoliday[]        @relation("PayrollHolidayCreatedBy")
 }
 
 model Session {
-  id                 String            @id @default(cuid())
-  userId             Int
-  user               User              @relation(fields: [userId], references: [id])
-  deviceId           String
-  startedAt          DateTime          @default(now())
-  endedAt            DateTime?
-  status             String            @default("active")
-  presencePlanCount  Int               @default(0)
-  presenceChecks     PresencePrompt[]
-  events             Event[]
-  minuteStats        MinuteStat[]
-  pauses             SessionPause[]
-  createdAt          DateTime          @default(now())
-  updatedAt          DateTime          @updatedAt
+  id                String           @id @default(cuid())
+  userId            Int
+  user              User             @relation(fields: [userId], references: [id])
+  deviceId          String
+  startedAt         DateTime         @default(now())
+  endedAt           DateTime?
+  status            String           @default("active")
+  presencePlanCount Int              @default(0)
+  presenceChecks    PresencePrompt[]
+  events            Event[]
+  minuteStats       MinuteStat[]
+  pauses            SessionPause[]
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
 }
 
 model Event {
-  id        String     @id @default(cuid())
+  id        String   @id @default(cuid())
   sessionId String
-  session   Session    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  ts        DateTime   @default(now())
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  ts        DateTime @default(now())
   type      String
   payload   String
 }
 
 model MinuteStat {
-  id          Int       @id @default(autoincrement())
+  id          Int      @id @default(autoincrement())
   sessionId   String
-  session     Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session     Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   minuteStart DateTime
   active      Boolean
   idle        Boolean
   keysCount   Int
   mouseCount  Int
   fgApp       String?
-  createdAt   DateTime  @default(now())
+  createdAt   DateTime @default(now())
 
   @@unique([sessionId, minuteStart])
 }
 
 model PresencePrompt {
-  id          String          @id @default(cuid())
+  id          String    @id @default(cuid())
   sessionId   String
-  session     Session         @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session     Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   scheduledAt DateTime
   triggeredAt DateTime?
   expiresAt   DateTime?
   respondedAt DateTime?
-  status      String          @default("scheduled")
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
+  status      String    @default("scheduled")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 }
 
 model TimeRequest {
-  id            String    @id @default(cuid())
-  userId        Int
-  user          User      @relation(fields: [userId], references: [id])
-  type          String
-  status        String    @default("pending")
-  startDate     DateTime
-  endDate       DateTime
-  hours         Float
-  reason        String?
-  approverId    Int?
-  approver      User?     @relation("TimeRequestApprover", fields: [approverId], references: [id])
-  approvedAt    DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id         String    @id @default(cuid())
+  userId     Int
+  user       User      @relation(fields: [userId], references: [id])
+  type       String
+  status     String    @default("pending")
+  startDate  DateTime
+  endDate    DateTime
+  hours      Float
+  reason     String?
+  approverId Int?
+  approver   User?     @relation("TimeRequestApprover", fields: [approverId], references: [id])
+  approvedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 }
 
 model PtoBalance {
-  id           Int      @id @default(autoincrement())
-  userId       Int      @unique
-  user         User     @relation(fields: [userId], references: [id])
+  id               Int      @id @default(autoincrement())
+  userId           Int      @unique
+  user             User     @relation(fields: [userId], references: [id])
   basePtoHours     Float    @default(0)
   baseNonPtoHours  Float    @default(0)
   baseMakeUpHours  Float    @default(0)
@@ -110,8 +122,8 @@ model PtoBalance {
   nonPtoHours      Float    @default(0)
   makeUpHours      Float    @default(0)
   lastAccrualMonth String?
-  updatedAt    DateTime @updatedAt
-  createdAt    DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  createdAt        DateTime @default(now())
 }
 
 model BalanceLedger {
@@ -130,29 +142,29 @@ model BalanceLedger {
 }
 
 model AccrualRule {
-  id            Int      @id @default(autoincrement())
-  userId        Int?     @unique
-  user          User?    @relation(fields: [userId], references: [id])
-  isDefault     Boolean  @default(false)
+  id            Int       @id @default(autoincrement())
+  userId        Int?      @unique
+  user          User?     @relation(fields: [userId], references: [id])
+  isDefault     Boolean   @default(false)
   hoursPerMonth Float
   startDate     DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 }
 
 model RefreshToken {
-  id               String   @id @default(cuid())
-  userId           Int
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tokenHash        String   @unique
-  scope            String
-  deviceId         String?
-  ipAddress        String?
-  userAgent        String?
-  expiresAt        DateTime
-  createdAt        DateTime @default(now())
-  revokedAt        DateTime?
-  revokedReason    String?
+  id                String    @id @default(cuid())
+  userId            Int
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash         String    @unique
+  scope             String
+  deviceId          String?
+  ipAddress         String?
+  userAgent         String?
+  expiresAt         DateTime
+  createdAt         DateTime  @default(now())
+  revokedAt         DateTime?
+  revokedReason     String?
   replacedByTokenId String?
 
   @@index([userId])
@@ -183,40 +195,259 @@ model Config {
 }
 
 model TimesheetEditRequest {
-  id              String   @id @default(cuid())
-  userId          Int
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  view            String
-  periodStart     DateTime
-  periodEnd       DateTime
-  targetDate      DateTime
+  id               String    @id @default(cuid())
+  userId           Int
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  view             String
+  periodStart      DateTime
+  periodEnd        DateTime
+  targetDate       DateTime
   requestedMinutes Int?
-  reason          String
-  status          String   @default("pending")
-  reviewerId      Int?
-  reviewer        User?    @relation("TimesheetEditReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
-  adminNote       String?
-  reviewedAt      DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  reason           String
+  status           String    @default("pending")
+  reviewerId       Int?
+  reviewer         User?     @relation("TimesheetEditReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+  adminNote        String?
+  reviewedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   @@index([userId])
   @@index([status])
   @@index([periodStart, periodEnd])
 }
 
-
 model SessionPause {
-  id             String     @id @default(cuid())
-  sessionId      String
-  session        Session    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  type           String
-  sequence       Int
-  startedAt      DateTime
-  endedAt        DateTime?
+  id              String    @id @default(cuid())
+  sessionId       String
+  session         Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  type            String
+  sequence        Int
+  startedAt       DateTime
+  endedAt         DateTime?
   durationMinutes Int?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@index([sessionId, type, sequence])
+}
+
+enum PayrollAccrualMethod {
+  NONE
+  MANUAL
+  MONTHLY_HOURS
+}
+
+enum PayrollFactStatus {
+  PENDING
+  FINALIZED
+}
+
+enum PayrollBonusType {
+  MONTHLY_ATTENDANCE
+  QUARTERLY_ATTENDANCE
+  KPI
+}
+
+enum PayrollBonusStatus {
+  PENDING
+  ELIGIBLE
+  APPROVED
+  DENIED
+  PAID
+}
+
+enum PayrollPeriodStatus {
+  DRAFT
+  APPROVED
+  PAID
+}
+
+enum PayrollCheckStatus {
+  DRAFT
+  APPROVED
+  PAID
+}
+
+enum PayrollAuditEvent {
+  CONFIG_UPDATED
+  HOLIDAY_UPDATED
+  ATTENDANCE_RECALC
+  BONUS_DECISION
+  PAYROLL_STATUS_CHANGED
+}
+
+model PayrollEmployeeConfig {
+  id                       Int                       @id @default(autoincrement())
+  userId                   Int
+  user                     User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  effectiveOn              DateTime
+  baseSemiMonthlySalary    Decimal                   @default(0) @db.Decimal(12, 2)
+  monthlyAttendanceBonus   Decimal                   @default(0) @db.Decimal(10, 2)
+  quarterlyAttendanceBonus Decimal                   @default(0) @db.Decimal(10, 2)
+  kpiBonusDefaultAmount    Decimal                   @default(0) @db.Decimal(10, 2)
+  kpiBonusEnabled          Boolean                   @default(false)
+  ptoBalanceHours          Decimal                   @default(0) @db.Decimal(7, 2)
+  nonPtoBalanceHours       Decimal                   @default(0) @db.Decimal(7, 2)
+  accrualEnabled           Boolean                   @default(false)
+  accrualMethod            PayrollAccrualMethod      @default(NONE)
+  accrualHoursPerMonth     Decimal?                  @db.Decimal(6, 2)
+  notes                    String?                   @db.Text
+  createdById              Int?
+  createdBy                User?                     @relation("PayrollConfigCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  schedule                 PayrollEmployeeSchedule[]
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
+
+  @@unique([userId, effectiveOn])
+}
+
+model PayrollEmployeeSchedule {
+  id            Int                   @id @default(autoincrement())
+  configId      Int
+  config        PayrollEmployeeConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+  weekday       Int
+  isEnabled     Boolean               @default(true)
+  startMinutes  Int?
+  endMinutes    Int?
+  expectedHours Decimal?              @db.Decimal(5, 2)
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  @@unique([configId, weekday])
+}
+
+model PayrollHoliday {
+  id          Int      @id @default(autoincrement())
+  date        DateTime
+  name        String
+  isPaid      Boolean  @default(true)
+  createdById Int?
+  createdBy   User?    @relation("PayrollHolidayCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([date])
+}
+
+model PayrollAttendanceFact {
+  id                 Int               @id @default(autoincrement())
+  userId             Int
+  user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  month              DateTime
+  assignedHours      Decimal           @default(0) @db.Decimal(7, 2)
+  workedHours        Decimal           @default(0) @db.Decimal(7, 2)
+  ptoHours           Decimal           @default(0) @db.Decimal(7, 2)
+  nonPtoAbsenceHours Decimal           @default(0) @db.Decimal(7, 2)
+  tardyMinutes       Int               @default(0)
+  matchedMakeUpHours Decimal           @default(0) @db.Decimal(7, 2)
+  status             PayrollFactStatus @default(PENDING)
+  isPerfect          Boolean           @default(false)
+  finalizedAt        DateTime?
+  computedAt         DateTime?         @default(now())
+  reasons            Json?
+  snapshot           Json?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  bonuses            PayrollBonus[]    @relation("PayrollBonusAttendanceFact")
+
+  @@unique([userId, month])
+  @@index([status])
+  @@index([month])
+}
+
+model PayrollBonus {
+  id               Int                    @id @default(autoincrement())
+  userId           Int
+  user             User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type             PayrollBonusType
+  status           PayrollBonusStatus     @default(PENDING)
+  sourceMonth      DateTime
+  periodStart      DateTime?
+  periodEnd        DateTime?
+  amount           Decimal                @default(0) @db.Decimal(10, 2)
+  approvedAmount   Decimal?               @db.Decimal(10, 2)
+  payableDate      DateTime
+  paidAt           DateTime?
+  decisionById     Int?
+  decisionBy       User?                  @relation("PayrollBonusDecision", fields: [decisionById], references: [id], onDelete: SetNull)
+  decidedAt        DateTime?
+  decisionReason   String?                @db.Text
+  payrollCheckId   Int?
+  payrollCheck     PayrollCheck?          @relation("PayrollCheckBonuses", fields: [payrollCheckId], references: [id], onDelete: SetNull)
+  attendanceFactId Int?
+  attendanceFact   PayrollAttendanceFact? @relation("PayrollBonusAttendanceFact", fields: [attendanceFactId], references: [id], onDelete: SetNull)
+  snapshot         Json?
+  quarterKey       String?
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  @@index([type, payableDate])
+  @@index([status])
+  @@unique([userId, type, sourceMonth])
+}
+
+model PayrollPeriod {
+  id           Int                 @id @default(autoincrement())
+  periodStart  DateTime
+  periodEnd    DateTime
+  payDate      DateTime
+  status       PayrollPeriodStatus @default(DRAFT)
+  notes        String?             @db.Text
+  approvedAt   DateTime?
+  approvedById Int?
+  approvedBy   User?               @relation("PayrollPeriodApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  paidAt       DateTime?
+  paidById     Int?
+  paidBy       User?               @relation("PayrollPeriodPaidBy", fields: [paidById], references: [id], onDelete: SetNull)
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  checks       PayrollCheck[]
+
+  @@unique([periodStart, periodEnd])
+  @@index([payDate])
+  @@index([status])
+}
+
+model PayrollCheck {
+  id                       Int                @id @default(autoincrement())
+  periodId                 Int
+  period                   PayrollPeriod      @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  userId                   Int
+  user                     User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status                   PayrollCheckStatus @default(DRAFT)
+  baseAmount               Decimal            @default(0) @db.Decimal(12, 2)
+  monthlyAttendanceBonus   Decimal            @default(0) @db.Decimal(10, 2)
+  deferredMonthlyBonus     Decimal            @default(0) @db.Decimal(10, 2)
+  quarterlyAttendanceBonus Decimal            @default(0) @db.Decimal(10, 2)
+  kpiBonus                 Decimal            @default(0) @db.Decimal(10, 2)
+  totalAmount              Decimal            @default(0) @db.Decimal(12, 2)
+  snapshot                 Json?
+  notes                    String?            @db.Text
+  approvedAt               DateTime?
+  approvedById             Int?
+  approvedBy               User?              @relation("PayrollCheckApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  paidAt                   DateTime?
+  paidById                 Int?
+  paidBy                   User?              @relation("PayrollCheckPaidBy", fields: [paidById], references: [id], onDelete: SetNull)
+  createdAt                DateTime           @default(now())
+  updatedAt                DateTime           @updatedAt
+  bonuses                  PayrollBonus[]     @relation("PayrollCheckBonuses")
+
+  @@unique([periodId, userId])
+  @@index([status])
+}
+
+model PayrollAuditLog {
+  id         Int               @id @default(autoincrement())
+  actorId    Int?
+  actor      User?             @relation("PayrollAuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  event      PayrollAuditEvent
+  entityType String
+  entityId   String
+  payload    Json?
+  createdAt  DateTime          @default(now())
+
+  @@index([createdAt])
+  @@index([entityType, entityId])
 }

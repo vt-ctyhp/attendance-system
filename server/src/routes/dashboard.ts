@@ -4614,3 +4614,691 @@ dashboardRouter.post(
     res.redirect('/dashboard/settings');
   })
 );
+
+dashboardRouter.get(
+  '/payroll',
+  asyncHandler(async (_req, res) => {
+    const employees = await prisma.user.findMany({
+      where: { role: 'employee' },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true, email: true, active: true }
+    });
+
+    res.type('html').send(`<!DOCTYPE html>
+      <html lang="en">
+        <head>
+          <meta charset="UTF-8" />
+          <meta name="viewport" content="width=device-width,initial-scale=1" />
+          <title>Payroll Administration</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; background: #f8fafc; color: #0f172a; }
+            header { background: #0f172a; color: #fff; padding: 1.25rem 2rem; }
+            h1 { margin: 0; font-size: 1.6rem; }
+            main { padding: 1.5rem 2rem 3rem; display: grid; gap: 1.5rem; }
+            section { background: #fff; border-radius: 12px; padding: 1.25rem 1.5rem; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08); }
+            section h2 { margin-top: 0; font-size: 1.25rem; }
+            label { display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.35rem; color: #475569; }
+            input, select, textarea { width: 100%; padding: 0.55rem 0.65rem; border-radius: 8px; border: 1px solid #cbd5f5; font-size: 0.95rem; margin-bottom: 0.65rem; box-sizing: border-box; }
+            input[type="number"] { -moz-appearance: textfield; }
+            input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+            button { border: none; border-radius: 8px; background: #2563eb; color: #fff; font-weight: 600; padding: 0.55rem 1rem; cursor: pointer; margin-right: 0.5rem; }
+            button.secondary { background: #64748b; }
+            button.danger { background: #dc2626; }
+            button:disabled { opacity: 0.6; cursor: not-allowed; }
+            table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+            th, td { border-bottom: 1px solid #e2e8f0; padding: 0.55rem; text-align: left; }
+            th { text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; color: #475569; background: #f1f5f9; }
+            .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.25rem; }
+            .muted { color: #64748b; font-size: 0.85rem; }
+            .status-pill { display: inline-flex; align-items: center; border-radius: 999px; padding: 0.25rem 0.6rem; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; }
+            .status-pill.DRAFT { background: #fef3c7; color: #92400e; }
+            .status-pill.APPROVED { background: #dcfce7; color: #166534; }
+            .status-pill.PAID { background: #e0f2fe; color: #075985; }
+            .status-pill.PENDING { background: #ede9fe; color: #5b21b6; }
+            .status-pill.DENIED { background: #fee2e2; color: #991b1b; }
+            .layout-stack { display: flex; flex-direction: column; gap: 0.75rem; }
+            .toolbar { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.75rem; }
+            .card { border-radius: 10px; border: 1px solid #e2e8f0; padding: 0.75rem; background: #f8fafc; }
+            .alert { padding: 0.5rem 0.65rem; border-radius: 8px; font-size: 0.85rem; margin-bottom: 0.75rem; }
+            .alert.error { background: #fee2e2; color: #991b1b; }
+            .alert.success { background: #dcfce7; color: #166534; }
+          </style>
+        </head>
+        <body>
+          <header>
+            <h1>Payroll Administration</h1>
+          </header>
+          <main>
+            <section>
+              <h2>Employee Compensation & Schedule</h2>
+              <div class="grid-2">
+                <div>
+                  <label for="employee-select">Select Employee</label>
+                  <select id="employee-select"></select>
+                  <div id="config-timeline" class="layout-stack"></div>
+                </div>
+                <form id="config-form">
+                  <label for="effective-on">Effective On</label>
+                  <input type="date" id="effective-on" required />
+                  <label for="base-pay">Semi-Monthly Base ($)</label>
+                  <input type="number" id="base-pay" step="0.01" min="0" required />
+                  <label for="monthly-bonus">Monthly Attendance Bonus ($)</label>
+                  <input type="number" id="monthly-bonus" step="0.01" min="0" required />
+                  <label for="quarterly-bonus">Quarterly Attendance Bonus ($)</label>
+                  <input type="number" id="quarterly-bonus" step="0.01" min="0" required />
+                  <label for="kpi-bonus">KPI Bonus Target ($)</label>
+                  <input type="number" id="kpi-bonus" step="0.01" min="0" required />
+                  <label><input type="checkbox" id="kpi-enabled" /> KPI Bonus Enabled</label>
+                  <label for="pto-balance">PTO Balance (hours)</label>
+                  <input type="number" id="pto-balance" step="0.01" min="0" required />
+                  <label for="nonpto-balance">Non-PTO Balance (hours)</label>
+                  <input type="number" id="nonpto-balance" step="0.01" min="0" required />
+                  <label><input type="checkbox" id="accrual-enabled" /> Accrual Enabled</label>
+                  <label for="accrual-method">Accrual Method</label>
+                  <select id="accrual-method">
+                    <option value="NONE">None</option>
+                    <option value="MANUAL">Manual</option>
+                    <option value="MONTHLY_HOURS">Monthly Hours</option>
+                  </select>
+                  <label for="accrual-hours">Accrual Hours / Month</label>
+                  <input type="number" id="accrual-hours" step="0.01" min="0" />
+                  <label for="notes">Notes</label>
+                  <textarea id="notes" rows="2"></textarea>
+                  <div id="schedule-editor" class="layout-stack"></div>
+                  <button type="submit">Save Configuration</button>
+                  <div id="config-message" class="alert" style="display:none;"></div>
+                </form>
+              </div>
+            </section>
+
+            <section>
+              <h2>Monthly Attendance</h2>
+              <div class="toolbar">
+                <label for="attendance-month" style="margin-bottom:0; font-weight:600;">Month</label>
+                <input type="month" id="attendance-month" />
+                <button type="button" id="attendance-load">Load</button>
+                <button type="button" id="attendance-recalc">Recalculate & Finalize</button>
+              </div>
+              <div id="attendance-summary" class="layout-stack"></div>
+              <div class="card">
+                <h3>Daily Snapshot</h3>
+                <div style="overflow:auto;">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Assigned</th>
+                        <th>Worked</th>
+                        <th>PTO</th>
+                        <th>Non-PTO</th>
+                        <th>Make-Up</th>
+                        <th>Tardy (m)</th>
+                        <th>Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody id="attendance-body"></tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <h2>Holiday Calendar</h2>
+              <div class="toolbar">
+                <input type="date" id="holiday-date" />
+                <input type="text" id="holiday-name" placeholder="Holiday name" />
+                <label style="margin-bottom:0;"><input type="checkbox" id="holiday-paid" checked /> Paid</label>
+                <button type="button" id="holiday-save">Add / Update</button>
+              </div>
+              <div id="holiday-message" class="alert" style="display:none;"></div>
+              <div id="holiday-list" class="layout-stack"></div>
+            </section>
+
+            <section>
+              <h2>KPI Approvals</h2>
+              <div class="toolbar">
+                <button type="button" id="kpi-refresh">Refresh</button>
+              </div>
+              <div id="kpi-list" class="layout-stack"></div>
+            </section>
+
+            <section>
+              <h2>Payroll Periods</h2>
+              <div class="toolbar">
+                <button type="button" id="periods-refresh">Refresh Periods</button>
+              </div>
+              <div id="periods-list" class="layout-stack"></div>
+            </section>
+          </main>
+          <script>
+            const employees = ${JSON.stringify(employees)};
+
+            const employeeSelect = document.getElementById('employee-select');
+            const scheduleEditor = document.getElementById('schedule-editor');
+            const configTimeline = document.getElementById('config-timeline');
+            const configMessage = document.getElementById('config-message');
+            const attendanceMonthInput = document.getElementById('attendance-month');
+            const attendanceBody = document.getElementById('attendance-body');
+            const attendanceSummary = document.getElementById('attendance-summary');
+            const holidayList = document.getElementById('holiday-list');
+            const holidayMessage = document.getElementById('holiday-message');
+            const kpiList = document.getElementById('kpi-list');
+            const periodsList = document.getElementById('periods-list');
+
+            const API = {
+              configs: (userId) => requestJson('/api/payroll/configs/' + userId),
+              saveConfig: (userId, payload) => requestJson('/api/payroll/configs/' + userId, { method: 'POST', body: JSON.stringify(payload) }),
+              attendance: (userId) => requestJson('/api/payroll/attendance/' + userId),
+              recalcAttendance: (payload) => requestJson('/api/payroll/attendance/recalc', { method: 'POST', body: JSON.stringify(payload) }),
+              holidays: (from, to) => requestJson('/api/payroll/holidays?from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to)),
+              saveHoliday: (payload) => requestJson('/api/payroll/holidays', { method: 'POST', body: JSON.stringify(payload) }),
+              deleteHoliday: (payload) => requestJson('/api/payroll/holidays', { method: 'DELETE', body: JSON.stringify(payload) }),
+              listBonuses: (query) => {
+                const params = new URLSearchParams(query);
+                return requestJson('/api/payroll/bonuses?' + params.toString());
+              },
+              decideBonus: (id, payload) => requestJson('/api/payroll/bonuses/' + id + '/decision', { method: 'POST', body: JSON.stringify(payload) }),
+              periods: () => requestJson('/api/payroll/periods'),
+              recalcPeriod: (id) => requestJson('/api/payroll/periods/' + id + '/recalc', { method: 'POST' }),
+              updatePeriodStatus: (id, status) => requestJson('/api/payroll/periods/' + id + '/status', { method: 'POST', body: JSON.stringify({ status }) })
+            };
+
+            function requestJson(url, options = {}) {
+              const opts = { ...options, headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } };
+              return fetch(url, opts).then(async (response) => {
+                if (!response.ok) {
+                  const text = await response.text();
+                  throw new Error(text || 'Request failed');
+                }
+                return response.json();
+              });
+            }
+
+            function populateEmployeeSelect() {
+              employeeSelect.innerHTML = '';
+              employees.forEach((employee) => {
+                const option = document.createElement('option');
+                option.value = employee.id;
+                option.textContent = employee.name + ' (' + employee.email + ')' + (employee.active ? '' : ' • inactive');
+                employeeSelect.appendChild(option);
+              });
+            }
+
+            function buildScheduleEditor(schedule) {
+              scheduleEditor.innerHTML = '';
+              const weekdays = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+              for (let i = 0; i < 7; i += 1) {
+                const container = document.createElement('div');
+                container.className = 'card';
+                const title = document.createElement('h3');
+                title.textContent = weekdays[i];
+                container.appendChild(title);
+
+                const enabledLabel = document.createElement('label');
+                const enabledInput = document.createElement('input');
+                enabledInput.type = 'checkbox';
+                enabledInput.dataset.scheduleEnabled = String(i);
+                enabledLabel.appendChild(enabledInput);
+                enabledLabel.appendChild(document.createTextNode(' Enabled'));
+                container.appendChild(enabledLabel);
+
+                const startLabel = document.createElement('label');
+                startLabel.textContent = 'Start (minutes from midnight)';
+                const startInput = document.createElement('input');
+                startInput.type = 'number';
+                startInput.min = '0';
+                startInput.max = '1440';
+                startInput.dataset.scheduleStart = String(i);
+                container.appendChild(startLabel);
+                container.appendChild(startInput);
+
+                const endLabel = document.createElement('label');
+                endLabel.textContent = 'End (minutes from midnight)';
+                const endInput = document.createElement('input');
+                endInput.type = 'number';
+                endInput.min = '0';
+                endInput.max = '1440';
+                endInput.dataset.scheduleEnd = String(i);
+                container.appendChild(endLabel);
+                container.appendChild(endInput);
+
+                const hoursLabel = document.createElement('label');
+                hoursLabel.textContent = 'Expected Hours';
+                const hoursInput = document.createElement('input');
+                hoursInput.type = 'number';
+                hoursInput.step = '0.25';
+                hoursInput.min = '0';
+                hoursInput.dataset.scheduleHours = String(i);
+                container.appendChild(hoursLabel);
+                container.appendChild(hoursInput);
+
+                scheduleEditor.appendChild(container);
+              }
+
+              if (Array.isArray(schedule)) {
+                schedule.forEach((entry) => {
+                  const index = Number(entry.weekday);
+                  const enabled = scheduleEditor.querySelector('[data-schedule-enabled="' + index + '"]');
+                  const start = scheduleEditor.querySelector('[data-schedule-start="' + index + '"]');
+                  const end = scheduleEditor.querySelector('[data-schedule-end="' + index + '"]');
+                  const hours = scheduleEditor.querySelector('[data-schedule-hours="' + index + '"]');
+                  if (enabled) enabled.checked = Boolean(entry.isEnabled);
+                  if (start && entry.startMinutes != null) start.value = entry.startMinutes;
+                  if (end && entry.endMinutes != null) end.value = entry.endMinutes;
+                  if (hours && entry.expectedHours != null) hours.value = entry.expectedHours;
+                });
+              }
+            }
+
+            function readSchedule() {
+              const results = [];
+              for (let i = 0; i < 7; i += 1) {
+                const enabled = scheduleEditor.querySelector('[data-schedule-enabled="' + i + '"]');
+                const start = scheduleEditor.querySelector('[data-schedule-start="' + i + '"]');
+                const end = scheduleEditor.querySelector('[data-schedule-end="' + i + '"]');
+                const hours = scheduleEditor.querySelector('[data-schedule-hours="' + i + '"]');
+                results.push({
+                  weekday: i,
+                  isEnabled: enabled ? enabled.checked : false,
+                  startMinutes: start && start.value ? Number(start.value) : null,
+                  endMinutes: end && end.value ? Number(end.value) : null,
+                  expectedHours: hours && hours.value ? Number(hours.value) : null
+                });
+              }
+              return results;
+            }
+
+            function renderConfigs(configs) {
+              configTimeline.innerHTML = '';
+              if (!configs || !configs.length) {
+                const empty = document.createElement('div');
+                empty.className = 'muted';
+                empty.textContent = 'No configurations yet.';
+                configTimeline.appendChild(empty);
+                return;
+              }
+              configs.forEach((config) => {
+                const card = document.createElement('div');
+                card.className = 'card';
+                const heading = document.createElement('h3');
+                heading.textContent = 'Effective ' + new Date(config.effectiveOn).toLocaleDateString();
+                card.appendChild(heading);
+                const details = document.createElement('div');
+                details.className = 'muted';
+                details.textContent = 'Base $' + Number(config.baseSemiMonthlySalary).toFixed(2) + ' · Monthly $' + Number(config.monthlyAttendanceBonus).toFixed(2) + ' · Quarterly $' + Number(config.quarterlyAttendanceBonus).toFixed(2) + ' · KPI $' + Number(config.kpiBonusDefaultAmount).toFixed(2);
+                card.appendChild(details);
+                const accrual = document.createElement('div');
+                accrual.className = 'muted';
+                accrual.textContent = 'Accrual: ' + (config.accrualEnabled ? config.accrualMethod : 'Disabled');
+                card.appendChild(accrual);
+                configTimeline.appendChild(card);
+              });
+            }
+
+            function renderAttendance(fact) {
+              attendanceSummary.innerHTML = '';
+              attendanceBody.innerHTML = '';
+              if (!fact) {
+                const empty = document.createElement('div');
+                empty.className = 'muted';
+                empty.textContent = 'No attendance data for selection.';
+                attendanceSummary.appendChild(empty);
+                return;
+              }
+
+              const totals = document.createElement('div');
+              totals.className = 'card';
+              totals.innerHTML = '<strong>Totals</strong><div>Assigned ' + Number(fact.assignedHours).toFixed(2) + 'h</div><div>Worked ' + Number(fact.workedHours).toFixed(2) + 'h</div><div>PTO ' + Number(fact.ptoHours).toFixed(2) + 'h</div><div>Non-PTO ' + Number(fact.nonPtoAbsenceHours).toFixed(2) + 'h</div><div>Make-Up ' + Number(fact.matchedMakeUpHours).toFixed(2) + 'h</div><div>Tardy ' + fact.tardyMinutes + ' minutes</div><div>Status ' + fact.status + ' · ' + (fact.isPerfect ? 'Perfect ✅' : 'Needs review ⚠️') + '</div>';
+              attendanceSummary.appendChild(totals);
+
+              const reasons = document.createElement('div');
+              reasons.className = 'card';
+              reasons.innerHTML = '<strong>Reasons</strong>';
+              if (fact.reasons && fact.reasons.length) {
+                fact.reasons.forEach((reason) => {
+                  const line = document.createElement('div');
+                  line.textContent = '• ' + reason;
+                  reasons.appendChild(line);
+                });
+              } else {
+                const none = document.createElement('div');
+                none.className = 'muted';
+                none.textContent = 'None';
+                reasons.appendChild(none);
+              }
+              attendanceSummary.appendChild(reasons);
+
+              if (Array.isArray(fact.snapshot)) {
+                fact.snapshot.forEach((day) => {
+                  const row = document.createElement('tr');
+                  const cells = [
+                    day.date,
+                    Number(day.assignedHours).toFixed(2),
+                    Number(day.workedHours).toFixed(2),
+                    Number(day.ptoHours).toFixed(2),
+                    Number(day.nonPtoHours).toFixed(2),
+                    Number(day.makeUpHours).toFixed(2),
+                    day.tardyMinutes,
+                    (day.notes && day.notes.length) ? day.notes.join(', ') : ''
+                  ];
+                  cells.forEach((value) => {
+                    const cell = document.createElement('td');
+                    cell.textContent = String(value);
+                    row.appendChild(cell);
+                  });
+                  attendanceBody.appendChild(row);
+                });
+              }
+            }
+
+            function renderHolidays(list) {
+              holidayList.innerHTML = '';
+              if (!list || !list.length) {
+                const empty = document.createElement('div');
+                empty.className = 'muted';
+                empty.textContent = 'No holidays scheduled.';
+                holidayList.appendChild(empty);
+                return;
+              }
+              list.forEach((holiday) => {
+                const card = document.createElement('div');
+                card.className = 'card';
+                const title = document.createElement('strong');
+                title.textContent = new Date(holiday.date).toLocaleDateString() + ' · ' + holiday.name;
+                card.appendChild(title);
+                const meta = document.createElement('div');
+                meta.className = 'muted';
+                meta.textContent = holiday.isPaid ? 'Paid' : 'Unpaid';
+                card.appendChild(meta);
+                const remove = document.createElement('button');
+                remove.className = 'danger';
+                remove.type = 'button';
+                remove.textContent = 'Remove';
+                remove.addEventListener('click', async () => {
+                  await API.deleteHoliday({ date: holiday.date });
+                  await loadHolidays();
+                });
+                card.appendChild(remove);
+                holidayList.appendChild(card);
+              });
+            }
+
+            function renderKpi(bonuses) {
+              kpiList.innerHTML = '';
+              if (!bonuses || !bonuses.length) {
+                const empty = document.createElement('div');
+                empty.className = 'muted';
+                empty.textContent = 'No pending KPI bonuses.';
+                kpiList.appendChild(empty);
+                return;
+              }
+              bonuses.forEach((bonus) => {
+                const card = document.createElement('div');
+                card.className = 'card';
+                const heading = document.createElement('h3');
+                heading.textContent = (bonus.user?.name ?? 'Employee') + ' · ' + new Date(bonus.sourceMonth).toLocaleDateString();
+                card.appendChild(heading);
+                const detail = document.createElement('div');
+                detail.textContent = 'Amount requested $' + Number(bonus.amount).toFixed(2) + ' · Payable ' + new Date(bonus.payableDate).toLocaleDateString();
+                card.appendChild(detail);
+                const actions = document.createElement('div');
+                actions.className = 'toolbar';
+                const approve = document.createElement('button');
+                approve.textContent = 'Approve';
+                approve.addEventListener('click', async () => {
+                  await API.decideBonus(bonus.id, { status: 'APPROVED' });
+                  await loadKpi();
+                });
+                const adjust = document.createElement('button');
+                adjust.className = 'secondary';
+                adjust.textContent = 'Adjust';
+                adjust.addEventListener('click', async () => {
+                  const value = prompt('Enter approved amount ($)', Number(bonus.amount).toFixed(2));
+                  if (!value) return;
+                  const amount = Number(value);
+                  if (Number.isNaN(amount)) {
+                    alert('Invalid amount');
+                    return;
+                  }
+                  await API.decideBonus(bonus.id, { status: 'APPROVED', amount });
+                  await loadKpi();
+                });
+                const deny = document.createElement('button');
+                deny.className = 'danger';
+                deny.textContent = 'Deny';
+                deny.addEventListener('click', async () => {
+                  await API.decideBonus(bonus.id, { status: 'DENIED', reason: 'Denied by admin' });
+                  await loadKpi();
+                });
+                actions.appendChild(approve);
+                actions.appendChild(adjust);
+                actions.appendChild(deny);
+                card.appendChild(actions);
+                kpiList.appendChild(card);
+              });
+            }
+
+            function renderPeriods(periods) {
+              periodsList.innerHTML = '';
+              if (!periods || !periods.length) {
+                const empty = document.createElement('div');
+                empty.className = 'muted';
+                empty.textContent = 'No payroll periods found.';
+                periodsList.appendChild(empty);
+                return;
+              }
+              periods.forEach((period) => {
+                const card = document.createElement('div');
+                card.className = 'card';
+                const heading = document.createElement('h3');
+                heading.textContent = new Date(period.periodStart).toLocaleDateString() + ' – ' + new Date(period.periodEnd).toLocaleDateString() + ' · Pay ' + new Date(period.payDate).toLocaleDateString();
+                card.appendChild(heading);
+                const status = document.createElement('span');
+                status.className = 'status-pill ' + period.status;
+                status.textContent = period.status;
+                card.appendChild(status);
+
+                const actions = document.createElement('div');
+                actions.className = 'toolbar';
+                const recalc = document.createElement('button');
+                recalc.textContent = 'Recalculate';
+                recalc.addEventListener('click', async () => {
+                  await API.recalcPeriod(period.id);
+                  await loadPeriods();
+                });
+                actions.appendChild(recalc);
+                if (period.status !== 'APPROVED') {
+                  const approve = document.createElement('button');
+                  approve.className = 'secondary';
+                  approve.textContent = 'Mark Approved';
+                  approve.addEventListener('click', async () => {
+                    await API.updatePeriodStatus(period.id, 'APPROVED');
+                    await loadPeriods();
+                  });
+                  actions.appendChild(approve);
+                }
+                if (period.status !== 'PAID') {
+                  const paid = document.createElement('button');
+                  paid.className = 'danger';
+                  paid.textContent = 'Mark Paid';
+                  paid.addEventListener('click', async () => {
+                    await API.updatePeriodStatus(period.id, 'PAID');
+                    await loadPeriods();
+                  });
+                  actions.appendChild(paid);
+                }
+                card.appendChild(actions);
+
+                if (period.checks && period.checks.length) {
+                  const tableWrapper = document.createElement('div');
+                  tableWrapper.style.overflow = 'auto';
+                  const table = document.createElement('table');
+                  const thead = document.createElement('thead');
+                  const headerRow = document.createElement('tr');
+                  ['User','Base','Monthly','Quarterly','KPI','Total','Status'].forEach((label) => {
+                    const th = document.createElement('th');
+                    th.textContent = label;
+                    headerRow.appendChild(th);
+                  });
+                  thead.appendChild(headerRow);
+                  table.appendChild(thead);
+                  const tbody = document.createElement('tbody');
+                  period.checks.forEach((check) => {
+                    const row = document.createElement('tr');
+                    const cells = [
+                      check.userId,
+                      '$' + Number(check.baseAmount).toFixed(2),
+                      '$' + Number(check.monthlyAttendanceBonus).toFixed(2),
+                      '$' + Number(check.quarterlyAttendanceBonus).toFixed(2),
+                      '$' + Number(check.kpiBonus).toFixed(2),
+                      '$' + Number(check.totalAmount).toFixed(2),
+                      check.status
+                    ];
+                    cells.forEach((value) => {
+                      const td = document.createElement('td');
+                      td.textContent = String(value);
+                      row.appendChild(td);
+                    });
+                    tbody.appendChild(row);
+                  });
+                  table.appendChild(tbody);
+                  tableWrapper.appendChild(table);
+                  card.appendChild(tableWrapper);
+                }
+
+                periodsList.appendChild(card);
+              });
+            }
+
+            async function loadConfig() {
+              const userId = Number(employeeSelect.value);
+              if (!userId) return;
+              const { configs } = await API.configs(userId);
+              renderConfigs(configs);
+              if (configs && configs.length) {
+                buildScheduleEditor(configs[configs.length - 1].schedule || []);
+              } else {
+                buildScheduleEditor([]);
+              }
+            }
+
+            async function loadAttendance(finalize = false) {
+              const userId = Number(employeeSelect.value);
+              if (!userId) return;
+              const selectedMonth = attendanceMonthInput.value ? new Date(attendanceMonthInput.value + '-01') : new Date();
+              if (finalize) {
+                await API.recalcAttendance({ userId, month: selectedMonth, finalize: true });
+              }
+              const { facts } = await API.attendance(userId);
+              const key = selectedMonth.toISOString().slice(0, 7);
+              const fact = (facts || []).find((item) => item.month.slice(0, 7) === key);
+              renderAttendance(fact);
+            }
+
+            async function loadHolidays() {
+              const now = new Date();
+              const start = new Date(now.getFullYear(), 0, 1).toISOString();
+              const end = new Date(now.getFullYear(), 11, 31, 23, 59, 59).toISOString();
+              const { holidays } = await API.holidays(start, end);
+              renderHolidays(holidays);
+            }
+
+            async function loadKpi() {
+              const { bonuses } = await API.listBonuses({ type: 'KPI', status: 'PENDING' });
+              renderKpi(bonuses);
+            }
+
+            async function loadPeriods() {
+              const { periods } = await API.periods();
+              renderPeriods(periods);
+            }
+
+            document.getElementById('attendance-load').addEventListener('click', () => loadAttendance(false));
+            document.getElementById('attendance-recalc').addEventListener('click', () => loadAttendance(true));
+            document.getElementById('holiday-save').addEventListener('click', async () => {
+              const date = document.getElementById('holiday-date').value;
+              const name = document.getElementById('holiday-name').value.trim();
+              const isPaid = document.getElementById('holiday-paid').checked;
+              if (!date || !name) {
+                holidayMessage.textContent = 'Provide date and name.';
+                holidayMessage.className = 'alert error';
+                holidayMessage.style.display = 'block';
+                return;
+              }
+              try {
+                await API.saveHoliday({ date, name, isPaid });
+                holidayMessage.textContent = 'Holiday saved.';
+                holidayMessage.className = 'alert success';
+                holidayMessage.style.display = 'block';
+                await loadHolidays();
+              } catch (error) {
+                holidayMessage.textContent = error.message;
+                holidayMessage.className = 'alert error';
+                holidayMessage.style.display = 'block';
+              }
+            });
+
+            document.getElementById('kpi-refresh').addEventListener('click', loadKpi);
+            document.getElementById('periods-refresh').addEventListener('click', loadPeriods);
+
+            employeeSelect.addEventListener('change', async () => {
+              await loadConfig();
+              await loadAttendance(false);
+            });
+
+            document.getElementById('config-form').addEventListener('submit', async (event) => {
+              event.preventDefault();
+              const userId = Number(employeeSelect.value);
+              if (!userId) return;
+              const payload = {
+                effectiveOn: document.getElementById('effective-on').value,
+                baseSemiMonthlySalary: Number(document.getElementById('base-pay').value || 0),
+                monthlyAttendanceBonus: Number(document.getElementById('monthly-bonus').value || 0),
+                quarterlyAttendanceBonus: Number(document.getElementById('quarterly-bonus').value || 0),
+                kpiBonusDefaultAmount: Number(document.getElementById('kpi-bonus').value || 0),
+                kpiBonusEnabled: document.getElementById('kpi-enabled').checked,
+                ptoBalanceHours: Number(document.getElementById('pto-balance').value || 0),
+                nonPtoBalanceHours: Number(document.getElementById('nonpto-balance').value || 0),
+                accrualEnabled: document.getElementById('accrual-enabled').checked,
+                accrualMethod: document.getElementById('accrual-method').value,
+                accrualHoursPerMonth: document.getElementById('accrual-hours').value ? Number(document.getElementById('accrual-hours').value) : null,
+                notes: document.getElementById('notes').value,
+                schedule: readSchedule()
+              };
+              try {
+                await API.saveConfig(userId, payload);
+                configMessage.textContent = 'Configuration saved.';
+                configMessage.className = 'alert success';
+                configMessage.style.display = 'block';
+                await loadConfig();
+              } catch (error) {
+                configMessage.textContent = error.message;
+                configMessage.className = 'alert error';
+                configMessage.style.display = 'block';
+              }
+            });
+
+            function init() {
+              populateEmployeeSelect();
+              if (employees.length) {
+                employeeSelect.value = employees[0].id;
+              }
+              const today = new Date();
+              attendanceMonthInput.value = today.toISOString().slice(0, 7);
+              document.getElementById('holiday-date').value = today.toISOString().slice(0, 10);
+            }
+
+            (async function bootstrap() {
+              init();
+              buildScheduleEditor([]);
+              await loadConfig();
+              await loadAttendance(false);
+              await loadHolidays();
+              await loadKpi();
+              await loadPeriods();
+            })();
+          </script>
+        </body>
+      </html>`);
+  })
+);
