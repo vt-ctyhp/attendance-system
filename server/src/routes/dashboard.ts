@@ -5460,7 +5460,7 @@ dashboardRouter.get('/payroll', async (req, res) => {
               >Export CSV</a>
               <a
                 class="button button-secondary"
-                href="/dashboard/payroll/period/${payDateIso}"
+                href="/dashboard/payroll/summary/${payDateIso}"
               >View Details</a>
             </div>
             <p class="form-error" id="${errorTargetId}" role="alert"></p>
@@ -6651,7 +6651,357 @@ const renderSettingsPage = ({ enabled, employees, logs, message, error }: Settin
 };
 
 
-dashboardRouter.get('/payroll/period/:payDate', async (req, res) => {
+
+
+dashboardRouter.get('/payroll/summary/:payDate', async (req, res) => {
+  const payDateParam = typeof req.params.payDate === 'string' ? req.params.payDate : '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(payDateParam)) {
+    res.status(404).type('html').send('<!doctype html><html><body>Payroll period not found.</body></html>');
+    return;
+  }
+
+  const parsedPayDate = parseDateInput(payDateParam);
+  if (!parsedPayDate) {
+    res.status(404).type('html').send('<!doctype html><html><body>Payroll period not found.</body></html>');
+    return;
+  }
+
+  const actorId = (req as AuthenticatedRequest | undefined)?.user?.id ?? null;
+  const { payDate: normalizedPayDate, periodStart, periodEnd } = computePayPeriodWindow(parsedPayDate);
+
+  const startMonthKey = formatInTimeZone(periodStart, DASHBOARD_TIME_ZONE, 'yyyy-MM');
+  const endMonthKey = formatInTimeZone(periodEnd, DASHBOARD_TIME_ZONE, 'yyyy-MM');
+  await ensurePayrollDemoData(startMonthKey, normalizedPayDate, actorId);
+  if (endMonthKey !== startMonthKey) {
+    await ensurePayrollDemoData(endMonthKey, normalizedPayDate, actorId);
+  }
+
+  const period = await getPayrollPeriod(normalizedPayDate);
+  if (!period) {
+    const payDateLabel = formatFullDate(normalizedPayDate);
+    const html = `
+      <!doctype html>
+      <html lang="en">
+        <head>
+          <meta charset="utf-8" />
+          <title>Payroll Summary – ${escapeHtml(payDateLabel)}</title>
+          <style>${baseStyles}</style>
+        </head>
+        <body class="dashboard dashboard--payroll-summary">
+          ${renderNav('payroll')}
+          <main class="page-shell">
+            <header class="page-header">
+              <div class="page-header__content">
+                <p class="page-header__eyebrow">Payroll</p>
+                <h1 class="page-header__title">Payroll Summary</h1>
+                <p class="page-header__subtitle">No payroll data is available for this pay date.</p>
+              </div>
+              <div class="page-header__meta">
+                <a class="button button-secondary" href="/dashboard/payroll">Back to Payroll</a>
+              </div>
+            </header>
+            <section class="card">
+              <div class="card__body">
+                <div class="empty empty--error">No payroll period was found for ${escapeHtml(payDateLabel)}.</div>
+              </div>
+            </section>
+          </main>
+        </body>
+      </html>
+    `;
+    res.status(404).type('html').send(html);
+    return;
+  }
+
+  type PayrollPeriodWithLines = NonNullable<Awaited<ReturnType<typeof getPayrollPeriod>>>;
+  type PayrollLineWithUser = PayrollPeriodWithLines['lines'][number];
+
+  const lines: PayrollLineWithUser[] = Array.isArray(period.lines) ? period.lines : [];
+  const sortedLines = lines
+    .slice()
+    .sort((a, b) => (a.user?.name ?? `User ${a.userId}`).localeCompare(b.user?.name ?? `User ${b.userId}`));
+
+  const summarizeBehavior = (summary: PeriodAttendanceSummary | null) => {
+    const aggregate = {
+      lunchCount: 0,
+      lunchMinutes: 0,
+      breakCount: 0,
+      breakMinutes: 0,
+      idleMinutes: 0,
+      idleDays: 0,
+      averageLunch: null as number | null,
+      averageBreak: null as number | null,
+      averageIdle: null as number | null
+    };
+    if (!summary) return aggregate;
+    for (const detail of summary.details) {
+      if (detail.lunchCount > 0) {
+        aggregate.lunchCount += detail.lunchCount;
+        aggregate.lunchMinutes += detail.lunchMinutes;
+      }
+      if (detail.breakCount > 0) {
+        aggregate.breakCount += detail.breakCount;
+        aggregate.breakMinutes += detail.breakMinutes;
+      }
+      aggregate.idleMinutes += detail.idleMinutes;
+      if (detail.expectedHours > 0 || detail.workedHours > 0 || detail.ptoHours > 0) {
+        aggregate.idleDays += 1;
+      }
+    }
+    aggregate.averageLunch = aggregate.lunchCount > 0
+      ? Math.round((aggregate.lunchMinutes / aggregate.lunchCount) * 10) / 10
+      : null;
+    aggregate.averageBreak = aggregate.breakCount > 0
+      ? Math.round((aggregate.breakMinutes / aggregate.breakCount) * 10) / 10
+      : null;
+    aggregate.averageIdle = aggregate.idleDays > 0
+      ? Math.round((aggregate.idleMinutes / aggregate.idleDays) * 10) / 10
+      : null;
+    return aggregate;
+  };
+
+  type EmployeeSummary = {
+    userId: number;
+    name: string;
+    email: string;
+    totals: {
+      workedHours: number;
+      ptoHours: number;
+      nonPtoHours: number;
+      makeUpHours: number;
+      tardyMinutes: number;
+    };
+    totalHours: number;
+    onTimePercent: number | null;
+    behavior: ReturnType<typeof summarizeBehavior>;
+    payLine: {
+      baseAmount: number;
+      monthlyAttendance: number;
+      monthlyDeferred: number;
+      quarterlyAttendance: number;
+      kpiBonus: number;
+      finalAmount: number;
+    };
+    attendanceBonus: number;
+  };
+
+  const employeeSummaries: EmployeeSummary[] = await Promise.all(
+    sortedLines.map(async (line): Promise<EmployeeSummary> => {
+      const attendanceSummary = await collectAttendanceSummary(line.userId, periodStart, periodEnd);
+      const totals = attendanceSummary.totals;
+      const behavior = summarizeBehavior(attendanceSummary);
+      const totalHoursRaw =
+        totals.workedHours + totals.ptoHours + totals.nonPtoHours + totals.makeUpHours;
+      const totalHours = Math.round(totalHoursRaw * 100) / 100;
+      const payLine = {
+        baseAmount: Math.round(Number(line.baseAmount) * 100) / 100,
+        monthlyAttendance: Math.round(Number(line.monthlyAttendance) * 100) / 100,
+        monthlyDeferred: Math.round(Number(line.monthlyDeferred) * 100) / 100,
+        quarterlyAttendance: Math.round(Number(line.quarterlyAttendance) * 100) / 100,
+        kpiBonus: Math.round(Number(line.kpiBonus) * 100) / 100,
+        finalAmount: Math.round(Number(line.finalAmount) * 100) / 100
+      };
+      const attendanceBonus =
+        Math.round(
+          (payLine.monthlyAttendance + payLine.monthlyDeferred + payLine.quarterlyAttendance) * 100
+        ) / 100;
+      const onTimePercent = totals.scheduledDays
+        ? Math.round(((totals.onTimeDays / totals.scheduledDays) * 100) * 10) / 10
+        : null;
+      return {
+        userId: line.userId,
+        name: line.user?.name ?? `User ${line.userId}`,
+        email: line.user?.email ?? '',
+        totals: {
+          workedHours: Math.round(totals.workedHours * 100) / 100,
+          ptoHours: Math.round(totals.ptoHours * 100) / 100,
+          nonPtoHours: Math.round(totals.nonPtoHours * 100) / 100,
+          makeUpHours: Math.round(totals.makeUpHours * 100) / 100,
+          tardyMinutes: totals.tardyMinutes
+        },
+        totalHours,
+        onTimePercent,
+        behavior,
+        payLine,
+        attendanceBonus
+      };
+    })
+  );
+
+  const periodTotals = parsePeriodTotals(period.totals);
+  const attendanceBonusTotal =
+    periodTotals.monthlyAttendance + periodTotals.monthlyDeferred + periodTotals.quarterlyAttendance;
+  const teamTotalHours = employeeSummaries.reduce((acc, entry) => acc + entry.totalHours, 0);
+
+  const formatPercent = (value: number | null) => {
+    if (value === null || !Number.isFinite(value)) return '—';
+    const rounded = Math.round(value * 10) / 10;
+    return `${rounded % 1 === 0 ? rounded.toFixed(0) : rounded.toFixed(1)}%`;
+  };
+
+  const formatHoursCell = (value: number) => (value ? `${formatHours(value)} h` : '—');
+  const formatAverageMinutes = (value: number | null) => {
+    if (value === null || !Number.isFinite(value)) {
+      return '—';
+    }
+    const rounded = Math.round(value * 10) / 10;
+    return `${rounded % 1 === 0 ? rounded.toFixed(0) : rounded.toFixed(1)} min`;
+  };
+
+  const employeeRows = employeeSummaries
+    .map((employee) => {
+      const detailUrl = `/dashboard/payroll/period/${formatIsoDate(normalizedPayDate)}?employeeId=${employee.userId}`;
+      const tardyLabel = employee.totals.tardyMinutes
+        ? `${employee.totals.tardyMinutes} min`
+        : '—';
+      const compensationParts = [
+        `Base ${formatCurrency(employee.payLine.baseAmount)}`,
+        `Attendance ${formatCurrency(employee.attendanceBonus)}`
+      ];
+      if (employee.payLine.kpiBonus) {
+        compensationParts.push(`KPI ${formatCurrency(employee.payLine.kpiBonus)}`);
+      }
+      const compensationSummary = `${compensationParts.join(' + ')} = ${formatCurrency(employee.payLine.finalAmount)}`;
+      return `
+        <tr>
+          <td>
+            <a href="${escapeHtml(detailUrl)}">${escapeHtml(employee.name)}</a>
+            ${employee.email ? `<div class="meta">${escapeHtml(employee.email)}</div>` : ''}
+          </td>
+          <td>${formatHoursCell(Math.round(employee.totalHours * 100) / 100)}</td>
+          <td>${formatHoursCell(employee.totals.ptoHours)}</td>
+          <td>${formatHoursCell(employee.totals.nonPtoHours)}</td>
+          <td>${formatHoursCell(employee.totals.makeUpHours)}</td>
+          <td>${tardyLabel}</td>
+          <td>${escapeHtml(formatPercent(employee.onTimePercent))}</td>
+          <td>${escapeHtml(formatAverageMinutes(employee.behavior.averageLunch))}</td>
+          <td>${escapeHtml(formatAverageMinutes(employee.behavior.averageBreak))}</td>
+          <td>${escapeHtml(formatAverageMinutes(employee.behavior.averageIdle))}</td>
+          <td>${escapeHtml(compensationSummary)}</td>
+        </tr>
+      `;
+    })
+    .join('\n');
+
+  const employeeTable = employeeSummaries.length
+    ? `<div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Employee</th>
+              <th>Total Hours</th>
+              <th>PTO Hours</th>
+              <th>Non-PTO Hours</th>
+              <th>Make-up Hours</th>
+              <th>Tardy (m)</th>
+              <th>On-time %</th>
+              <th>Avg Lunch</th>
+              <th>Avg Break</th>
+              <th>Avg Idle</th>
+              <th>Compensation</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${employeeRows}
+          </tbody>
+        </table>
+      </div>`
+    : '';
+
+  const emptyState = employeeSummaries.length
+    ? ''
+    : '<div class="empty" data-summary-empty>No payroll lines have been computed for this period.</div>';
+
+  const totalsGrid = `
+    <dl class="totals-grid">
+      <div><dt>Gross</dt><dd>${formatCurrency(periodTotals.finalAmount)}</dd></div>
+      <div><dt>Base Pay</dt><dd>${formatCurrency(periodTotals.base)}</dd></div>
+      <div><dt>Attendance Bonus</dt><dd>${formatCurrency(attendanceBonusTotal)}</dd></div>
+      <div><dt>KPI Bonus</dt><dd>${formatCurrency(periodTotals.kpiBonus)}</dd></div>
+      <div><dt>Total Hours</dt><dd>${formatHours(Math.round(teamTotalHours * 100) / 100)} h</dd></div>
+    </dl>
+  `;
+
+  const payDateLabel = formatFullDate(normalizedPayDate);
+  const periodRangeLabel = `${formatFullDate(periodStart)} – ${formatFullDate(periodEnd)}`;
+  const statusValue = normalizePayrollStatus(period.status);
+  const statusChip = `<span class="${payrollStatusClasses[statusValue]}">${escapeHtml(
+    payrollStatusLabels[statusValue]
+  )}</span>`;
+
+  const html = `
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <title>Payroll Summary – ${escapeHtml(payDateLabel)}</title>
+        <style>${baseStyles}</style>
+      </head>
+      <body class="dashboard dashboard--payroll-summary">
+        ${renderNav('payroll')}
+        <main class="page-shell">
+          <header class="page-header">
+            <div class="page-header__content">
+              <p class="page-header__eyebrow">Payroll</p>
+              <h1 class="page-header__title">Payroll Summary</h1>
+              <p class="page-header__subtitle">Team snapshot for ${escapeHtml(payDateLabel)}.</p>
+            </div>
+            <div class="page-header__meta">
+              ${statusChip}
+              <span>${escapeHtml(periodRangeLabel)}</span>
+              <a class="button button-secondary" href="/dashboard/payroll">Back to Payroll</a>
+            </div>
+          </header>
+          <div class="cards-grid">
+            <section class="card">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Team Totals</h2>
+                  <p class="card__subtitle">Compensation mix and coverage for the selected pay period.</p>
+                </div>
+              </div>
+              <div class="card__body">
+                ${totalsGrid}
+              </div>
+            </section>
+          </div>
+          <div class="cards-grid">
+            <section class="card card--table">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Employee Breakdown</h2>
+                  <p class="card__subtitle">Hours, adherence, and payout summary per employee.</p>
+                </div>
+              </div>
+              <div class="card__body">
+                <div data-summary-loading class="empty">Loading payroll summary…</div>
+                <div data-summary-error class="empty empty--error" hidden>Unable to load payroll summary.</div>
+                ${emptyState}
+                ${employeeSummaries.length ? `<div data-summary-content hidden>${employeeTable}</div>` : ''}
+                <noscript>${employeeSummaries.length ? employeeTable : '<div class="empty">No payroll lines have been computed for this period.</div>'}</noscript>
+              </div>
+            </section>
+          </div>
+        </main>
+        <script>
+          (() => {
+            const loading = document.querySelector('[data-summary-loading]');
+            const content = document.querySelector('[data-summary-content]');
+            if (loading) {
+              loading.setAttribute('hidden', 'true');
+            }
+            if (content) {
+              content.removeAttribute('hidden');
+            }
+          })();
+        </script>
+      </body>
+    </html>
+  `;
+
+  res.type('html').send(html);
+});
+dashboardRouter.get(['/payroll/period/:payDate', '/payroll/period/:payDate/employee/:employeeId'], async (req, res) => {
   const payDateParam = typeof req.params.payDate === 'string' ? req.params.payDate : '';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(payDateParam)) {
     res.status(404).type('html').send('<!doctype html><html><body>Payroll period not found.</body></html>');
@@ -6731,7 +7081,11 @@ dashboardRouter.get('/payroll/period/:payDate', async (req, res) => {
   }
 
   const lines = period.lines ?? [];
-  const employeeIdParam = typeof req.query.employeeId === 'string' ? req.query.employeeId : undefined;
+  const employeeQueryParam = typeof req.query.employeeId === 'string' ? req.query.employeeId : undefined;
+  const employeePathParam = typeof req.params.employeeId === 'string' ? req.params.employeeId : undefined;
+  const employeeIdParam = employeeQueryParam && employeeQueryParam.trim().length
+    ? employeeQueryParam
+    : employeePathParam;
   const employeeIdCandidate = employeeIdParam && /^\d+$/.test(employeeIdParam)
     ? Number.parseInt(employeeIdParam, 10)
     : undefined;

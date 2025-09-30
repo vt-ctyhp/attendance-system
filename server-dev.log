@@ -7,24 +7,598 @@
 [33m[nodemon] watching path(s): src/**/*[39m
 [33m[nodemon] watching extensions: ts,json[39m
 [32m[nodemon] starting `ts-node src/index.ts`[39m
-{"level":30,"time":1759259752193,"pid":47287,"hostname":"Viviannes-MacBook-Air.local","msg":"Skipping sqlite backups: DATABASE_URL is not a file: path"}
-{"level":30,"time":1759259752194,"pid":47287,"hostname":"Viviannes-MacBook-Air.local","msg":"Server listening on port 4000"}
-{"level":30,"time":1759259771230,"pid":47287,"hostname":"Viviannes-MacBook-Air.local","ts":"2025-09-30T19:16:11.230Z","reqId":"42d0b4fb-cc3d-48dc-93a8-db1fc7f28b3c","method":"GET","url":"/api/health","status":200,"userId":null,"sessionId":null,"msg":"request_trace"}
-{"level":30,"time":1759259771231,"pid":47287,"hostname":"Viviannes-MacBook-Air.local","req":{"id":"94c0091c-a8a6-4f1f-8eb0-8ecfc6e0c947","method":"GET","url":"/api/health","query":{},"params":{},"headers":{"host":"127.0.0.1:4000","user-agent":"curl/8.6.0","accept":"*/*"},"remoteAddress":"::ffff:127.0.0.1","remotePort":56512},"reqId":"94c0091c-a8a6-4f1f-8eb0-8ecfc6e0c947","userId":null,"sessionId":null,"res":{"statusCode":200,"headers":{"x-powered-by":"Express","access-control-allow-origin":"*","x-debug-req":"42d0b4fb-cc3d-48dc-93a8-db1fc7f28b3c","content-type":"application/json; charset=utf-8","content-length":"63","etag":"W/\"3f-dR5l/YHfwetrvFTzXchvK8Axcfo\""}},"responseTime":6,"msg":"request completed"}
-{"level":30,"time":1759259779389,"pid":47287,"hostname":"Viviannes-MacBook-Air.local","ts":"2025-09-30T19:16:19.389Z","reqId":"a5f6639b-7ea9-4dd6-bbef-c2f948aa2b59","method":"GET","url":"/dashboard/overview/today.json?date=2025-09-30","status":200,"userId":1,"sessionId":null,"msg":"request_trace"}
-{"level":30,"time":1759259779389,"pid":47287,"hostname":"Viviannes-MacBook-Air.local","req":{"id":"4a268756-15bf-4586-9489-44aa6ceb8c74","method":"GET","url":"/dashboard/overview/today.json?date=2025-09-30","query":{"date":"2025-09-30"},"params":{},"headers":{"host":"127.0.0.1:4000","connection":"keep-alive","sec-ch-ua-platform":"\"macOS\"","user-agent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36","accept":"application/json","sec-ch-ua":"\"Chromium\";v=\"140\", \"Not=A?Brand\";v=\"24\", \"Google Chrome\";v=\"140\"","sec-ch-ua-mobile":"?0","sec-fetch-site":"same-origin","sec-fetch-mode":"cors","sec-fetch-dest":"empty","referer":"http://127.0.0.1:4000/dashboard/overview","accept-encoding":"gzip, deflate, br, zstd","accept-language":"en-US,en;q=0.9","cookie":"attendance_dashboard_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsInJvbGUiOiJhZG1pbiIsInNjb3BlIjoiZnVsbCIsInR5cCI6ImFjY2VzcyIsImlhdCI6MTc1OTI0ODQ1MywiZXhwIjoxNzU5MjkxNjUzfQ.CLQmfqul5e4w7gcxK50jHezyDc44rhwDz4L07rgLWPE","if-none-match":"W/\"2541-1lnFloJ+7MJIa03IHeJ8/2inmsE\""},"remoteAddress":"::ffff:127.0.0.1","remotePort":56537},"reqId":"4a268756-15bf-4586-9489-44aa6ceb8c74","userId":null,"sessionId":null,"reqId":"4a268756-15bf-4586-9489-44aa6ceb8c74","userId":1,"sessionId":null,"res":{"statusCode":200,"headers":{"x-powered-by":"Express","access-control-allow-origin":"*","x-debug-req":"a5f6639b-7ea9-4dd6-bbef-c2f948aa2b59","content-type":"application/json; charset=utf-8","content-length":"9537","etag":"W/\"2541-DxDYYK+eLuxviWgr7CXbaH0Q9UU\""}},"responseTime":75,"msg":"request completed"}
-{"level":30,"time":1759259809455,"pid":47287,"hostname":"Viviannes-MacBook-Air.local","ts":"2025-09-30T19:16:49.455Z","reqId":"f87b2bbd-b89a-4612-8939-cae67343fb85","method":"GET","url":"/dashboard/overview/today.json?date=2025-09-30","status":200,"userId":1,"sessionId":null,"msg":"request_trace"}
-{"level":30,"time":1759259809455,"pid":47287,"hostname":"Viviannes-MacBook-Air.local","req":{"id":"903114ec-5b1f-45c1-b62a-15020266d5f7","method":"GET","url":"/dashboard/overview/today.json?date=2025-09-30","query":{"date":"2025-09-30"},"params":{},"headers":{"host":"127.0.0.1:4000","connection":"keep-alive","sec-ch-ua-platform":"\"macOS\"","user-agent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36","accept":"application/json","sec-ch-ua":"\"Chromium\";v=\"140\", \"Not=A?Brand\";v=\"24\", \"Google Chrome\";v=\"140\"","sec-ch-ua-mobile":"?0","sec-fetch-site":"same-origin","sec-fetch-mode":"cors","sec-fetch-dest":"empty","referer":"http://127.0.0.1:4000/dashboard/overview","accept-encoding":"gzip, deflate, br, zstd","accept-language":"en-US,en;q=0.9","cookie":"attendance_dashboard_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsInJvbGUiOiJhZG1pbiIsInNjb3BlIjoiZnVsbCIsInR5cCI6ImFjY2VzcyIsImlhdCI6MTc1OTI0ODQ1MywiZXhwIjoxNzU5MjkxNjUzfQ.CLQmfqul5e4w7gcxK50jHezyDc44rhwDz4L07rgLWPE","if-none-match":"W/\"2541-DxDYYK+eLuxviWgr7CXbaH0Q9UU\""},"remoteAddress":"::ffff:127.0.0.1","remotePort":56556},"reqId":"903114ec-5b1f-45c1-b62a-15020266d5f7","userId":null,"sessionId":null,"reqId":"903114ec-5b1f-45c1-b62a-15020266d5f7","userId":1,"sessionId":null,"res":{"statusCode":200,"headers":{"x-powered-by":"Express","access-control-allow-origin":"*","x-debug-req":"f87b2bbd-b89a-4612-8939-cae67343fb85","content-type":"application/json; charset=utf-8","content-length":"9537","etag":"W/\"2541-vHeqihAs7FaXiXE+JLpJ6bloYVk\""}},"responseTime":136,"msg":"request completed"}
-{"level":30,"time":1759259817670,"pid":47287,"hostname":"Viviannes-MacBook-Air.local","ts":"2025-09-30T19:16:57.670Z","reqId":"2e094367-f7dc-4007-a261-b62c76ec3818","method":"GET","url":"/dashboard/overview","status":200,"userId":1,"sessionId":null,"msg":"request_trace"}
-{"level":30,"time":1759259817671,"pid":47287,"hostname":"Viviannes-MacBook-Air.local","req":{"id":"fe412505-a6cd-4170-8681-6fb489617879","method":"GET","url":"/dashboard/overview","query":{},"params":{},"headers":{"host":"127.0.0.1:4000","connection":"keep-alive","cache-control":"max-age=0","sec-ch-ua":"\"Chromium\";v=\"140\", \"Not=A?Brand\";v=\"24\", \"Google Chrome\";v=\"140\"","sec-ch-ua-mobile":"?0","sec-ch-ua-platform":"\"macOS\"","upgrade-insecure-requests":"1","user-agent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36","accept":"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7","sec-fetch-site":"same-origin","sec-fetch-mode":"navigate","sec-fetch-user":"?1","sec-fetch-dest":"document","referer":"http://127.0.0.1:4000/dashboard/payroll/period/2025-09-30","accept-encoding":"gzip, deflate, br, zstd","accept-language":"en-US,en;q=0.9","cookie":"attendance_dashboard_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsInJvbGUiOiJhZG1pbiIsInNjb3BlIjoiZnVsbCIsInR5cCI6ImFjY2VzcyIsImlhdCI6MTc1OTI0ODQ1MywiZXhwIjoxNzU5MjkxNjUzfQ.CLQmfqul5e4w7gcxK50jHezyDc44rhwDz4L07rgLWPE","if-none-match":"W/\"115e1-2SYsCszvEqzDLQDEzFwdcPBFHxo\""},"remoteAddress":"::ffff:127.0.0.1","remotePort":56565},"reqId":"fe412505-a6cd-4170-8681-6fb489617879","userId":null,"sessionId":null,"reqId":"fe412505-a6cd-4170-8681-6fb489617879","userId":1,"sessionId":null,"res":{"statusCode":200,"headers":{"x-powered-by":"Express","access-control-allow-origin":"*","x-debug-req":"2e094367-f7dc-4007-a261-b62c76ec3818","content-type":"text/html; charset=utf-8","content-length":"64631","etag":"W/\"fc77-/7rJuVb+9MoOPAxtKkoLZv2WyNE\""}},"responseTime":606,"msg":"request completed"}
-{"level":30,"time":1759259817798,"pid":47287,"hostname":"Viviannes-MacBook-Air.local","ts":"2025-09-30T19:16:57.798Z","reqId":"b4d4fe4d-4387-4576-a941-fedbd407c46c","method":"GET","url":"/dashboard/overview/today.json?date=2025-09-30","status":200,"userId":1,"sessionId":null,"msg":"request_trace"}
-{"level":30,"time":1759259817799,"pid":47287,"hostname":"Viviannes-MacBook-Air.local","req":{"id":"ecd2948c-6bee-44bd-9a99-9d0e6361c720","method":"GET","url":"/dashboard/overview/today.json?date=2025-09-30","query":{"date":"2025-09-30"},"params":{},"headers":{"host":"127.0.0.1:4000","connection":"keep-alive","sec-ch-ua-platform":"\"macOS\"","user-agent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36","accept":"application/json","sec-ch-ua":"\"Chromium\";v=\"140\", \"Not=A?Brand\";v=\"24\", \"Google Chrome\";v=\"140\"","sec-ch-ua-mobile":"?0","sec-fetch-site":"same-origin","sec-fetch-mode":"cors","sec-fetch-dest":"empty","referer":"http://127.0.0.1:4000/dashboard/overview","accept-encoding":"gzip, deflate, br, zstd","accept-language":"en-US,en;q=0.9","cookie":"attendance_dashboard_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsInJvbGUiOiJhZG1pbiIsInNjb3BlIjoiZnVsbCIsInR5cCI6ImFjY2VzcyIsImlhdCI6MTc1OTI0ODQ1MywiZXhwIjoxNzU5MjkxNjUzfQ.CLQmfqul5e4w7gcxK50jHezyDc44rhwDz4L07rgLWPE","if-none-match":"W/\"2541-vHeqihAs7FaXiXE+JLpJ6bloYVk\""},"remoteAddress":"::ffff:127.0.0.1","remotePort":56565},"reqId":"ecd2948c-6bee-44bd-9a99-9d0e6361c720","userId":null,"sessionId":null,"reqId":"ecd2948c-6bee-44bd-9a99-9d0e6361c720","userId":1,"sessionId":null,"res":{"statusCode":200,"headers":{"x-powered-by":"Express","access-control-allow-origin":"*","x-debug-req":"b4d4fe4d-4387-4576-a941-fedbd407c46c","content-type":"application/json; charset=utf-8","content-length":"9537","etag":"W/\"2541-OYHM+3IFbpfupbPwf9elO8SJjas\""}},"responseTime":84,"msg":"request completed"}
-{"level":30,"time":1759259820950,"pid":47287,"hostname":"Viviannes-MacBook-Air.local","scope":"payroll-demo-seed","monthKey":"2025-09","requestedPayDate":"2025-09-30T07:00:00.000Z","chosenPayDate":"2025-09-30T07:00:00.000Z","msg":"Ensuring payroll demo data"}
-{"level":30,"time":1759259820958,"pid":47287,"hostname":"Viviannes-MacBook-Air.local","ts":"2025-09-30T19:17:00.958Z","reqId":"a0651249-9489-4ae9-8a4b-fdb7235f95b8","method":"GET","url":"/dashboard/payroll","status":200,"userId":1,"sessionId":null,"msg":"request_trace"}
-{"level":30,"time":1759259820958,"pid":47287,"hostname":"Viviannes-MacBook-Air.local","req":{"id":"4d1fda52-a611-4a5f-b42a-55a9596c62da","method":"GET","url":"/dashboard/payroll","query":{},"params":{},"headers":{"host":"127.0.0.1:4000","connection":"keep-alive","sec-ch-ua":"\"Chromium\";v=\"140\", \"Not=A?Brand\";v=\"24\", \"Google Chrome\";v=\"140\"","sec-ch-ua-mobile":"?0","sec-ch-ua-platform":"\"macOS\"","upgrade-insecure-requests":"1","user-agent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36","accept":"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7","sec-fetch-site":"same-origin","sec-fetch-mode":"navigate","sec-fetch-user":"?1","sec-fetch-dest":"document","referer":"http://127.0.0.1:4000/dashboard/overview","accept-encoding":"gzip, deflate, br, zstd","accept-language":"en-US,en;q=0.9","cookie":"attendance_dashboard_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsInJvbGUiOiJhZG1pbiIsInNjb3BlIjoiZnVsbCIsInR5cCI6ImFjY2VzcyIsImlhdCI6MTc1OTI0ODQ1MywiZXhwIjoxNzU5MjkxNjUzfQ.CLQmfqul5e4w7gcxK50jHezyDc44rhwDz4L07rgLWPE","if-none-match":"W/\"11b0a-JaNv2ZBP/ZOVoXSsBcBGOMxj1mQ\""},"remoteAddress":"::ffff:127.0.0.1","remotePort":56565},"reqId":"4d1fda52-a611-4a5f-b42a-55a9596c62da","userId":null,"sessionId":null,"reqId":"4d1fda52-a611-4a5f-b42a-55a9596c62da","userId":1,"sessionId":null,"res":{"statusCode":200,"headers":{"x-powered-by":"Express","access-control-allow-origin":"*","x-debug-req":"a0651249-9489-4ae9-8a4b-fdb7235f95b8","content-type":"text/html; charset=utf-8","content-length":"76641","etag":"W/\"12b61-ctQhEdlxrzy4QdIVcwc4xC1zlKw\""}},"responseTime":348,"msg":"request completed"}
-{"level":30,"time":1759259823487,"pid":47287,"hostname":"Viviannes-MacBook-Air.local","ts":"2025-09-30T19:17:03.487Z","reqId":"1fd909fc-2ab8-4e38-8127-69cc51865c89","method":"GET","url":"/api/payroll/payruns/2025-09-30","status":200,"userId":1,"sessionId":null,"msg":"request_trace"}
-{"level":30,"time":1759259823487,"pid":47287,"hostname":"Viviannes-MacBook-Air.local","req":{"id":"316b994f-3906-44e9-92a1-d388fac305a3","method":"GET","url":"/api/payroll/payruns/2025-09-30","query":{},"params":{},"headers":{"host":"127.0.0.1:4000","connection":"keep-alive","sec-ch-ua-platform":"\"macOS\"","user-agent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36","accept":"application/json","sec-ch-ua":"\"Chromium\";v=\"140\", \"Not=A?Brand\";v=\"24\", \"Google Chrome\";v=\"140\"","sec-ch-ua-mobile":"?0","sec-fetch-site":"same-origin","sec-fetch-mode":"cors","sec-fetch-dest":"empty","referer":"http://127.0.0.1:4000/dashboard/payroll","accept-encoding":"gzip, deflate, br, zstd","accept-language":"en-US,en;q=0.9","cookie":"attendance_dashboard_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsInJvbGUiOiJhZG1pbiIsInNjb3BlIjoiZnVsbCIsInR5cCI6ImFjY2VzcyIsImlhdCI6MTc1OTI0ODQ1MywiZXhwIjoxNzU5MjkxNjUzfQ.CLQmfqul5e4w7gcxK50jHezyDc44rhwDz4L07rgLWPE","if-none-match":"W/\"ae4-K3WFQycNeOOGVS6tXpI0FpRdn+o\""},"remoteAddress":"::ffff:127.0.0.1","remotePort":56565},"reqId":"316b994f-3906-44e9-92a1-d388fac305a3","userId":null,"sessionId":null,"reqId":"316b994f-3906-44e9-92a1-d388fac305a3","userId":1,"sessionId":null,"res":{"statusCode":200,"headers":{"x-powered-by":"Express","access-control-allow-origin":"*","x-debug-req":"1fd909fc-2ab8-4e38-8127-69cc51865c89","content-type":"application/json; charset=utf-8","content-length":"1827","etag":"W/\"723-AtXQjoUEdx1fS8t9XVQV+D2S7b4\""}},"responseTime":9,"msg":"request completed"}
+{"level":30,"time":1759260994337,"pid":50731,"hostname":"Viviannes-MacBook-Air.local","msg":"Skipping sqlite backups: DATABASE_URL is not a file: path"}
+{"level":30,"time":1759260994339,"pid":50731,"hostname":"Viviannes-MacBook-Air.local","msg":"Server listening on port 4000"}
+{"level":30,"time":1759260996525,"pid":50731,"hostname":"Viviannes-MacBook-Air.local","ts":"2025-09-30T19:36:36.525Z","reqId":"2706dc2b-30db-4f9a-b457-945396506fbf","method":"GET","url":"/dashboard/overview/today.json?date=2025-09-30","status":200,"userId":1,"sessionId":null,"msg":"request_trace"}
+{"level":30,"time":1759260996525,"pid":50731,"hostname":"Viviannes-MacBook-Air.local","req":{"id":"cad069c3-f30a-4b4d-aefc-d28b75b54cfc","method":"GET","url":"/dashboard/overview/today.json?date=2025-09-30","query":{"date":"2025-09-30"},"params":{},"headers":{"host":"127.0.0.1:4000","connection":"keep-alive","sec-ch-ua-platform":"\"macOS\"","user-agent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36","accept":"application/json","sec-ch-ua":"\"Chromium\";v=\"140\", \"Not=A?Brand\";v=\"24\", \"Google Chrome\";v=\"140\"","sec-ch-ua-mobile":"?0","sec-fetch-site":"same-origin","sec-fetch-mode":"cors","sec-fetch-dest":"empty","referer":"http://127.0.0.1:4000/dashboard/overview","accept-encoding":"gzip, deflate, br, zstd","accept-language":"en-US,en;q=0.9","cookie":"attendance_dashboard_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsInJvbGUiOiJhZG1pbiIsInNjb3BlIjoiZnVsbCIsInR5cCI6ImFjY2VzcyIsImlhdCI6MTc1OTI0ODQ1MywiZXhwIjoxNzU5MjkxNjUzfQ.CLQmfqul5e4w7gcxK50jHezyDc44rhwDz4L07rgLWPE","if-none-match":"W/\"2d86-V+N3/Atx9HbE9CqGvXRHuhFvo58\""},"remoteAddress":"::ffff:127.0.0.1","remotePort":56968},"reqId":"cad069c3-f30a-4b4d-aefc-d28b75b54cfc","userId":null,"sessionId":null,"reqId":"cad069c3-f30a-4b4d-aefc-d28b75b54cfc","userId":1,"sessionId":null,"res":{"statusCode":200,"heade[32m[nodemon] restarting child process[39m
+[32m[nodemon] starting `ts-node src/index.ts`[39m
+[32m[nodemon] restarting child process[39m
+[32m[nodemon] starting `ts-node src/index.ts`[39m
+{"level":30,"time":1759261135130,"pid":51438,"hostname":"Viviannes-MacBook-Air.local","msg":"Skipping sqlite backups: DATABASE_URL is not a file: path"}
+Error: listen EADDRINUSE: address already in use :::4000
+    at Server.setupListenHandle [as _listen2] (node:net:1940:16)
+    at listenInCluster (node:net:1997:12)
+    at Server.listen (node:net:2102:7)
+    at Function.listen (/Users/viv/attendance-system/attendance-system/server/node_modules/express/lib/application.js:635:24)
+    at start (/Users/viv/attendance-system/attendance-system/server/src/index.ts:18:22) {
+  code: 'EADDRINUSE',
+  errno: -48,
+  syscall: 'listen',
+  address: '::',
+  port: 4000
+}
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
 [32m[nodemon] restarting due to changes...[39m
 [32m[nodemon] starting `ts-node src/index.ts`[39m
-{"level":30,"time":1759259832216,"pid":47613,"hostname":"Viviannes-MacBook-Air.local","msg":"Skipping sqlite backups: DATABASE_URL is not a file: path"}
-{"level":30,"time":1759259832218,"pid":47613,"hostname":"Viviannes-MacBook-Air.local","msg":"Server listening on port 4000"}
+{"level":30,"time":1759263300216,"pid":55057,"hostname":"Viviannes-MacBook-Air.local","msg":"Skipping sqlite backups: DATABASE_URL is not a file: path"}
+{"level":30,"time":1759263300219,"pid":55057,"hostname":"Viviannes-MacBook-Air.local","msg":"Server listening on port 4000"}
+{"level":30,"time":1759263371544,"pid":55057,"hostname":"Viviannes-MacBook-Air.local","scope":"payroll-demo-seed","monthKey":"2025-09","requestedPayDate":"2025-09-30T07:00:00.000Z","chosenPayDate":"2025-09-30T07:00:00.000Z","msg":"Ensuring payroll demo data"}
+{"level":30,"time":1759263371573,"pid":55057,"hostname":"Viviannes-MacBook-Air.local","scope":"payroll-demo-seed","monthKey":"2025-08","requestedPayDate":"2025-09-15T07:00:00.000Z","chosenPayDate":"2025-09-15T07:00:00.000Z","msg":"Ensuring payroll demo data"}
+{"level":30,"time":1759263371580,"pid":55057,"hostname":"Viviannes-MacBook-Air.local","ts":"2025-09-30T20:16:11.580Z","reqId":"aa2de9fe-848a-420b-9e3a-ce94c03f006a","method":"GET","url":"/dashboard/payroll/period/2025-09-30","status":304,"userId":1,"sessionId":null,"msg":"request_trace"}
+{"level":30,"time":1759263371580,"pid":55057,"hostname":"Viviannes-MacBook-Air.local","req":{"id":"3130343a-3b45-47c5-a530-7baf016072d3","method":"GET","url":"/dashboard/payroll/period/2025-09-30","query":{},"params":{},"headers":{"host":"127.0.0.1:4000","connection":"keep-alive","sec-ch-ua":"\"Chromium\";v=\"140\", \"Not=A?Brand\";v=\"24\", \"Google Chrome\";v=\"140\"","sec-ch-ua-mobile":"?0","sec-ch-ua-platform":"\"macOS\"","upgrade-insecure-requests":"1","user-agent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36","accept":"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7","sec-fetch-site":"none","sec-fetch-mode":"navigate","sec-fetch-user":"?1","sec-fetch-dest":"document","accept-encoding":"gzip, deflate, br, zstd","accept-language":"en-US,en;q=0.9","cookie":"attendance_dashboard_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsInJvbGUiOiJhZG1pbiIsInNjb3BlIjoiZnVsbCIsInR5cCI6ImFjY2VzcyIsImlhdCI6MTc1OTI0ODQ1MywiZXhwIjoxNzU5MjkxNjUzfQ.CLQmfqul5e4w7gcxK50jHezyDc44rhwDz4L07rgLWPE","if-none-match":"W/\"b148-+pFNJ1TvYPG/2/STf1kRtQkfcL0\""},"remoteAddress":"::ffff:127.0.0.1","remotePort":57820},"reqId":"3130343a-3b45-47c5-a530-7baf016072d3","userId":null,"sessionId":null,"reqId":"3130343a-3b45-47c5-a530-7baf016072d3","userId":1,"sessionId":null,"res":{"statusCode":304,"headers":{"x-powered-by":"Express","access-control-allow-origin":"*","x-debug-req":"aa2de9fe-848a-420b-9e3a-ce94c03f006a","etag":"W/\"b148-+pFNJ1TvYPG/2/STf1kRtQkfcL0\""}},"responseTime":396,"msg":"request completed"}
+{"level":30,"time":1759263374298,"pid":55057,"hostname":"Viviannes-MacBook-Air.local","scope":"payroll-demo-seed","monthKey":"2025-09","requestedPayDate":"2025-09-30T07:00:00.000Z","chosenPayDate":"2025-09-30T07:00:00.000Z","msg":"Ensuring payroll demo data"}
+{"level":30,"time":1759263374310,"pid":55057,"hostname":"Viviannes-MacBook-Air.local","ts":"2025-09-30T20:16:14.310Z","reqId":"7a7f0a54-0075-471c-85db-6e881dba0470","method":"GET","url":"/dashboard/payroll","status":200,"userId":1,"sessionId":null,"msg":"request_trace"}
+{"level":30,"time":1759263374310,"pid":55057,"hostname":"Viviannes-MacBook-Air.local","req":{"id":"e242394f-6b24-49ae-b66d-3e6da2fd369d","method":"GET","url":"/dashboard/payroll","query":{},"params":{},"headers":{"host":"127.0.0.1:4000","connection":"keep-alive","sec-ch-ua":"\"Chromium\";v=\"140\", \"Not=A?Brand\";v=\"24\", \"Google Chrome\";v=\"140\"","sec-ch-ua-mobile":"?0","sec-ch-ua-platform":"\"macOS\"","upgrade-insecure-requests":"1","user-agent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36","accept":"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7","sec-fetch-site":"same-origin","sec-fetch-mode":"navigate","sec-fetch-user":"?1","sec-fetch-dest":"document","referer":"http://127.0.0.1:4000/dashboard/payroll/period/2025-09-30","accept-encoding":"gzip, deflate, br, zstd","accept-language":"en-US,en;q=0.9","cookie":"attendance_dashboard_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsInJvbGUiOiJhZG1pbiIsInNjb3BlIjoiZnVsbCIsInR5cCI6ImFjY2VzcyIsImlhdCI6MTc1OTI0ODQ1MywiZXhwIjoxNzU5MjkxNjUzfQ.CLQmfqul5e4w7gcxK50jHezyDc44rhwDz4L07rgLWPE","if-none-match":"W/\"124f0-FpbUg1+wsKJKNsf/j3XkzAXCJ4M\""},"remoteAddress":"::ffff:127.0.0.1","remotePort":57820},"reqId":"e242394f-6b24-49ae-b66d-3e6da2fd369d","userId":null,"sessionId":null,"reqId":"e242394f-6b24-49ae-b66d-3e6da2fd369d","userId":1,"sessionId":null,"res":{"statusCode":200,"headers":{"x-powered-by":"Express","access-control-allow-origin":"*","x-debug-req":"7a7f0a54-0075-471c-85db-6e881dba0470","content-type":"text/html; charset=utf-8","content-length":"74994","etag":"W/\"124f2-76FOwA5CujdRjWlcXDPg/aygtdo\""}},"responseTime":35,"msg":"request completed"}
+{"level":30,"time":1759263377191,"pid":55057,"hostname":"Viviannes-MacBook-Air.local","scope":"payroll-demo-seed","monthKey":"2025-09","requestedPayDate":"2025-09-30T07:00:00.000Z","chosenPayDate":"2025-09-30T07:00:00.000Z","msg":"Ensuring payroll demo data"}
+{"level":30,"time":1759263377218,"pid":55057,"hostname":"Viviannes-MacBook-Air.local","ts":"2025-09-30T20:16:17.218Z","reqId":"19635db3-3264-43a2-b709-6fbf42c78023","method":"GET","url":"/dashboard/payroll/summary/2025-09-30","status":200,"userId":1,"sessionId":null,"msg":"request_trace"}
+{"level":30,"time":1759263377218,"pid":55057,"hostname":"Viviannes-MacBook-Air.local","req":{"id":"41d0bdac-a5f4-4622-9a3a-0d0dd926ba56","method":"GET","url":"/dashboard/payroll/summary/2025-09-30","query":{},"params":{},"headers":{"host":"127.0.0.1:4000","connection":"keep-alive","sec-ch-ua":"\"Chromium\";v=\"140\", \"Not=A?Brand\";v=\"24\", \"Google Chrome\";v=\"140\"","sec-ch-ua-mobile":"?0","sec-ch-ua-platform":"\"macOS\"","upgrade-insecure-requests":"1","user-agent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36","accept":"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7","sec-fetch-site":"same-origin","sec-fetch-mode":"navigate","sec-fetch-user":"?1","sec-fetch-dest":"document","referer":"http://127.0.0.1:4000/dashboard/payroll","accept-encoding":"gzip, deflate, br, zstd","accept-language":"en-US,en;q=0.9","cookie":"attendance_dashboard_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsInJvbGUiOiJhZG1pbiIsInNjb3BlIjoiZnVsbCIsInR5cCI6ImFjY2VzcyIsImlhdCI6MTc1OTI0ODQ1MywiZXhwIjoxNzU5MjkxNjUzfQ.CLQmfqul5e4w7gcxK50jHezyDc44rhwDz4L07rgLWPE"},"remoteAddress":"::ffff:127.0.0.1","remotePort":57820},"reqId":"41d0bdac-a5f4-4622-9a3a-0d0dd926ba56","userId":null,"sessionId":null,"reqId":"41d0bdac-a5f4-4622-9a3a-0d0dd926ba56","userId":1,"sessionId":null,"res":{"statusCode":200,"headers":{"x-powered-by":"Express","access-control-allow-origin":"*","x-debug-req":"19635db3-3264-43a2-b709-6fbf42c78023","content-type":"text/html; charset=utf-8","content-length":"37332","etag":"W/\"91d4-n9cx3FwJpJCQjkrlGSiElVXJrfU\""}},"responseTime":75,"msg":"request completed"}
+{"level":30,"time":1759263385566,"pid":55057,"hostname":"Viviannes-MacBook-Air.local","scope":"payroll-demo-seed","monthKey":"2025-09","requestedPayDate":"2025-09-30T07:00:00.000Z","chosenPayDate":"2025-09-30T07:00:00.000Z","msg":"Ensuring payroll demo data"}
+{"level":30,"time":1759263385593,"pid":55057,"hostname":"Viviannes-MacBook-Air.local","scope":"payroll-demo-seed","monthKey":"2025-08","requestedPayDate":"2025-09-15T07:00:00.000Z","chosenPayDate":"2025-09-15T07:00:00.000Z","msg":"Ensuring payroll demo data"}
+{"level":30,"time":1759263385596,"pid":55057,"hostname":"Viviannes-MacBook-Air.local","ts":"2025-09-30T20:16:25.596Z","reqId":"042f8884-f50a-4360-ae65-53ce953242f1","method":"GET","url":"/dashboard/payroll/period/2025-09-30?employeeId=2","status":200,"userId":1,"sessionId":null,"msg":"request_trace"}
+{"level":30,"time":1759263385596,"pid":55057,"hostname":"Viviannes-MacBook-Air.local","req":{"id":"d5168234-4f7d-4fb3-8988-c2782d0f1f1c","method":"GET","url":"/dashboard/payroll/period/2025-09-30?employeeId=2","query":{"employeeId":"2"},"params":{},"headers":{"host":"127.0.0.1:4000","connection":"keep-alive","sec-ch-ua":"\"Chromium\";v=\"140\", \"Not=A?Brand\";v=\"24\", \"Google Chrome\";v=\"140\"","sec-ch-ua-mobile":"?0","sec-ch-ua-platform":"\"macOS\"","upgrade-insecure-requests":"1","user-agent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36","accept":"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7","sec-fetch-site":"same-origin","sec-fetch-mode":"navigate","sec-fetch-user":"?1","sec-fetch-dest":"document","referer":"http://127.0.0.1:4000/dashboard/payroll/summary/2025-09-30","accept-encoding":"gzip, deflate, br, zstd","accept-language":"en-US,en;q=0.9","cookie":"attendance_dashboard_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsInJvbGUiOiJhZG1pbiIsInNjb3BlIjoiZnVsbCIsInR5cCI6ImFjY2VzcyIsImlhdCI6MTc1OTI0ODQ1MywiZXhwIjoxNzU5MjkxNjUzfQ.CLQmfqul5e4w7gcxK50jHezyDc44rhwDz4L07rgLWPE"},"remoteAddress":"::ffff:127.0.0.1","remotePort":57821},"reqId":"d5168234-4f7d-4fb3-8988-c2782d0f1f1c","userId":null,"sessionId":null,"reqId":"d5168234-4f7d-4fb3-8988-c2782d0f1f1c","userId":1,"sessionId":null,"res":{"statusCode":200,"headers":{"x-powered-by":"Express","access-control-allow-origin":"*","x-debug-req":"042f8884-f50a-4360-ae65-53ce953242f1","content-type":"text/html; charset=utf-8","content-length":"45384","etag":"W/\"b148-+pFNJ1TvYPG/2/STf1kRtQkfcL0\""}},"responseTime":82,"msg":"request completed"}
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `ts-node src/index.ts`[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `ts-node src/index.ts`[39m
+{"level":30,"time":1759263409388,"pid":56392,"hostname":"Viviannes-MacBook-Air.local","msg":"Skipping sqlite backups: DATABASE_URL is not a file: path"}
+{"level":30,"time":1759263409391,"pid":56392,"hostname":"Viviannes-MacBook-Air.local","msg":"Server listening on port 4000"}
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `ts-node src/index.ts`[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `ts-node src/index.ts`[39m
+{"level":30,"time":1759263454544,"pid":56973,"hostname":"Viviannes-MacBook-Air.local","msg":"Skipping sqlite backups: DATABASE_URL is not a file: path"}
+Error: listen EADDRINUSE: address already in use :::4000
+    at Server.setupListenHandle [as _listen2] (node:net:1940:16)
+    at listenInCluster (node:net:1997:12)
+    at Server.listen (node:net:2102:7)
+    at Function.listen (/Users/viv/attendance-system/attendance-system/server/node_modules/express/lib/application.js:635:24)
+    at start (/Users/viv/attendance-system/attendance-system/server/src/index.ts:18:22) {
+  code: 'EADDRINUSE',
+  errno: -48,
+  syscall: 'listen',
+  address: '::',
+  port: 4000
+}
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `ts-node src/index.ts`[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `ts-node src/index.ts`[39m
+/Users/viv/attendance-system/attendance-system/server/node_modules/ts-node/src/index.ts:859
+    return new TSError(diagnosticText, diagnosticCodes, diagnostics);
+           ^
+TSError: ⨯ Unable to compile TypeScript:
+src/routes/dashboard.ts(7011,48): error TS2304: Cannot find name 'span'.
+src/routes/dashboard.ts(7011,53): error TS2581: Cannot find name '$'. Do you need to install type definitions for jQuery? Try `npm i --save-dev @types/jquery`.
+src/routes/dashboard.ts(7011,55): error TS7031: Binding element 'escapeHtmlClient' implicitly has an 'any' type.
+src/routes/dashboard.ts(7011,72): error TS2304: Cannot find name 'card'.
+src/routes/dashboard.ts(7014,20): error TS2304: Cannot find name 'join'.
+src/routes/dashboard.ts(7016,17): error TS2304: Cannot find name 'teamTotalsEl'.
+src/routes/dashboard.ts(7020,18): error TS2304: Cannot find name 'employees'.
+src/routes/dashboard.ts(7021,19): error TS2304: Cannot find name 'employeesEl'.
+src/routes/dashboard.ts(7022,17): error TS2304: Cannot find name 'employeesEl'.
+src/routes/dashboard.ts(7024,19): error TS2304: Cannot find name 'contentEl'.
+src/routes/dashboard.ts(7025,17): error TS2304: Cannot find name 'contentEl'.
+src/routes/dashboard.ts(7027,19): error TS2304: Cannot find name 'emptyEl'.
+src/routes/dashboard.ts(7028,17): error TS2304: Cannot find name 'emptyEl'.
+src/routes/dashboard.ts(7030,15): error TS2304: Cannot find name 'hideLoading'.
+src/routes/dashboard.ts(7034,17): error TS2304: Cannot find name 'employeesEl'.
+src/routes/dashboard.ts(7035,15): error TS2304: Cannot find name 'employeesEl'.
+src/routes/dashboard.ts(7035,39): error TS2304: Cannot find name 'employees'.
+src/routes/dashboard.ts(7036,23): error TS7006: Parameter 'employee' implicitly has an 'any' type.
+src/routes/dashboard.ts(7037,32): error TS2304: Cannot find name 'escapeHtmlClient'.
+src/routes/dashboard.ts(7038,79): error TS2304: Cannot find name 'escapeHtmlClient'.
+src/routes/dashboard.ts(7039,32): error TS2304: Cannot find name 'escapeHtmlClient'.
+src/routes/dashboard.ts(7042,27): error TS7006: Parameter 'metric' implicitly has an 'any' type.
+src/routes/dashboard.ts(7043,37): error TS2304: Cannot find name 'escapeHtmlClient'.
+src/routes/dashboard.ts(7044,37): error TS2304: Cannot find name 'escapeHtmlClient'.
+src/routes/dashboard.ts(7045,71): error TS2304: Cannot find name 'escapeHtmlClient'.
+src/routes/dashboard.ts(7049,40): error TS2304: Cannot find name 'escapeHtmlClient'.
+src/routes/dashboard.ts(7051,44): error TS2304: Cannot find name 'escapeHtmlClient'.
+src/routes/dashboard.ts(7072,17): error TS2304: Cannot find name 'contentEl'.
+src/routes/dashboard.ts(7073,15): error TS2304: Cannot find name 'contentEl'.
+src/routes/dashboard.ts(7076,13): error TS2304: Cannot find name 'hideLoading'.
+src/routes/dashboard.ts(7080,6): error TS2349: This expression is not callable.
+  Type 'RegExp' has no call signatures.
+src/routes/dashboard.ts(7122,26): error TS2581: Cannot find name '$'. Do you need to install type definitions for jQuery? Try `npm i --save-dev @types/jquery`.
+src/routes/dashboard.ts(7122,43): error TS2304: Cannot find name 'entry'.
+src/routes/dashboard.ts(7122,60): error TS2581: Cannot find name '$'. Do you need to install type definitions for jQuery? Try `npm i --save-dev @types/jquery`.
+src/routes/dashboard.ts(7122,62): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type 'Record<"approved" | "draft" | "paid", string>'.
+  No index signature with a parameter of type 'string' was found on type 'Record<"approved" | "draft" | "paid", string>'.
+src/routes/dashboard.ts(7122,91): error TS2365: Operator '<' cannot be applied to types 'string' and 'boolean'.
+src/routes/dashboard.ts(7132,9): error TS2304: Cannot find name 'doctype'.
+src/routes/dashboard.ts(7132,17): error TS2448: Block-scoped variable 'html' used before its declaration.
+src/routes/dashboard.ts(7133,8): error TS2749: 'html' refers to a value, but is being used as a type here. Did you mean 'typeof html'?
+src/routes/dashboard.ts(7133,13): error TS2304: Cannot find name 'lang'.
+src/routes/dashboard.ts(7134,10): error TS2304: Cannot find name 'head'.
+src/routes/dashboard.ts(7135,12): error TS2304: Cannot find name 'meta'.
+src/routes/dashboard.ts(7135,17): error TS2304: Cannot find name 'charset'.
+src/routes/dashboard.ts(7135,25): error TS2362: The left-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.
+src/routes/dashboard.ts(7136,12): error TS2304: Cannot find name 'title'.
+src/routes/dashboard.ts(7136,18): error TS2304: Cannot find name 'Payroll'.
+src/routes/dashboard.ts(7136,26): error TS2304: Cannot find name 'Period'.
+src/routes/dashboard.ts(7136,35): error TS2581: Cannot find name '$'. Do you need to install type definitions for jQuery? Try `npm i --save-dev @types/jquery`.
+src/routes/dashboard.ts(7136,48): error TS2448: Block-scoped variable 'payDateLabel' used before its declaration.
+src/routes/dashboard.ts(7137,12): error TS2304: Cannot find name 'style'.
+src/routes/dashboard.ts(7137,18): error TS2581: Cannot find name '$'. Do you need to install type definitions for jQuery? Try `npm i --save-dev @types/jquery`.
+src/routes/dashboard.ts(7139,10): error TS2304: Cannot find name 'body'.
+src/routes/dashboard.ts(7140,11): error TS2581: Cannot find name '$'. Do you need to install type definitions for jQuery? Try `npm i --save-dev @types/jquery`.
+src/routes/dashboard.ts(7141,12): error TS2304: Cannot find name 'main'.
+src/routes/dashboard.ts(7142,14): error TS2304: Cannot find name 'header'.
+src/routes/dashboard.ts(7143,16): error TS2304: Cannot find name 'div'.
+src/routes/dashboard.ts(7144,18): error TS2304: Cannot find name 'a'.
+src/routes/dashboard.ts(7144,64): error TS2304: Cannot find name 'href'.
+src/routes/dashboard.ts(7144,90): error TS2304: Cannot find name 'Back'.
+src/routes/dashboard.ts(7144,95): error TS2304: Cannot find name 'to'.
+src/routes/dashboard.ts(7144,98): error TS2304: Cannot find name 'Payroll'.
+src/routes/dashboard.ts(7145,18): error TS2304: Cannot find name 'div'.
+src/routes/dashboard.ts(7146,18): error TS2304: Cannot find name 'div'.
+src/routes/dashboard.ts(7147,20): error TS2304: Cannot find name 'h1'.
+src/routes/dashboard.ts(7147,23): error TS2581: Cannot find name '$'. Do you need to install type definitions for jQuery? Try `npm i --save-dev @types/jquery`.
+src/routes/dashboard.ts(7147,36): error TS2448: Block-scoped variable 'payDateLabel' used before its declaration.
+src/routes/dashboard.ts(7148,20): error TS2304: Cannot find name 'p'.
+src/routes/dashboard.ts(7148,22): error TS2304: Cannot find name 'No'.
+src/routes/dashboard.ts(7148,25): error TS2304: Cannot find name 'payroll'.
+src/routes/dashboard.ts(7148,33): error TS2304: Cannot find name 'run'.
+src/routes/dashboard.ts(7148,37): error TS2304: Cannot find name 'is'.
+src/routes/dashboard.ts(7148,40): error TS2304: Cannot find name 'available'.
+src/routes/dashboard.ts(7148,59): error TS2304: Cannot find name 'pay'.
+src/routes/dashboard.ts(7148,63): error TS2304: Cannot find name 'date'.
+src/routes/dashboard.ts(7148,68): error TS2304: Cannot find name 'yet'.
+src/routes/dashboard.ts(7148,68): error TS2365: Operator '<' cannot be applied to types 'boolean' and 'RegExp'.
+src/routes/dashboard.ts(7148,68): error TS2365: Operator '<' cannot be applied to types 'boolean' and 'RegExp'.
+src/routes/dashboard.ts(7151,16): error TS2304: Cannot find name 'div'.
+src/routes/dashboard.ts(7152,18): error TS2304: Cannot find name 'span'.
+src/routes/dashboard.ts(7152,23): error TS2581: Cannot find name '$'. Do you need to install type definitions for jQuery? Try `npm i --save-dev @types/jquery`.
+src/routes/dashboard.ts(7152,51): error TS2304: Cannot find name 'periodStart'.
+src/routes/dashboard.ts(7152,68): error TS2581: Cannot find name '$'. Do you need to install type definitions for jQuery? Try `npm i --save-dev @types/jquery`.
+src/routes/dashboard.ts(7152,96): error TS2304: Cannot find name 'periodEnd'.
+src/routes/dashboard.ts(7152,108): error TS2365: Operator '<' cannot be applied to types 'boolean' and 'RegExp'.
+src/routes/dashboard.ts(7155,14): error TS2304: Cannot find name 'div'.
+src/routes/dashboard.ts(7156,16): error TS2304: Cannot find name 'div'.
+src/routes/dashboard.ts(7157,18): error TS2304: Cannot find name 'div'.
+src/routes/dashboard.ts(7157,36): error TS2304: Cannot find name 'No'.
+src/routes/dashboard.ts(7157,39): error TS2304: Cannot find name 'payroll'.
+src/routes/dashboard.ts(7157,47): error TS2304: Cannot find name 'period'.
+src/routes/dashboard.ts(7157,54): error TS2304: Cannot find name 'was'.
+src/routes/dashboard.ts(7157,58): error TS2304: Cannot find name 'found'.
+src/routes/dashboard.ts(7157,68): error TS2581: Cannot find name '$'. Do you need to install type definitions for jQuery? Try `npm i --save-dev @types/jquery`.
+src/routes/dashboard.ts(7157,69): error TS2365: Operator '<' cannot be applied to types 'boolean' and 'RegExp'.
+src/routes/dashboard.ts(7157,69): error TS2365: Operator '<' cannot be applied to types 'boolean' and 'RegExp'.
+src/routes/dashboard.ts(7157,69): error TS2365: Operator '<' cannot be applied to types 'boolean' and 'RegExp'.
+src/routes/dashboard.ts(7157,69): error TS2365: Operator '<' cannot be applied to types 'boolean' and 'RegExp'.
+src/routes/dashboard.ts(7157,81): error TS7006: Parameter 'payDateLabel' implicitly has an 'any' type.
+src/routes/dashboard.ts(7162,8): error TS2349: This expression is not callable.
+  Type 'RegExp' has no call signatures.
+src/routes/dashboard.ts(7175,39): error TS2304: Cannot find name 'User'.
+src/routes/dashboard.ts(7175,44): error TS2581: Cannot find name '$'. Do you need to install type definitions for jQuery? Try `npm i --save-dev @types/jquery`.
+src/routes/dashboard.ts(7175,46): error TS2304: Cannot find name 'a'.
+src/routes/dashboard.ts(7175,89): error TS2304: Cannot find name 'User'.
+src/routes/dashboard.ts(7175,94): error TS2581: Cannot find name '$'. Do you need to install type definitions for jQuery? Try `npm i --save-dev @types/jquery`.
+src/routes/dashboard.ts(7175,96): error TS2304: Cannot find name 'b'.
+src/routes/dashboard.ts(7247,99): error TS2304: Cannot find name 'User'.
+src/routes/dashboard.ts(7247,104): error TS2581: Cannot find name '$'. Do you need to install type definitions for jQuery? Try `npm i --save-dev @types/jquery`.
+src/routes/dashboard.ts(7247,106): error TS2304: Cannot find name 'selectedEmployeeId'.
+src/routes/dashboard.ts(7250,8): error TS2581: Cannot find name '$'. Do you need to install type definitions for jQuery? Try `npm i --save-dev @types/jquery`.
+src/routes/dashboard.ts(7250,10): error TS2304: Cannot find name 'employeeRecord'.
+src/routes/dashboard.ts(7250,54): error TS2581: Cannot find name '$'. Do you need to install type definitions for jQuery? Try `npm i --save-dev @types/jquery`.
+src/routes/dashboard.ts(7250,56): error TS2304: Cannot find name 'employeeRecord'.
+src/routes/dashboard.ts(7261,24): error TS2304: Cannot find name 'span'.
+src/routes/dashboard.ts(7261,74): error TS2581: Cannot find name '$'. Do you need to install type definitions for jQuery? Try `npm i --save-dev @types/jquery`.
+src/routes/dashboard.ts(7261,87): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type 'Record<"approved" | "draft" | "paid", string>'.
+src/routes/dashboard.ts(7261,107): error TS2304: Cannot find name 'statusValue'.
+src/routes/dashboard.ts(7263,39): error TS2304: Cannot find name 'normalizedPayDate'.
+src/routes/dashboard.ts(7264,46): error TS2304: Cannot find name 'periodStart'.
+src/routes/dashboard.ts(7264,79): error TS2304: Cannot find name 'periodEnd'.
+src/routes/dashboard.ts(7265,25): error TS2304: Cannot find name 'period'.
+src/routes/dashboard.ts(7265,83): error TS2304: Cannot find name 'period'.
+src/routes/dashboard.ts(7270,14): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7270,51): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7271,13): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7275,14): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7275,54): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7276,13): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7280,14): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7280,54): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7281,13): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7285,17): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7286,13): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7286,37): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7286,64): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7290,28): error TS2304: Cannot find name 'onTimePercentage'.
+src/routes/dashboard.ts(7291,13): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7292,14): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7292,38): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7292,75): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7297,14): error TS2304: Cannot find name 'currentBehavior'.
+src/routes/dashboard.ts(7297,75): error TS2304: Cannot find name 'currentBehavior'.
+src/routes/dashboard.ts(7298,13): error TS2304: Cannot find name 'currentBehavior'.
+src/routes/dashboard.ts(7299,14): error TS2304: Cannot find name 'currentBehavior'.
+src/routes/dashboard.ts(7299,49): error TS2304: Cannot find name 'currentBehavior'.
+src/routes/dashboard.ts(7299,99): error TS2304: Cannot find name 'currentBehavior'.
+src/routes/dashboard.ts(7301,20): error TS2304: Cannot find name 'currentBehavior'.
+src/routes/dashboard.ts(7305,14): error TS2304: Cannot find name 'currentBehavior'.
+src/routes/dashboard.ts(7305,75): error TS2304: Cannot find name 'currentBehavior'.
+src/routes/dashboard.ts(7306,13): error TS2304: Cannot find name 'currentBehavior'.
+src/routes/dashboard.ts(7307,14): error TS2304: Cannot find name 'currentBehavior'.
+src/routes/dashboard.ts(7307,49): error TS2304: Cannot find name 'currentBehavior'.
+src/routes/dashboard.ts(7307,98): error TS2304: Cannot find name 'currentBehavior'.
+src/routes/dashboard.ts(7309,20): error TS2304: Cannot find name 'currentBehavior'.
+src/routes/dashboard.ts(7313,14): error TS2304: Cannot find name 'currentBehavior'.
+src/routes/dashboard.ts(7313,74): error TS2304: Cannot find name 'currentBehavior'.
+src/routes/dashboard.ts(7315,9): error TS2304: Cannot find name 'currentBehavior'.
+src/routes/dashboard.ts(7316,16): error TS2304: Cannot find name 'currentBehavior'.
+src/routes/dashboard.ts(7316,58): error TS2304: Cannot find name 'currentBehavior'.
+src/routes/dashboard.ts(7316,89): error TS2304: Cannot find name 'currentBehavior'.
+src/routes/dashboard.ts(7318,20): error TS2304: Cannot find name 'currentBehavior'.
+src/routes/dashboard.ts(7340,53): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7341,31): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7341,68): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7342,35): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7342,75): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7343,35): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7343,75): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7348,20): error TS2304: Cannot find name 'payLine'.
+src/routes/dashboard.ts(7355,13): error TS2304: Cannot find name 'payComponents'.
+src/routes/dashboard.ts(7357,16): error TS7006: Parameter 'component' implicitly has an 'any' type.
+src/routes/dashboard.ts(7367,42): error TS2304: Cannot find name 'payComponentTotal'.
+src/routes/dashboard.ts(7374,30): error TS2304: Cannot find name 'payLine'.
+src/routes/dashboard.ts(7375,7): error TS2304: Cannot find name 'reconciliationDelta'.
+src/routes/dashboard.ts(7377,83): error TS2304: Cannot find name 'reconciliationDelta'.
+src/routes/dashboard.ts(7380,26): error TS2304: Cannot find name 'attendanceSummary'.
+src/routes/dashboard.ts(7383,15): error TS7006: Parameter 'request' implicitly has an 'any' type.
+src/routes/dashboard.ts(7418,24): error TS2304: Cannot find name 'detailList'.
+src/routes/dashboard.ts(7419,7): error TS2304: Cannot find name 'detailList'.
+src/routes/dashboard.ts(7420,15): error TS7006: Parameter 'detail' implicitly has an 'any' type.
+src/routes/dashboard.ts(7432,33): error TS7006: Parameter 'note' implicitly has an 'any' type.
+src/routes/dashboard.ts(7454,27): error TS2304: Cannot find name 'attendanceSummary'.
+src/routes/dashboard.ts(7483,7): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7486,18): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7486,45): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7486,86): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7489,7): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7492,18): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7492,43): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7495,7): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7498,34): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7501,26): error TS2304: Cannot find name 'detailList'.
+src/routes/dashboard.ts(7502,6): error TS7006: Parameter 'detail' implicitly has an 'any' type.
+src/routes/dashboard.ts(7510,23): error TS2304: Cannot find name 'detailList'.
+src/routes/dashboard.ts(7510,42): error TS7006: Parameter 'detail' implicitly has an 'any' type.
+src/routes/dashboard.ts(7512,48): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+src/routes/dashboard.ts(7512,53): error TS7006: Parameter 'detail' implicitly has an 'any' type.
+src/routes/dashboard.ts(7518,22): error TS2304: Cannot find name 'detailList'.
+src/routes/dashboard.ts(7518,41): error TS7006: Parameter 'detail' implicitly has an 'any' type.
+src/routes/dashboard.ts(7520,47): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+src/routes/dashboard.ts(7520,52): error TS7006: Parameter 'detail' implicitly has an 'any' type.
+src/routes/dashboard.ts(7526,22): error TS2304: Cannot find name 'detailList'.
+src/routes/dashboard.ts(7526,41): error TS7006: Parameter 'detail' implicitly has an 'any' type.
+src/routes/dashboard.ts(7528,42): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+src/routes/dashboard.ts(7528,47): error TS7006: Parameter 'detail' implicitly has an 'any' type.
+src/routes/dashboard.ts(7557,32): error TS2304: Cannot find name 'previousSummary'.
+src/routes/dashboard.ts(7557,50): error TS2304: Cannot find name 'previousSummary'.
+src/routes/dashboard.ts(7561,27): error TS2304: Cannot find name 'onTimePercentage'.
+src/routes/dashboard.ts(7562,27): error TS2304: Cannot find name 'previousOnTimePercentage'.
+src/routes/dashboard.ts(7563,25): error TS2304: Cannot find name 'onTimePercentage'.
+src/routes/dashboard.ts(7563,43): error TS2304: Cannot find name 'previousOnTimePercentage'.
+src/routes/dashboard.ts(7567,45): error TS2304: Cannot find name 'currentBehavior'.
+src/routes/dashboard.ts(7568,45): error TS2304: Cannot find name 'previousBehavior'.
+src/routes/dashboard.ts(7569,25): error TS2304: Cannot find name 'currentBehavior'.
+src/routes/dashboard.ts(7569,55): error TS2304: Cannot find name 'previousBehavior'.
+src/routes/dashboard.ts(7573,45): error TS2304: Cannot find name 'currentBehavior'.
+src/routes/dashboard.ts(7574,45): error TS2304: Cannot find name 'previousBehavior'.
+src/routes/dashboard.ts(7575,25): error TS2304: Cannot find name 'currentBehavior'.
+src/routes/dashboard.ts(7575,55): error TS2304: Cannot find name 'previousBehavior'.
+src/routes/dashboard.ts(7579,45): error TS2304: Cannot find name 'currentBehavior'.
+src/routes/dashboard.ts(7580,45): error TS2304: Cannot find name 'previousBehavior'.
+src/routes/dashboard.ts(7581,25): error TS2304: Cannot find name 'currentBehavior'.
+src/routes/dashboard.ts(7581,54): error TS2304: Cannot find name 'previousBehavior'.
+src/routes/dashboard.ts(7585,13): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7587,25): error TS2304: Cannot find name 'totals'.
+src/routes/dashboard.ts(7591,27): error TS2304: Cannot find name 'sortedLines'.
+src/routes/dashboard.ts(7593,9): error TS2304: Cannot find name 'sortedLines'.
+src/routes/dashboard.ts(7593,26): error TS7006: Parameter 'line' implicitly has an 'any' type.
+src/routes/dashboard.ts(7594,9): error TS2304: Cannot find name 'selectedEmployeeId'.
+src/routes/dashboard.ts(7594,37): error TS2304: Cannot find name 'selectedEmployeeId'.
+src/routes/dashboard.ts(7612,55): error TS2304: Cannot find name 'employeeInitials'.
+src/routes/dashboard.ts(7614,34): error TS2304: Cannot find name 'employeeName'.
+src/routes/dashboard.ts(7615,33): error TS2304: Cannot find name 'employeeRoleLabel'.
+src/routes/dashboard.ts(7615,54): error TS2304: Cannot find name 'employeeEmail'.
+src/routes/dashboard.ts(7615,87): error TS2304: Cannot find name 'employeeEmail'.
+src/routes/dashboard.ts(7619,17): error TS2304: Cannot find name 'statusChip'.
+src/routes/dashboard.ts(7704,23): error TS2304: Cannot find name 'periodOptions'.
+src/routes/dashboard.ts(7716,78): error TS2304: Cannot find name 'normalizedPayDate'.
+src/routes/dashboard.ts(7762,3): error TS2304: Cannot find name 'res'.
+src/routes/dashboard.ts(7011,54): error TS1005: ',' expected.
+src/routes/dashboard.ts(7011,71): error TS1005: ',' expected.
+src/routes/dashboard.ts(7011,83): error TS1005: ',' expected.
+src/routes/dashboard.ts(7011,84): error TS1110: Type expected.
+src/routes/dashboard.ts(7011,85): error TS1161: Unterminated regular expression literal.
+src/routes/dashboard.ts(7012,21): error TS1005: ',' expected.
+src/routes/dashboard.ts(7013,19): error TS1128: Declaration or statement expected.
+src/routes/dashboard.ts(7013,20): error TS1128: Declaration or statement expected.
+src/routes/dashboard.ts(7014,19): error TS1128: Declaration or statement expected.
+src/routes/dashboard.ts(7015,15): error TS1128: Declaration or statement expected.
+src/routes/dashboard.ts(7015,17): error TS1128: Declaration or statement expected.
+src/routes/dashboard.ts(7018,13): error TS1128: Declaration or statement expected.
+src/routes/dashboard.ts(7077,11): error TS1128: Declaration or statement expected.
+src/routes/dashboard.ts(7077,12): error TS1128: Declaration or statement expected.
+src/routes/dashboard.ts(7077,14): error TS1109: Expression expected.
+src/routes/dashboard.ts(7078,10): error TS1110: Type expected.
+src/routes/dashboard.ts(7078,11): error TS1161: Unterminated regular expression literal.
+src/routes/dashboard.ts(7079,9): error TS1161: Unterminated regular expression literal.
+src/routes/dashboard.ts(7080,7): error TS1161: Unterminated regular expression literal.
+src/routes/dashboard.ts(7122,26): error TS1005: ';' expected.
+src/routes/dashboard.ts(7122,61): error TS1005: ')' expected.
+src/routes/dashboard.ts(7122,90): error TS1128: Declaration or statement expected.
+src/routes/dashboard.ts(7132,17): error TS1005: ';' expected.
+src/routes/dashboard.ts(7133,13): error TS1005: '>' expected.
+src/routes/dashboard.ts(7133,17): error TS1005: ';' expected.
+src/routes/dashboard.ts(7135,17): error TS1005: '>' expected.
+src/routes/dashboard.ts(7135,24): error TS1005: ';' expected.
+src/routes/dashboard.ts(7135,34): error TS1109: Expression expected.
+src/routes/dashboard.ts(7136,26): error TS1005: ';' expected.
+src/routes/dashboard.ts(7136,33): error TS1127: Invalid character.
+src/routes/dashboard.ts(7136,35): error TS1434: Unexpected keyword or identifier.
+src/routes/dashboard.ts(7136,63): error TS1110: Type expected.
+src/routes/dashboard.ts(7136,64): error TS1161: Unterminated regular expression literal.
+src/routes/dashboard.ts(7137,19): error TS1005: ';' expected.
+src/routes/dashboard.ts(7137,32): error TS1110: Type expected.
+src/routes/dashboard.ts(7137,33): error TS1161: Unterminated regular expression literal.
+src/routes/dashboard.ts(7138,11): error TS1161: Unterminated regular expression literal.
+src/routes/dashboard.ts(7139,15): error TS1005: ';' expected.
+src/routes/dashboard.ts(7139,20): error TS1005: '{' expected.
+src/routes/dashboard.ts(7140,12): error TS1005: ';' expected.
+src/routes/dashboard.ts(7141,17): error TS1005: '>' expected.
+src/routes/dashboard.ts(7141,22): error TS1005: '{' expected.
+src/routes/dashboard.ts(7142,21): error TS1005: '>' expected.
+src/routes/dashboard.ts(7142,26): error TS1005: '{' expected.
+src/routes/dashboard.ts(7143,20): error TS1005: '>' expected.
+src/routes/dashboard.ts(7143,25): error TS1005: '{' expected.
+src/routes/dashboard.ts(7144,20): error TS1005: '>' expected.
+src/routes/dashboard.ts(7144,25): error TS1005: '{' expected.
+src/routes/dashboard.ts(7144,64): error TS1005: ';' expected.
+src/routes/dashboard.ts(7144,95): error TS1005: ';' expected.
+src/routes/dashboard.ts(7144,107): error TS1161: Unterminated regular expression literal.
+src/routes/dashboard.ts(7145,22): error TS1005: ';' expected.
+src/routes/dashboard.ts(7145,27): error TS1005: '{' expected.
+src/routes/dashboard.ts(7145,44): error TS1109: Expression expected.
+src/routes/dashboard.ts(7145,46): error TS1110: Type expected.
+src/routes/dashboard.ts(7145,47): error TS1161: Unterminated regular expression literal.
+src/routes/dashboard.ts(7146,22): error TS1005: ':' expected.
+src/routes/dashboard.ts(7146,27): error TS1005: '{' expected.
+src/routes/dashboard.ts(7147,24): error TS1005: ';' expected.
+src/routes/dashboard.ts(7147,51): error TS1110: Type expected.
+src/routes/dashboard.ts(7147,52): error TS1161: Unterminated regular expression literal.
+src/routes/dashboard.ts(7148,25): error TS1005: ';' expected.
+src/routes/dashboard.ts(7148,33): error TS1434: Unexpected keyword or identifier.
+src/routes/dashboard.ts(7148,37): error TS1228: A type predicate is only allowed in return type position for functions and methods.
+src/routes/dashboard.ts(7148,40): error TS1434: Unexpected keyword or identifier.
+src/routes/dashboard.ts(7148,54): error TS1005: '(' expected.
+src/routes/dashboard.ts(7148,59): error TS1005: ';' expected.
+src/routes/dashboard.ts(7148,63): error TS1005: ';' expected.
+src/routes/dashboard.ts(7148,68): error TS1005: ')' expected.
+src/routes/dashboard.ts(7148,72): error TS1003: Identifier expected.
+src/routes/dashboard.ts(7148,74): error TS1161: Unterminated regular expression literal.
+src/routes/dashboard.ts(7149,19): error TS1161: Unterminated regular expression literal.
+src/routes/dashboard.ts(7150,17): error TS1161: Unterminated regular expression literal.
+src/routes/dashboard.ts(7151,20): error TS1005: ';' expected.
+src/routes/dashboard.ts(7151,25): error TS1005: '{' expected.
+src/routes/dashboard.ts(7152,24): error TS1005: ';' expected.
+src/routes/dashboard.ts(7152,66): error TS1127: Invalid character.
+src/routes/dashboard.ts(7152,68): error TS1434: Unexpected keyword or identifier.
+src/routes/dashboard.ts(7152,109): error TS1110: Type expected.
+src/routes/dashboard.ts(7152,110): error TS1161: Unterminated regular expression literal.
+src/routes/dashboard.ts(7153,17): error TS1161: Unterminated regular expression literal.
+src/routes/dashboard.ts(7154,15): error TS1161: Unterminated regular expression literal.
+src/routes/dashboard.ts(7155,18): error TS1005: ';' expected.
+src/routes/dashboard.ts(7155,23): error TS1005: '{' expected.
+src/routes/dashboard.ts(7156,20): error TS1005: '>' expected.
+src/routes/dashboard.ts(7156,25): error TS1005: '{' expected.
+src/routes/dashboard.ts(7157,22): error TS1005: '>' expected.
+src/routes/dashboard.ts(7157,27): error TS1005: '{' expected.
+src/routes/dashboard.ts(7157,39): error TS1005: ';' expected.
+src/routes/dashboard.ts(7157,47): error TS1434: Unexpected keyword or identifier.
+src/routes/dashboard.ts(7157,54): error TS1434: Unexpected keyword or identifier.
+src/routes/dashboard.ts(7157,58): error TS1434: Unexpected keyword or identifier.
+src/routes/dashboard.ts(7157,68): error TS1005: '(' expected.
+src/routes/dashboard.ts(7157,69): error TS1005: ';' expected.
+src/routes/dashboard.ts(7157,96): error TS1003: Identifier expected.
+src/routes/dashboard.ts(7157,98): error TS1161: Unterminated regular expression literal.
+src/routes/dashboard.ts(7158,17): error TS1161: Unterminated regular expression literal.
+src/routes/dashboard.ts(7159,15): error TS1161: Unterminated regular expression literal.
+src/routes/dashboard.ts(7160,13): error TS1161: Unterminated regular expression literal.
+src/routes/dashboard.ts(7161,11): error TS1161: Unterminated regular expression literal.
+src/routes/dashboard.ts(7162,9): error TS1161: Unterminated regular expression literal.
+src/routes/dashboard.ts(7175,39): error TS1005: ';' expected.
+src/routes/dashboard.ts(7175,44): error TS1005: ')' expected.
+src/routes/dashboard.ts(7175,89): error TS1005: ';' expected.
+src/routes/dashboard.ts(7175,94): error TS1434: Unexpected keyword or identifier.
+src/routes/dashboard.ts(7247,99): error TS1005: ';' expected.
+src/routes/dashboard.ts(7247,104): error TS1434: Unexpected keyword or identifier.
+src/routes/dashboard.ts(7250,8): error TS1005: ';' expected.
+src/routes/dashboard.ts(7250,54): error TS1434: Unexpected keyword or identifier.
+src/routes/dashboard.ts(7261,29): error TS1005: ';' expected.
+src/routes/dashboard.ts(7261,34): error TS1005: '{' expected.
+src/routes/dashboard.ts(7261,75): error TS1005: ';' expected.
+src/routes/dashboard.ts(7261,122): error TS1110: Type expected.
+src/routes/dashboard.ts(7261,123): error TS1161: Unterminated regular expression literal.
+src/routes/dashboard.ts(7763,1): error TS1128: Declaration or statement expected.
+src/routes/dashboard.ts(7763,2): error TS1128: Declaration or statement expected.
+
+    at createTSError (/Users/viv/attendance-system/attendance-system/server/node_modules/ts-node/src/index.ts:859:12)
+    at reportTSError (/Users/viv/attendance-system/attendance-system/server/node_modules/ts-node/src/index.ts:863:19)
+    at getOutput (/Users/viv/attendance-system/attendance-system/server/node_modules/ts-node/src/index.ts:1077:36)
+    at Object.compile (/Users/viv/attendance-system/attendance-system/server/node_modules/ts-node/src/index.ts:1433:41)
+    at Module.m._compile (/Users/viv/attendance-system/attendance-system/server/node_modules/ts-node/src/index.ts:1617:30)
+    at node:internal/modules/cjs/loader:1839:10
+    at Object.require.extensions.<computed> [as .ts] (/Users/viv/attendance-system/attendance-system/server/node_modules/ts-node/src/index.ts:1621:12)
+    at Module.load (node:internal/modules/cjs/loader:1441:32)
+    at Function._load (node:internal/modules/cjs/loader:1263:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14) {
+  diagnosticCodes: [
+    2304, 2581, 7031, 2304, 2304, 2304, 2304, 2304, 2304, 2304,
+    2304, 2304, 2304, 2304, 2304, 2304, 2304, 7006, 2304, 2304,
+    2304, 7006, 2304, 2304, 2304, 2304, 2304, 2304, 2304, 2304,
+    2349, 2581, 2304, 2581, 7053, 2365, 2304, 2448, 2749, 2304,
+    2304, 2304, 2304, 2362, 2304, 2304, 2304, 2581, 2448, 2304,
+    2581, 2304, 2581, 2304, 2304, 2304, 2304, 2304, 2304, 2304,
+    2304, 2304, 2304, 2304, 2581, 2448, 2304, 2304, 2304, 2304,
+    2304, 2304, 2304, 2304, 2304, 2365, 2365, 2304, 2304, 2581,
+    2304, 2581, 2304, 2365, 2304, 2304, 2304, 2304, 2304, 2304,
+    2304, 2304, 2581, 2365, 2365, 2365, 2365, 7006, 2349, 2304,
+    ... 254 more items
+  ]
+}
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `ts-node src/index.ts`[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `ts-node src/index.ts`[39m
+{"level":30,"time":1759263520639,"pid":57959,"hostname":"Viviannes-MacBook-Air.local","msg":"Skipping sqlite backups: DATABASE_URL is not a file: path"}
+Error: listen EADDRINUSE: address already in use :::4000
+    at Server.setupListenHandle [as _listen2] (node:net:1940:16)
+    at listenInCluster (node:net:1997:12)
+    at Server.listen (node:net:2102:7)
+    at Function.listen (/Users/viv/attendance-system/attendance-system/server/node_modules/express/lib/application.js:635:24)
+    at start (/Users/viv/attendance-system/attendance-system/server/src/index.ts:18:22) {
+  code: 'EADDRINUSE',
+  errno: -48,
+  syscall: 'listen',
+  address: '::',
+  port: 4000
+}
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `ts-node src/index.ts`[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `ts-node src/index.ts`[39m
+{"level":30,"time":1759263581475,"pid":58659,"hostname":"Viviannes-MacBook-Air.local","msg":"Skipping sqlite backups: DATABASE_URL is not a file: path"}
+Error: listen EADDRINUSE: address already in use :::4000
+    at Server.setupListenHandle [as _listen2] (node:net:1940:16)
+    at listenInCluster (node:net:1997:12)
+    at Server.listen (node:net:2102:7)
+    at Function.listen (/Users/viv/attendance-system/attendance-system/server/node_modules/express/lib/application.js:635:24)
+    at start (/Users/viv/attendance-system/attendance-system/server/src/index.ts:18:22) {
+  code: 'EADDRINUSE',
+  errno: -48,
+  syscall: 'listen',
+  address: '::',
+  port: 4000
+}
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `ts-node src/index.ts`[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `ts-node src/index.ts`[39m
+{"level":30,"time":1759263608524,"pid":59223,"hostname":"Viviannes-MacBook-Air.local","msg":"Skipping sqlite backups: DATABASE_URL is not a file: path"}
+Error: listen EADDRINUSE: address already in use :::4000
+    at Server.setupListenHandle [as _listen2] (node:net:1940:16)
+    at listenInCluster (node:net:1997:12)
+    at Server.listen (node:net:2102:7)
+    at Function.listen (/Users/viv/attendance-system/attendance-system/server/node_modules/express/lib/application.js:635:24)
+    at start (/Users/viv/attendance-system/attendance-system/server/src/index.ts:18:22) {
+  code: 'EADDRINUSE',
+  errno: -48,
+  syscall: 'listen',
+  address: '::',
+  port: 4000
+}
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `ts-node src/index.ts`[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `ts-node src/index.ts`[39m
+{"level":30,"time":1759263687825,"pid":60151,"hostname":"Viviannes-MacBook-Air.local","msg":"Skipping sqlite backups: DATABASE_URL is not a file: path"}
+Error: listen EADDRINUSE: address already in use :::4000
+    at Server.setupListenHandle [as _listen2] (node:net:1940:16)
+    at listenInCluster (node:net:1997:12)
+    at Server.listen (node:net:2102:7)
+    at Function.listen (/Users/viv/attendance-system/attendance-system/server/node_modules/express/lib/application.js:635:24)
+    at start (/Users/viv/attendance-system/attendance-system/server/src/index.ts:18:22) {
+  code: 'EADDRINUSE',
+  errno: -48,
+  syscall: 'listen',
+  address: '::',
+  port: 4000
+}
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `ts-node src/index.ts`[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `ts-node src/index.ts`[39m
+{"level":30,"time":1759263747006,"pid":60832,"hostname":"Viviannes-MacBook-Air.local","msg":"Skipping sqlite backups: DATABASE_URL is not a file: path"}
+Error: listen EADDRINUSE: address already in use :::4000
+    at Server.setupListenHandle [as _listen2] (node:net:1940:16)
+    at listenInCluster (node:net:1997:12)
+    at Server.listen (node:net:2102:7)
+    at Function.listen (/Users/viv/attendance-system/attendance-system/server/node_modules/express/lib/application.js:635:24)
+    at start (/Users/viv/attendance-system/attendance-system/server/src/index.ts:18:22) {
+  code: 'EADDRINUSE',
+  errno: -48,
+  syscall: 'listen',
+  address: '::',
+  port: 4000
+}
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+s/lib/application.js:635:24)
+    at start (/Users/viv/attendance-system/attendance-system/server/src/index.ts:18:22) {
+  code: 'EADDRINUSE',
+  errno: -48,
+  syscall: 'listen',
+  address: '::',
+  port: 4000
+}
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `ts-node src/index.ts`[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `ts-node src/index.ts`[39m
+{"level":30,"time":1759263608522,"pid":59233,"hostname":"Viviannes-MacBook-Air.local","msg":"Skipping sqlite backups: DATABASE_URL is not a file: path"}
+{"level":30,"time":1759263608524,"pid":59233,"hostname":"Viviannes-MacBook-Air.local","msg":"Server listening on port 4000"}
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `ts-node src/index.ts`[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `ts-node src/index.ts`[39m
+{"level":30,"time":1759263687857,"pid":60128,"hostname":"Viviannes-MacBook-Air.local","msg":"Skipping sqlite backups: DATABASE_URL is not a file: path"}
+Error: listen EADDRINUSE: address already in use :::4000
+    at Server.setupListenHandle [as _listen2] (node:net:1940:16)
+    at listenInCluster (node:net:1997:12)
+    at Server.listen (node:net:2102:7)
+    at Function.listen (/Users/viv/attendance-system/attendance-system/server/node_modules/express/lib/application.js:635:24)
+    at start (/Users/viv/attendance-system/attendance-system/server/src/index.ts:18:22) {
+  code: 'EADDRINUSE',
+  errno: -48,
+  syscall: 'listen',
+  address: '::',
+  port: 4000
+}
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `ts-node src/index.ts`[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `ts-node src/index.ts`[39m
+{"level":30,"time":1759263746896,"pid":60886,"hostname":"Viviannes-MacBook-Air.local","msg":"Skipping sqlite backups: DATABASE_URL is not a file: path"}
+Error: listen EADDRINUSE: address already in use :::4000
+    at Server.setupListenHandle [as _listen2] (node:net:1940:16)
+    at listenInCluster (node:net:1997:12)
+    at Server.listen (node:net:2102:7)
+    at Function.listen (/Users/viv/attendance-system/attendance-system/server/node_modules/express/lib/application.js:635:24)
+    at start (/Users/viv/attendance-system/attendance-system/server/src/index.ts:18:22) {
+  code: 'EADDRINUSE',
+  errno: -48,
+  syscall: 'listen',
+  address: '::',
+  port: 4000
+}
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m

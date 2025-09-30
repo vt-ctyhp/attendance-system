@@ -170,3 +170,13 @@
 2025-09-30 12:12:24.222 PDT [39573] LOG:  database system is ready to accept connections
 2025-09-30 12:12:35.171 PDT [39637] FATAL:  database "attendance" does not exist
 2025-09-30 12:12:35.178 PDT [39639] FATAL:  database "attendance" does not exist
+2025-09-30 12:36:23.646 PDT [50687] LOG:  starting PostgreSQL 14.19 (Homebrew) on aarch64-apple-darwin23.6.0, compiled by Apple clang version 16.0.0 (clang-1600.0.26.6), 64-bit
+2025-09-30 12:36:23.647 PDT [50687] LOG:  listening on IPv6 address "::1", port 5433
+2025-09-30 12:36:23.647 PDT [50687] LOG:  listening on IPv4 address "127.0.0.1", port 5433
+2025-09-30 12:36:23.648 PDT [50687] LOG:  listening on Unix socket "/tmp/.s.PGSQL.5433"
+2025-09-30 12:36:23.650 PDT [50688] LOG:  database system was interrupted; last known up at 2025-09-30 12:19:29 PDT
+2025-09-30 12:36:23.701 PDT [50688] LOG:  database system was not properly shut down; automatic recovery in progress
+2025-09-30 12:36:23.702 PDT [50688] LOG:  redo starts at 0/236F6B8
+2025-09-30 12:36:23.702 PDT [50688] LOG:  invalid record length at 0/236F7A0: wanted 24, got 0
+2025-09-30 12:36:23.702 PDT [50688] LOG:  redo done at 0/236F768 system usage: CPU: user: 0.00 s, system: 0.00 s, elapsed: 0.00 s
+2025-09-30 12:36:23.706 PDT [50687] LOG:  database system is ready to accept connections
