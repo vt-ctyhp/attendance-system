@@ -70,6 +70,7 @@ import {
   getApprovedMakeupHoursThisMonthByUser,
   remainingHoursWithinCap
 } from '../services/timeRequestPolicy';
+import { logger } from '../logger';
 
 type SessionSummary = {
   userId: number;
@@ -692,20 +693,6 @@ type PeriodTotals = {
   finalAmount: number;
 };
 
-type PayrollPeriodWithMeta = Prisma.PayrollPeriodGetPayload<{
-  include: {
-    approvedBy: { select: { id: true; name: true } };
-    paidBy: { select: { id: true; name: true } };
-    _count: { select: { lines: true } };
-  };
-}>;
-
-type EmployeeListItem = Prisma.UserGetPayload<{
-  select: { id: true; name: true; email: true; active: true };
-}>;
-
-type HolidayList = Awaited<ReturnType<typeof listHolidays>>;
-
 const parsePeriodTotals = (value: unknown): PeriodTotals => {
   const record = (value && typeof value === 'object') ? (value as Record<string, unknown>) : {};
   return {
@@ -716,6 +703,203 @@ const parsePeriodTotals = (value: unknown): PeriodTotals => {
     kpiBonus: Math.round(toNumber(record.kpiBonus) * 100) / 100,
     finalAmount: Math.round(toNumber(record.finalAmount) * 100) / 100
   };
+};
+
+type PayrollPeriodRecord = Prisma.PayrollPeriodGetPayload<{
+  include: {
+    approvedBy: { select: { id: true; name: true } };
+    paidBy: { select: { id: true; name: true } };
+    _count: { select: { lines: true } };
+  };
+}>;
+
+type DashboardEmployeeRecord = Prisma.UserGetPayload<{
+  select: { id: true; name: true; email: true; active: true };
+}>;
+
+type HolidayRecordList = Awaited<ReturnType<typeof listHolidays>>;
+
+const DEMO_PAYROLL_USERS = [
+  {
+    email: 'payroll.alice@example.com',
+    name: 'Alice Payroll',
+    base: 2900,
+    monthlyBonus: 200,
+    quarterlyBonus: 600,
+    kpiEligible: true,
+    defaultKpiBonus: 750
+  },
+  {
+    email: 'payroll.bob@example.com',
+    name: 'Bob Payroll',
+    base: 2600,
+    monthlyBonus: 150,
+    quarterlyBonus: 450,
+    kpiEligible: false,
+    defaultKpiBonus: null
+  }
+] as const;
+
+let demoPayrollPasswordHash: string | null = null;
+
+const toMonthKey = (monthKey: string): string => {
+  if (/^\d{4}-\d{2}$/.test(monthKey)) {
+    return monthKey;
+  }
+  return formatInTimeZone(zonedStartOfMonth(new Date()), DASHBOARD_TIME_ZONE, 'yyyy-MM');
+};
+
+const computeMonthRange = (monthKey: string) => {
+  const monthDate = parseMonthParam(monthKey);
+  const rangeStart = monthDate;
+  const rangeEnd = zonedEndOfMonth(monthDate);
+  return { rangeStart, rangeEnd };
+};
+
+const buildDemoSchedule = () =>
+  ({
+    '0': { enabled: false, start: '09:00', end: '17:00', expectedHours: 8 },
+    '1': { enabled: true, start: '09:00', end: '17:00', expectedHours: 8 },
+    '2': { enabled: true, start: '09:00', end: '17:00', expectedHours: 8 },
+    '3': { enabled: true, start: '09:00', end: '17:00', expectedHours: 8 },
+    '4': { enabled: true, start: '09:00', end: '17:00', expectedHours: 8 },
+    '5': { enabled: true, start: '09:00', end: '17:00', expectedHours: 6 },
+    '6': { enabled: false, start: '09:00', end: '13:00', expectedHours: 4 }
+  });
+
+const ensurePayrollDemoData = async (monthKey: string, payDate: Date, actorId?: number | null) => {
+  const normalizedMonthKey = toMonthKey(monthKey);
+  const { rangeStart, rangeEnd } = computeMonthRange(normalizedMonthKey);
+
+  if (!demoPayrollPasswordHash) {
+    demoPayrollPasswordHash = await hashPassword('DemoPayroll!1');
+  }
+
+  const demoUsers = new Map<string, number>();
+
+  for (const userDef of DEMO_PAYROLL_USERS) {
+    const user = await prisma.user.upsert({
+      where: { email: userDef.email },
+      update: { name: userDef.name, role: 'employee', active: true },
+      create: {
+        email: userDef.email,
+        name: userDef.name,
+        role: 'employee',
+        passwordHash: demoPayrollPasswordHash
+      }
+    });
+
+    demoUsers.set(userDef.email, user.id);
+
+    const schedule = buildDemoSchedule();
+    await upsertEmployeeConfig(
+      {
+        userId: user.id,
+        effectiveOn: rangeStart,
+        baseSemiMonthlySalary: userDef.base,
+        monthlyAttendanceBonus: userDef.monthlyBonus,
+        quarterlyAttendanceBonus: userDef.quarterlyBonus,
+        kpiEligible: userDef.kpiEligible,
+        defaultKpiBonus: userDef.defaultKpiBonus,
+        schedule,
+        accrualEnabled: true,
+        accrualMethod: 'standard',
+        ptoBalanceHours: 40,
+        nonPtoBalanceHours: 16
+      },
+      actorId ?? undefined
+    );
+
+    const isPerfect = userDef.kpiEligible;
+    const workedHours = isPerfect ? 160 : 152;
+    const tardyMinutes = isPerfect ? 0 : 45;
+    const matchedMakeUpHours = isPerfect ? 0 : 2;
+    const reasons = isPerfect ? [] : ['Tardy arrivals recorded'];
+
+    await prisma.attendanceMonthFact.upsert({
+      where: { userId_monthKey: { userId: user.id, monthKey: normalizedMonthKey } },
+      update: {
+        rangeStart,
+        rangeEnd,
+        assignedHours: 160,
+        workedHours,
+        ptoHours: isPerfect ? 0 : 8,
+        nonPtoAbsenceHours: 0,
+        tardyMinutes,
+        matchedMakeUpHours,
+        isPerfect,
+        reasons,
+        snapshot: {
+          monthKey: normalizedMonthKey,
+          seeded: true
+        }
+      },
+      create: {
+        userId: user.id,
+        monthKey: normalizedMonthKey,
+        rangeStart,
+        rangeEnd,
+        assignedHours: 160,
+        workedHours,
+        ptoHours: isPerfect ? 0 : 8,
+        nonPtoAbsenceHours: 0,
+        tardyMinutes,
+        matchedMakeUpHours,
+        isPerfect,
+        reasons,
+        snapshot: {
+          monthKey: normalizedMonthKey,
+          seeded: true
+        }
+      }
+    });
+  }
+
+  const holidayAnchor = addDays(rangeStart, 20);
+  await prisma.holiday.upsert({
+    where: { observedOn: holidayAnchor },
+    update: { name: 'Founders Day' },
+    create: { name: 'Founders Day', observedOn: holidayAnchor, createdById: actorId ?? undefined }
+  });
+
+  await recalcMonthlyBonuses(normalizedMonthKey, actorId ?? undefined);
+
+  const payDateZoned = zoned(payDate);
+  const endOfMonthZoned = endOfMonth(payDateZoned);
+  const isFifteenth = payDateZoned.getDate() === 15;
+  const isEndOfMonth = payDateZoned.getDate() === endOfMonthZoned.getDate();
+
+  const targetZoned = isFifteenth || isEndOfMonth
+    ? payDateZoned
+    : (() => {
+        const copy = new Date(payDateZoned);
+        if (payDateZoned.getDate() < 15) {
+          copy.setDate(15);
+        } else {
+          copy.setTime(endOfMonthZoned.getTime());
+        }
+        return copy;
+      })();
+
+  targetZoned.setHours(0, 0, 0, 0);
+  const samplePayDateUtc = zonedTimeToUtc(targetZoned, DASHBOARD_TIME_ZONE);
+
+  logger.info(
+    {
+      scope: 'payroll-demo-seed',
+      monthKey: normalizedMonthKey,
+      requestedPayDate: payDate.toISOString(),
+      chosenPayDate: samplePayDateUtc.toISOString()
+    },
+    'Ensuring payroll demo data'
+  );
+
+  const existingPeriod = await prisma.payrollPeriod.findFirst({ where: { payDate: samplePayDateUtc } });
+  if (!existingPeriod) {
+    await recalcPayrollForPayDate(samplePayDateUtc, actorId ?? undefined);
+  }
+
+  return demoUsers;
 };
 const formatTimesheetStatus = (status: string) =>
   status ? `${status.charAt(0).toUpperCase()}${status.slice(1)}` : status;
@@ -4572,6 +4756,10 @@ dashboardRouter.get('/payroll', async (req, res) => {
     ? Number.parseInt(employeePrefRaw, 10)
     : undefined;
 
+  const actorId = (req as AuthenticatedRequest | undefined)?.user?.id ?? null;
+
+  await ensurePayrollDemoData(selectedFactsMonth, bonusDateValue, actorId);
+
   const baseDataPromise = Promise.all([
     prisma.payrollPeriod.findMany({
       orderBy: { payDate: 'desc' },
@@ -4596,10 +4784,10 @@ dashboardRouter.get('/payroll', async (req, res) => {
   const bonusCandidates = await listBonusesForPayDate(bonusDateValue);
 
   const [periods, employees, configSnapshots, holidays]: [
-    PayrollPeriodWithMeta[],
-    EmployeeListItem[],
+    PayrollPeriodRecord[],
+    DashboardEmployeeRecord[],
     EmployeeCompSnapshot[],
-    HolidayList
+    HolidayRecordList
   ] = baseData;
 
   const employeeLookup = new Map(employees.map((employee) => [employee.id, employee]));
@@ -5430,16 +5618,23 @@ dashboardRouter.get('/payroll', async (req, res) => {
                 try {
                   if (kind === 'payroll-run') {
                     const input = form.querySelector('input[name="payDate"]');
-                    if (!(input instanceof HTMLInputElement) || !/^\d{4}-\d{2}-\d{2}$/.test(input.value)) {
+                    if (!(input instanceof HTMLInputElement)) {
                       throw new Error('Select a valid pay date.');
                     }
-                    const date = new Date(input.value + 'T00:00:00');
+                    const iso = input.value.trim();
+                    if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+                      throw new Error('Select a valid pay date.');
+                    }
+                    const date = new Date(iso + 'T00:00:00Z');
+                    if (Number.isNaN(date.getTime())) {
+                      throw new Error('Select a valid pay date.');
+                    }
                     const day = date.getUTCDate();
                     const endOfMonth = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate();
                     if (day !== 15 && day !== endOfMonth) {
                       throw new Error('Pay date must be on the 15th or the last day of the month.');
                     }
-                    const response = await fetch('/api/payroll/payruns/' + input.value + '/recalc', {
+                    const response = await fetch('/api/payroll/payruns/' + iso + '/recalc', {
                       method: 'POST'
                     });
                     if (!response.ok) {

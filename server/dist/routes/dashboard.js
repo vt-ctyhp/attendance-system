@@ -17,6 +17,7 @@ const timesheets_1 = require("../services/timesheets");
 const balances_1 = require("../services/balances");
 const config_1 = require("../services/payroll/config");
 const constants_1 = require("../services/payroll/constants");
+const payroll_1 = require("../services/payroll/payroll");
 const attendance_1 = require("../services/payroll/attendance");
 const bonuses_1 = require("../services/payroll/bonuses");
 const timeRequestPolicy_1 = require("../services/timeRequestPolicy");
@@ -448,6 +449,145 @@ const parsePeriodTotals = (value) => {
         kpiBonus: Math.round(toNumber(record.kpiBonus) * 100) / 100,
         finalAmount: Math.round(toNumber(record.finalAmount) * 100) / 100
     };
+};
+const DEMO_PAYROLL_USERS = [
+    {
+        email: 'payroll.alice@example.com',
+        name: 'Alice Payroll',
+        base: 2900,
+        monthlyBonus: 200,
+        quarterlyBonus: 600,
+        kpiEligible: true,
+        defaultKpiBonus: 750
+    },
+    {
+        email: 'payroll.bob@example.com',
+        name: 'Bob Payroll',
+        base: 2600,
+        monthlyBonus: 150,
+        quarterlyBonus: 450,
+        kpiEligible: false,
+        defaultKpiBonus: null
+    }
+];
+let demoPayrollPasswordHash = null;
+const toMonthKey = (monthKey) => {
+    if (/^\d{4}-\d{2}$/.test(monthKey)) {
+        return monthKey;
+    }
+    return (0, date_fns_tz_1.formatInTimeZone)(zonedStartOfMonth(new Date()), DASHBOARD_TIME_ZONE, 'yyyy-MM');
+};
+const computeMonthRange = (monthKey) => {
+    const monthDate = parseMonthParam(monthKey);
+    const rangeStart = monthDate;
+    const rangeEnd = zonedEndOfMonth(monthDate);
+    return { rangeStart, rangeEnd };
+};
+const buildDemoSchedule = () => ({
+    '0': { enabled: false, start: '09:00', end: '17:00', expectedHours: 8 },
+    '1': { enabled: true, start: '09:00', end: '17:00', expectedHours: 8 },
+    '2': { enabled: true, start: '09:00', end: '17:00', expectedHours: 8 },
+    '3': { enabled: true, start: '09:00', end: '17:00', expectedHours: 8 },
+    '4': { enabled: true, start: '09:00', end: '17:00', expectedHours: 8 },
+    '5': { enabled: true, start: '09:00', end: '17:00', expectedHours: 6 },
+    '6': { enabled: false, start: '09:00', end: '13:00', expectedHours: 4 }
+});
+const ensurePayrollDemoData = async (monthKey, payDate, actorId) => {
+    const normalizedMonthKey = toMonthKey(monthKey);
+    const { rangeStart, rangeEnd } = computeMonthRange(normalizedMonthKey);
+    if (!demoPayrollPasswordHash) {
+        demoPayrollPasswordHash = await (0, auth_1.hashPassword)('DemoPayroll!1');
+    }
+    const demoUsers = new Map();
+    for (const userDef of DEMO_PAYROLL_USERS) {
+        const user = await prisma_1.prisma.user.upsert({
+            where: { email: userDef.email },
+            update: { name: userDef.name, role: 'employee', active: true },
+            create: {
+                email: userDef.email,
+                name: userDef.name,
+                role: 'employee',
+                passwordHash: demoPayrollPasswordHash
+            }
+        });
+        demoUsers.set(userDef.email, user.id);
+        const schedule = buildDemoSchedule();
+        await (0, config_1.upsertEmployeeConfig)({
+            userId: user.id,
+            effectiveOn: rangeStart,
+            baseSemiMonthlySalary: userDef.base,
+            monthlyAttendanceBonus: userDef.monthlyBonus,
+            quarterlyAttendanceBonus: userDef.quarterlyBonus,
+            kpiEligible: userDef.kpiEligible,
+            defaultKpiBonus: userDef.defaultKpiBonus,
+            schedule,
+            accrualEnabled: true,
+            accrualMethod: 'standard',
+            ptoBalanceHours: 40,
+            nonPtoBalanceHours: 16
+        }, actorId ?? undefined);
+        const isPerfect = userDef.kpiEligible;
+        const workedHours = isPerfect ? 160 : 152;
+        const tardyMinutes = isPerfect ? 0 : 45;
+        const matchedMakeUpHours = isPerfect ? 0 : 2;
+        const reasons = isPerfect ? [] : ['Tardy arrivals recorded'];
+        await prisma_1.prisma.attendanceMonthFact.upsert({
+            where: { userId_monthKey: { userId: user.id, monthKey: normalizedMonthKey } },
+            update: {
+                rangeStart,
+                rangeEnd,
+                assignedHours: 160,
+                workedHours,
+                ptoHours: isPerfect ? 0 : 8,
+                nonPtoAbsenceHours: 0,
+                tardyMinutes,
+                matchedMakeUpHours,
+                isPerfect,
+                reasons,
+                snapshot: {
+                    monthKey: normalizedMonthKey,
+                    seeded: true
+                }
+            },
+            create: {
+                userId: user.id,
+                monthKey: normalizedMonthKey,
+                rangeStart,
+                rangeEnd,
+                assignedHours: 160,
+                workedHours,
+                ptoHours: isPerfect ? 0 : 8,
+                nonPtoAbsenceHours: 0,
+                tardyMinutes,
+                matchedMakeUpHours,
+                isPerfect,
+                reasons,
+                snapshot: {
+                    monthKey: normalizedMonthKey,
+                    seeded: true
+                }
+            }
+        });
+    }
+    const holidayAnchor = (0, date_fns_1.addDays)(rangeStart, 20);
+    await prisma_1.prisma.holiday.upsert({
+        where: { observedOn: holidayAnchor },
+        update: { name: 'Founders Day' },
+        create: { name: 'Founders Day', observedOn: holidayAnchor, createdById: actorId ?? undefined }
+    });
+    await (0, bonuses_1.recalcMonthlyBonuses)(normalizedMonthKey, actorId ?? undefined);
+    const samplePayDateUtc = new Date(payDate);
+    samplePayDateUtc.setUTCHours(0, 0, 0, 0);
+    const payDay = samplePayDateUtc.getUTCDate();
+    const lastDayOfMonth = new Date(Date.UTC(samplePayDateUtc.getUTCFullYear(), samplePayDateUtc.getUTCMonth() + 1, 0)).getUTCDate();
+    if (payDay !== 15 && payDay !== lastDayOfMonth) {
+        samplePayDateUtc.setUTCDate(15);
+    }
+    const existingPeriod = await prisma_1.prisma.payrollPeriod.findFirst({ where: { payDate: samplePayDateUtc } });
+    if (!existingPeriod) {
+        await (0, payroll_1.recalcPayrollForPayDate)(samplePayDateUtc, actorId ?? undefined);
+    }
+    return demoUsers;
 };
 const formatTimesheetStatus = (status) => status ? `${status.charAt(0).toUpperCase()}${status.slice(1)}` : status;
 const timesheetViewLabel = (view) => {
@@ -3902,6 +4042,8 @@ exports.dashboardRouter.get('/payroll', async (req, res) => {
     const employeeIdCandidate = employeePrefRaw && /^\d+$/.test(employeePrefRaw)
         ? Number.parseInt(employeePrefRaw, 10)
         : undefined;
+    const actorId = req?.user?.id ?? null;
+    await ensurePayrollDemoData(selectedFactsMonth, bonusDateValue, actorId);
     const baseDataPromise = Promise.all([
         prisma_1.prisma.payrollPeriod.findMany({
             orderBy: { payDate: 'desc' },
@@ -4705,16 +4847,23 @@ exports.dashboardRouter.get('/payroll', async (req, res) => {
                 try {
                   if (kind === 'payroll-run') {
                     const input = form.querySelector('input[name="payDate"]');
-                    if (!(input instanceof HTMLInputElement) || !/^\d{4}-\d{2}-\d{2}$/.test(input.value)) {
+                    if (!(input instanceof HTMLInputElement)) {
                       throw new Error('Select a valid pay date.');
                     }
-                    const date = new Date(input.value + 'T00:00:00');
+                    const iso = input.value.trim();
+                    if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+                      throw new Error('Select a valid pay date.');
+                    }
+                    const date = new Date(iso + 'T00:00:00Z');
+                    if (Number.isNaN(date.getTime())) {
+                      throw new Error('Select a valid pay date.');
+                    }
                     const day = date.getUTCDate();
                     const endOfMonth = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate();
                     if (day !== 15 && day !== endOfMonth) {
                       throw new Error('Pay date must be on the 15th or the last day of the month.');
                     }
-                    const response = await fetch('/api/payroll/payruns/' + input.value + '/recalc', {
+                    const response = await fetch('/api/payroll/payruns/' + iso + '/recalc', {
                       method: 'POST'
                     });
                     if (!response.ok) {
