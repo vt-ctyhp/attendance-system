@@ -1,82 +1,176 @@
 import { prisma } from '../src/prisma';
 import { hashPassword } from '../src/auth';
+import { addMinutes, eachDayOfInterval } from 'date-fns';
 import { ensureSchedule } from '../src/services/payroll/config';
 import { PAYROLL_TIME_ZONE } from '../src/services/payroll/constants';
 import { recalcMonthlyBonuses } from '../src/services/payroll/bonuses';
 import { recalcPayrollForPayDate } from '../src/services/payroll/payroll';
-import { zonedTimeToUtc } from 'date-fns-tz';
+import { recalcMonthlyAttendanceFacts } from '../src/services/payroll/attendance';
+import { formatInTimeZone, utcToZonedTime, zonedTimeToUtc } from 'date-fns-tz';
 
 const DEMO_PASSWORD = process.env.PAYROLL_DEMO_PASSWORD ?? 'PayrollDemo123!';
-const MONTH_KEY = process.env.PAYROLL_DEMO_MONTH ?? new Date().toISOString().slice(0, 7);
+
+const resolveDefaultMonthKey = () => {
+  if (process.env.PAYROLL_DEMO_MONTH) {
+    return process.env.PAYROLL_DEMO_MONTH;
+  }
+  const now = utcToZonedTime(new Date(), PAYROLL_TIME_ZONE);
+  const targetYear = now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1;
+  return `${targetYear}-09`;
+};
+
+const MONTH_KEY = resolveDefaultMonthKey();
 const PAY_DATE_INPUT = process.env.PAYROLL_DEMO_PAYDATE ?? `${MONTH_KEY}-30`;
 
-const EMPLOYEES = [
+type ScheduleKey = 'weekday' | 'split';
+
+type BreakPlan = {
+  type: 'break' | 'lunch';
+  offset: number;
+  duration: number;
+};
+
+type LateStartPlan = {
+  day: number;
+  minutesLate: number;
+};
+
+type RequestPlan = {
+  day: number;
+  hours?: number;
+  startHour?: number;
+  startMinute?: number;
+  reason?: string;
+};
+
+type NonPtoPlan = RequestPlan & {
+  hours: number;
+};
+
+type MakeUpPlan = RequestPlan & {
+  hours: number;
+  breakPlan?: BreakPlan[];
+};
+
+type EmployeeSeedPlan = {
+  email: string;
+  name: string;
+  role: 'employee';
+  baseSemiMonthlySalary: number;
+  monthlyAttendanceBonus: number;
+  quarterlyAttendanceBonus: number;
+  defaultKpiBonus: number | null;
+  kpiEligible: boolean;
+  scheduleType: ScheduleKey;
+  deviceId: string;
+  lateStarts: LateStartPlan[];
+  ptoDays: RequestPlan[];
+  nonPtoRequests: NonPtoPlan[];
+  makeUpSessions: MakeUpPlan[];
+};
+
+const DEFAULT_SHIFT_TOTAL_MINUTES = 10 * 60;
+const DEFAULT_BREAK_PLAN: BreakPlan[] = [
+  { type: 'break', offset: 120, duration: 15 },
+  { type: 'lunch', offset: 240, duration: 60 },
+  { type: 'break', offset: 420, duration: 15 }
+];
+const DEFAULT_BREAK_MINUTES = DEFAULT_BREAK_PLAN.reduce((sum, item) => sum + item.duration, 0);
+const DEFAULT_SHIFT_WORK_MINUTES = DEFAULT_SHIFT_TOTAL_MINUTES - DEFAULT_BREAK_MINUTES;
+const DEFAULT_SHIFT_WORK_HOURS = Math.round((DEFAULT_SHIFT_WORK_MINUTES / 60) * 100) / 100;
+
+const makeSchedule = (key: ScheduleKey) => {
+  if (key === 'weekday') {
+    return ensureSchedule({
+      '0': { enabled: false, start: '10:00', end: '20:00', expectedHours: DEFAULT_SHIFT_WORK_HOURS },
+      '1': { enabled: true, start: '10:00', end: '20:00', expectedHours: DEFAULT_SHIFT_WORK_HOURS },
+      '2': { enabled: true, start: '10:00', end: '20:00', expectedHours: DEFAULT_SHIFT_WORK_HOURS },
+      '3': { enabled: true, start: '10:00', end: '20:00', expectedHours: DEFAULT_SHIFT_WORK_HOURS },
+      '4': { enabled: true, start: '10:00', end: '20:00', expectedHours: DEFAULT_SHIFT_WORK_HOURS },
+      '5': { enabled: true, start: '10:00', end: '20:00', expectedHours: DEFAULT_SHIFT_WORK_HOURS },
+      '6': { enabled: false, start: '10:00', end: '20:00', expectedHours: DEFAULT_SHIFT_WORK_HOURS }
+    });
+  }
+
+  return ensureSchedule({
+    '0': { enabled: true, start: '10:00', end: '20:00', expectedHours: DEFAULT_SHIFT_WORK_HOURS },
+    '1': { enabled: true, start: '10:00', end: '20:00', expectedHours: DEFAULT_SHIFT_WORK_HOURS },
+    '2': { enabled: true, start: '10:00', end: '20:00', expectedHours: DEFAULT_SHIFT_WORK_HOURS },
+    '3': { enabled: true, start: '10:00', end: '20:00', expectedHours: DEFAULT_SHIFT_WORK_HOURS },
+    '4': { enabled: false, start: '10:00', end: '20:00', expectedHours: DEFAULT_SHIFT_WORK_HOURS },
+    '5': { enabled: false, start: '10:00', end: '20:00', expectedHours: DEFAULT_SHIFT_WORK_HOURS },
+    '6': { enabled: true, start: '10:00', end: '20:00', expectedHours: DEFAULT_SHIFT_WORK_HOURS }
+  });
+};
+
+const EMPLOYEES: EmployeeSeedPlan[] = [
   {
     email: 'alex.morgan@example.com',
     name: 'Alex Morgan',
-    role: 'employee' as const,
+    role: 'employee',
     baseSemiMonthlySalary: 3100,
     monthlyAttendanceBonus: 180,
     quarterlyAttendanceBonus: 550,
     defaultKpiBonus: 600,
     kpiEligible: true,
-    assignedHours: 168,
-    workedHours: 168,
-    ptoHours: 0,
-    nonPtoAbsenceHours: 0,
-    matchedMakeUpHours: 0,
-    tardyMinutes: 0,
-    reasons: [] as string[],
-    isPerfect: true
+    scheduleType: 'weekday',
+    deviceId: 'payroll-demo-device-1',
+    lateStarts: [
+      { day: 3, minutesLate: 12 },
+      { day: 17, minutesLate: 8 },
+      { day: 24, minutesLate: 18 }
+    ],
+    ptoDays: [{ day: 12, hours: DEFAULT_SHIFT_WORK_HOURS, reason: 'PTO - long weekend getaway' }],
+    nonPtoRequests: [],
+    makeUpSessions: []
   },
   {
     email: 'jamie.chen@example.com',
     name: 'Jamie Chen',
-    role: 'employee' as const,
+    role: 'employee',
     baseSemiMonthlySalary: 2725,
     monthlyAttendanceBonus: 120,
     quarterlyAttendanceBonus: 420,
     defaultKpiBonus: null,
     kpiEligible: false,
-    assignedHours: 168,
-    workedHours: 158.5,
-    ptoHours: 4,
-    nonPtoAbsenceHours: 0,
-    matchedMakeUpHours: 1.5,
-    tardyMinutes: 48,
-    reasons: ['Late arrivals on 3 days'],
-    isPerfect: false
+    scheduleType: 'split',
+    deviceId: 'payroll-demo-device-2',
+    lateStarts: [
+      { day: 7, minutesLate: 9 },
+      { day: 21, minutesLate: 6 }
+    ],
+    ptoDays: [{ day: 3, hours: DEFAULT_SHIFT_WORK_HOURS, reason: 'PTO - family travel' }],
+    nonPtoRequests: [
+      { day: 18, hours: 4, reason: 'Non-PTO block for appointments' }
+    ],
+    makeUpSessions: [
+      { day: 20, hours: 4.5, startHour: 11, reason: 'Make-up shift for appointments' }
+    ]
   },
   {
     email: 'riley.davis@example.com',
     name: 'Riley Davis',
-    role: 'employee' as const,
+    role: 'employee',
     baseSemiMonthlySalary: 3350,
     monthlyAttendanceBonus: 210,
     quarterlyAttendanceBonus: 650,
     defaultKpiBonus: 800,
     kpiEligible: true,
-    assignedHours: 168,
-    workedHours: 164,
-    ptoHours: 8,
-    nonPtoAbsenceHours: 0,
-    matchedMakeUpHours: 0,
-    tardyMinutes: 10,
-    reasons: ['PTO day approved'],
-    isPerfect: false
+    scheduleType: 'weekday',
+    deviceId: 'payroll-demo-device-3',
+    lateStarts: [
+      { day: 2, minutesLate: 5 },
+      { day: 15, minutesLate: 9 }
+    ],
+    ptoDays: [{ day: 26, hours: DEFAULT_SHIFT_WORK_HOURS, reason: 'PTO - travel day' }],
+    nonPtoRequests: [
+      { day: 9, hours: 3.5, reason: 'Non-PTO afternoon outage' }
+    ],
+    makeUpSessions: [
+      { day: 27, hours: 3.5, startHour: 14, reason: 'Make-up evening block' }
+    ]
   }
 ];
-
-const buildSchedule = () =>
-  ensureSchedule({
-    '0': { enabled: false, start: '09:00', end: '17:00', expectedHours: 8 },
-    '1': { enabled: true, start: '09:00', end: '17:00', expectedHours: 8 },
-    '2': { enabled: true, start: '09:00', end: '17:00', expectedHours: 8 },
-    '3': { enabled: true, start: '09:00', end: '17:00', expectedHours: 8 },
-    '4': { enabled: true, start: '09:00', end: '17:00', expectedHours: 8 },
-    '5': { enabled: true, start: '09:00', end: '16:00', expectedHours: 7 },
-    '6': { enabled: false, start: '09:00', end: '12:00', expectedHours: 3 }
-  });
 
 const parseMonthKey = (value: string) => {
   const [yearStr, monthStr] = value.split('-');
@@ -122,6 +216,246 @@ const resolveQuarterKey = (monthKey: string) => {
   return `${year}-Q${quarterIndex}`;
 };
 
+const buildDateTime = (monthKey: string, day: number, hour: number, minute = 0) => {
+  const dayPart = String(day).padStart(2, '0');
+  const hourPart = String(hour).padStart(2, '0');
+  const minutePart = String(minute).padStart(2, '0');
+  const iso = `${monthKey}-${dayPart}T${hourPart}:${minutePart}:00`;
+  return zonedTimeToUtc(iso, PAYROLL_TIME_ZONE);
+};
+
+const normalizedHours = (hours: number) => Math.round(hours * 100) / 100;
+
+const createTimeRequest = async (
+  userId: number,
+  type: 'pto' | 'non_pto' | 'make_up',
+  startDate: Date,
+  hours: number,
+  reason: string,
+  actorId: number
+) => {
+  const minutes = Math.round(hours * 60);
+  const endDate = addMinutes(startDate, minutes);
+  await prisma.timeRequest.create({
+    data: {
+      userId,
+      type,
+      status: 'approved',
+      startDate,
+      endDate,
+      hours: normalizedHours(hours),
+      reason,
+      approverId: actorId,
+      approvedAt: new Date()
+    }
+  });
+};
+
+const createSessionWithBreaks = async (
+  userId: number,
+  deviceId: string,
+  start: Date,
+  durationMinutes: number,
+  breakPlan: BreakPlan[]
+) => {
+  const end = addMinutes(start, durationMinutes);
+  const session = await prisma.session.create({
+    data: {
+      userId,
+      deviceId,
+      startedAt: start,
+      endedAt: end,
+      status: 'completed'
+    }
+  });
+
+  if (breakPlan.length) {
+    const pauses = breakPlan.map((plan, index) => {
+      const pauseStart = addMinutes(start, plan.offset);
+      const pauseEnd = addMinutes(pauseStart, plan.duration);
+      return {
+        sessionId: session.id,
+        type: plan.type,
+        sequence: index + 1,
+        startedAt: pauseStart,
+        endedAt: pauseEnd,
+        durationMinutes: plan.duration
+      };
+    });
+    await prisma.sessionPause.createMany({ data: pauses });
+  }
+
+  const breakWindows = breakPlan.map((plan) => {
+    const windowStart = addMinutes(start, plan.offset);
+    const windowEnd = addMinutes(windowStart, plan.duration);
+    return { start: windowStart.getTime(), end: windowEnd.getTime() };
+  });
+
+  const stats: Array<{
+    sessionId: string;
+    minuteStart: Date;
+    active: boolean;
+    idle: boolean;
+    keysCount: number;
+    mouseCount: number;
+    fgApp: string;
+  }> = [];
+
+  for (let minute = 0; minute < durationMinutes; minute += 1) {
+    const minuteStart = addMinutes(start, minute);
+    const inBreak = breakWindows.some(
+      (window) => minuteStart.getTime() >= window.start && minuteStart.getTime() < window.end
+    );
+    if (inBreak) continue;
+    stats.push({
+      sessionId: session.id,
+      minuteStart,
+      active: minute % 45 !== 0,
+      idle: minute % 45 === 0,
+      keysCount: 40 + (minute % 6) * 3,
+      mouseCount: 24 + (minute % 5) * 2,
+      fgApp: minute % 30 < 15 ? 'Spreadsheet' : 'Inbox'
+    });
+  }
+
+  if (stats.length) {
+    await prisma.minuteStat.createMany({ data: stats });
+  }
+
+  return session;
+};
+
+const clearExistingPayrollMonthData = async (
+  userId: number,
+  rangeStart: Date,
+  rangeEnd: Date
+) => {
+  const sessions = await prisma.session.findMany({
+    where: {
+      userId,
+      startedAt: { gte: rangeStart, lte: rangeEnd }
+    },
+    select: { id: true }
+  });
+
+  const sessionIds = sessions.map((session) => session.id);
+  if (sessionIds.length) {
+    await prisma.sessionPause.deleteMany({ where: { sessionId: { in: sessionIds } } });
+    await prisma.minuteStat.deleteMany({ where: { sessionId: { in: sessionIds } } });
+    await prisma.event.deleteMany({ where: { sessionId: { in: sessionIds } } });
+    await prisma.session.deleteMany({ where: { id: { in: sessionIds } } });
+  }
+
+  await prisma.timeRequest.deleteMany({
+    where: {
+      userId,
+      startDate: { lte: rangeEnd },
+      endDate: { gte: rangeStart }
+    }
+  });
+};
+
+const seedEmployeeTimesheets = async (
+  userId: number,
+  plan: EmployeeSeedPlan,
+  schedule: Record<string, ReturnType<typeof ensureSchedule>[string]>,
+  monthKey: string,
+  rangeStart: Date,
+  rangeEnd: Date,
+  actorId: number
+) => {
+  const days = eachDayOfInterval({ start: rangeStart, end: rangeEnd });
+
+  const lateMap = new Map<number, number>(plan.lateStarts.map((item) => [item.day, item.minutesLate]));
+  const ptoMap = new Map<number, RequestPlan>(plan.ptoDays.map((item) => [item.day, item]));
+  const nonPtoMap = new Map<number, NonPtoPlan>(plan.nonPtoRequests.map((item) => [item.day, item]));
+
+  for (const day of days) {
+    const zoned = utcToZonedTime(day, PAYROLL_TIME_ZONE);
+    const dayOfMonth = zoned.getDate();
+    if (formatInTimeZone(day, PAYROLL_TIME_ZONE, 'yyyy-MM') !== monthKey) {
+      continue;
+    }
+    const weekdayKey = String(zoned.getDay());
+    const scheduleEntry = schedule[weekdayKey];
+
+    const pto = ptoMap.get(dayOfMonth);
+    if (pto && scheduleEntry?.enabled) {
+      const start = buildDateTime(monthKey, dayOfMonth, pto.startHour ?? 10, pto.startMinute ?? 0);
+      await createTimeRequest(
+        userId,
+        'pto',
+        start,
+        pto.hours ?? DEFAULT_SHIFT_WORK_HOURS,
+        pto.reason ?? 'Sample PTO day',
+        actorId
+      );
+      continue;
+    }
+
+    if (!scheduleEntry?.enabled) {
+      continue;
+    }
+
+    const nonPto = nonPtoMap.get(dayOfMonth);
+    if (nonPto) {
+      const start = buildDateTime(
+        monthKey,
+        dayOfMonth,
+        nonPto.startHour ?? 10,
+        nonPto.startMinute ?? 0
+      );
+      await createTimeRequest(
+        userId,
+        'non_pto',
+        start,
+        nonPto.hours,
+        nonPto.reason ?? 'Non-PTO absence',
+        actorId
+      );
+      continue;
+    }
+
+    const baseStart = buildDateTime(monthKey, dayOfMonth, 10, 0);
+    const lateMinutes = lateMap.get(dayOfMonth) ?? 0;
+    const sessionStart = addMinutes(baseStart, lateMinutes);
+
+    await createSessionWithBreaks(
+      userId,
+      plan.deviceId,
+      sessionStart,
+      DEFAULT_SHIFT_TOTAL_MINUTES,
+      DEFAULT_BREAK_PLAN
+    );
+  }
+
+  for (const makeUp of plan.makeUpSessions) {
+    const start = buildDateTime(
+      monthKey,
+      makeUp.day,
+      makeUp.startHour ?? 10,
+      makeUp.startMinute ?? 0
+    );
+    await createTimeRequest(
+      userId,
+      'make_up',
+      start,
+      makeUp.hours,
+      makeUp.reason ?? 'Make-up shift',
+      actorId
+    );
+    const durationMinutes = Math.round(makeUp.hours * 60) +
+      (makeUp.breakPlan?.reduce((sum, pause) => sum + pause.duration, 0) ?? 0);
+    await createSessionWithBreaks(
+      userId,
+      plan.deviceId,
+      start,
+      durationMinutes,
+      makeUp.breakPlan ?? []
+    );
+  }
+};
+
 async function ensureAdminActor() {
   const admin = await prisma.user.findFirst({ where: { role: 'admin' } });
   if (admin) return admin.id;
@@ -162,6 +496,9 @@ async function seed() {
   for (const employee of EMPLOYEES) {
     const user = await upsertEmployee(employee.email, employee.name, employee.role);
 
+    await clearExistingPayrollMonthData(user.id, rangeStart, rangeEnd);
+
+    const schedule = makeSchedule(employee.scheduleType);
     await prisma.employeeCompConfig.upsert({
       where: { userId_effectiveOn: { userId: user.id, effectiveOn: rangeStart } },
       create: {
@@ -172,7 +509,7 @@ async function seed() {
         quarterlyAttendanceBonus: employee.quarterlyAttendanceBonus,
         kpiEligible: employee.kpiEligible,
         defaultKpiBonus: employee.defaultKpiBonus,
-        schedule: buildSchedule(),
+        schedule,
         accrualEnabled: true,
         accrualMethod: 'standard',
         ptoBalanceHours: 40,
@@ -184,7 +521,7 @@ async function seed() {
         quarterlyAttendanceBonus: employee.quarterlyAttendanceBonus,
         kpiEligible: employee.kpiEligible,
         defaultKpiBonus: employee.defaultKpiBonus,
-        schedule: buildSchedule(),
+        schedule,
         accrualEnabled: true,
         accrualMethod: 'standard',
         ptoBalanceHours: 40,
@@ -192,39 +529,18 @@ async function seed() {
       }
     });
 
-    await prisma.attendanceMonthFact.upsert({
-      where: { userId_monthKey: { userId: user.id, monthKey: MONTH_KEY } },
-      create: {
-        userId: user.id,
-        monthKey: MONTH_KEY,
-        rangeStart,
-        rangeEnd,
-        assignedHours: employee.assignedHours,
-        workedHours: employee.workedHours,
-        ptoHours: employee.ptoHours,
-        nonPtoAbsenceHours: employee.nonPtoAbsenceHours,
-        tardyMinutes: employee.tardyMinutes,
-        matchedMakeUpHours: employee.matchedMakeUpHours,
-        isPerfect: employee.isPerfect,
-        reasons: employee.reasons,
-        snapshot: { seeded: true, monthKey: MONTH_KEY }
-      },
-      update: {
-        rangeStart,
-        rangeEnd,
-        assignedHours: employee.assignedHours,
-        workedHours: employee.workedHours,
-        ptoHours: employee.ptoHours,
-        nonPtoAbsenceHours: employee.nonPtoAbsenceHours,
-        tardyMinutes: employee.tardyMinutes,
-        matchedMakeUpHours: employee.matchedMakeUpHours,
-        isPerfect: employee.isPerfect,
-        reasons: employee.reasons,
-        snapshot: { seeded: true, monthKey: MONTH_KEY }
-      }
-    });
+    await seedEmployeeTimesheets(
+      user.id,
+      employee,
+      schedule,
+      MONTH_KEY,
+      rangeStart,
+      rangeEnd,
+      actorId
+    );
   }
 
+  await recalcMonthlyAttendanceFacts(MONTH_KEY, actorId);
   await recalcMonthlyBonuses(MONTH_KEY, actorId);
   await recalcPayrollForPayDate(payDateUtc, actorId);
 
