@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { zonedTimeToUtc } from 'date-fns-tz';
 import { authenticate, requireRole, type AuthenticatedRequest } from '../auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { parseWithSchema } from '../utils/validation';
@@ -22,6 +23,7 @@ import {
   markPayrollPaid,
   recalcPayrollForPayDate
 } from '../services/payroll/payroll';
+import { PAYROLL_TIME_ZONE } from '../services/payroll/constants';
 
 const payrollRouter = Router();
 
@@ -166,7 +168,10 @@ payrollRouter.get(
 const dateParamSchema = z.object({ payDate: z.string().min(1) });
 
 const parsePayDate = (value: string) => {
-  const parsed = new Date(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new Error('Invalid pay date');
+  }
+  const parsed = zonedTimeToUtc(`${value}T00:00:00`, PAYROLL_TIME_ZONE);
   if (Number.isNaN(parsed.getTime())) {
     throw new Error('Invalid pay date');
   }

@@ -148,3 +148,7 @@
 2025-09-30 07:53:07.976 PDT [98689] STATEMENT:  CREATE DATABASE attendance_dev;
 2025-09-30 07:53:18.054 PDT [98725] FATAL:  role "postgres" does not exist
 2025-09-30 07:53:53.551 PDT [98987] LOG:  could not receive data from client: Connection reset by peer
+2025-09-30 08:09:50.378 PDT [1558] ERROR:  column "userid" does not exist at character 8
+2025-09-30 08:09:50.378 PDT [1558] HINT:  Perhaps you meant to reference the column "AttendanceMonthFact.userId".
+2025-09-30 08:09:50.378 PDT [1558] STATEMENT:  SELECT userId, monthKey, assignedHours, workedHours, ptoHours, isPerfect FROM "AttendanceMonthFact" WHERE monthKey='2025-09';
+2025-09-30 09:06:02.743 PDT [8433] LOG:  could not receive data from client: Connection reset by peer

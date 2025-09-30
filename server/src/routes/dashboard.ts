@@ -216,7 +216,7 @@ const DASHBOARD_TIME_ZONE = process.env.DASHBOARD_TIME_ZONE ?? 'America/Los_Ange
 const ISO_DATE_TIME = "yyyy-MM-dd'T'HH:mm:ssXXX";
 const ISO_DATE = 'yyyy-MM-dd';
 
-const DASHBOARD_COOKIE_PATH = '/dashboard';
+const DASHBOARD_COOKIE_PATH: string = '/';
 const DEFAULT_DASHBOARD_REDIRECT = '/dashboard/overview';
 const DASHBOARD_LOGIN_ROUTE = '/dashboard/login';
 const DASHBOARD_COOKIE_MAX_AGE_MS = TOKEN_TTL_SECONDS * 1000;
@@ -2101,13 +2101,25 @@ const setDashboardTokenCookie = (res: Response, token: string) => {
 };
 
 const clearDashboardTokenCookie = (res: Response) => {
-  res.cookie(DASHBOARD_TOKEN_COOKIE_NAME, '', {
+  const expireOptions = {
     httpOnly: true,
-    sameSite: 'lax',
+    sameSite: 'lax' as const,
     secure: IS_PRODUCTION,
-    maxAge: 0,
+    maxAge: 0
+  };
+
+  res.cookie(DASHBOARD_TOKEN_COOKIE_NAME, '', {
+    ...expireOptions,
     path: DASHBOARD_COOKIE_PATH
   });
+
+  if (DASHBOARD_COOKIE_PATH !== '/dashboard') {
+    // Clear any legacy cookie that was previously scoped to /dashboard.
+    res.cookie(DASHBOARD_TOKEN_COOKIE_NAME, '', {
+      ...expireOptions,
+      path: '/dashboard'
+    });
+  }
 };
 
 const runMiddleware = (
@@ -3944,7 +3956,10 @@ dashboardRouter.get('/overview', async (req, res) => {
                   if (dateParam) {
                     url.searchParams.set('date', dateParam);
                   }
-                  const response = await fetch(url.toString(), { headers: { 'Accept': 'application/json' } });
+                  const response = await fetch(url.toString(), {
+                    headers: { 'Accept': 'application/json' },
+                    credentials: 'same-origin'
+                  });
                   if (!response.ok) return;
                   const data = await response.json();
                   applyPayload(data);
@@ -4263,7 +4278,8 @@ dashboardRouter.get('/balances', async (req, res) => {
                 const response = await fetch('/api/balances/' + userId + '/adjust', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ deltaHours: delta, reason })
+                  body: JSON.stringify({ deltaHours: delta, reason }),
+                  credentials: 'same-origin'
                 });
                 if (response.ok) {
                   window.location.reload();
@@ -5530,7 +5546,7 @@ dashboardRouter.get('/payroll', async (req, res) => {
                 button.disabled = true;
                 setError(errorTarget, '');
                 try {
-                  const response = await fetch(url, { method });
+                  const response = await fetch(url, { method, credentials: 'same-origin' });
                   if (!response.ok) {
                     let message = 'Unable to process request.';
                     try {
@@ -5561,7 +5577,10 @@ dashboardRouter.get('/payroll', async (req, res) => {
                 setError(errorTarget, '');
                 button.setAttribute('disabled', 'true');
                 try {
-                  const response = await fetch('/api/payroll/holidays/' + date, { method: 'DELETE' });
+                  const response = await fetch('/api/payroll/holidays/' + date, {
+                    method: 'DELETE',
+                    credentials: 'same-origin'
+                  });
                   if (!response.ok) {
                     let message = 'Unable to delete holiday.';
                     try {
@@ -5618,24 +5637,13 @@ dashboardRouter.get('/payroll', async (req, res) => {
                 try {
                   if (kind === 'payroll-run') {
                     const input = form.querySelector('input[name="payDate"]');
-                    if (!(input instanceof HTMLInputElement)) {
-                      throw new Error('Select a valid pay date.');
+                    if (!(input instanceof HTMLInputElement) || !input.value.trim()) {
+                      throw new Error('Select a pay date.');
                     }
                     const iso = input.value.trim();
-                    if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
-                      throw new Error('Select a valid pay date.');
-                    }
-                    const date = new Date(iso + 'T00:00:00Z');
-                    if (Number.isNaN(date.getTime())) {
-                      throw new Error('Select a valid pay date.');
-                    }
-                    const day = date.getUTCDate();
-                    const endOfMonth = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate();
-                    if (day !== 15 && day !== endOfMonth) {
-                      throw new Error('Pay date must be on the 15th or the last day of the month.');
-                    }
-                    const response = await fetch('/api/payroll/payruns/' + iso + '/recalc', {
-                      method: 'POST'
+                    const response = await fetch('/api/payroll/payruns/' + encodeURIComponent(iso) + '/recalc', {
+                      method: 'POST',
+                      credentials: 'same-origin'
                     });
                     if (!response.ok) {
                       let message = 'Unable to queue recalculation.';
@@ -5652,11 +5660,13 @@ dashboardRouter.get('/payroll', async (req, res) => {
 
                   if (kind === 'attendance-recalc') {
                     const input = form.querySelector('input[name="month"]');
-                    if (!(input instanceof HTMLInputElement) || !/^\d{4}-\d{2}$/.test(input.value)) {
-                      throw new Error('Select a valid month.');
+                    if (!(input instanceof HTMLInputElement) || !input.value.trim()) {
+                      throw new Error('Select a month.');
                     }
-                    const response = await fetch('/api/payroll/attendance/' + input.value + '/recalc', {
-                      method: 'POST'
+                    const iso = input.value.trim();
+                    const response = await fetch('/api/payroll/attendance/' + encodeURIComponent(iso) + '/recalc', {
+                      method: 'POST',
+                      credentials: 'same-origin'
                     });
                     if (!response.ok) {
                       let message = 'Unable to queue attendance recalculation.';
@@ -5683,7 +5693,8 @@ dashboardRouter.get('/payroll', async (req, res) => {
                     const response = await fetch('/api/payroll/holidays', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ name: nameInput.value.trim(), observedOn: dateInput.value })
+                      body: JSON.stringify({ name: nameInput.value.trim(), observedOn: dateInput.value }),
+                      credentials: 'same-origin'
                     });
                     if (!response.ok) {
                       let message = 'Unable to save holiday.';
@@ -5743,7 +5754,8 @@ dashboardRouter.get('/payroll', async (req, res) => {
                     const response = await fetch('/api/payroll/config', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify(payload)
+                      body: JSON.stringify(payload),
+                      credentials: 'same-origin'
                     });
                     if (!response.ok) {
                       let message = 'Unable to save configuration.';
@@ -5783,7 +5795,8 @@ dashboardRouter.get('/payroll', async (req, res) => {
                     const response = await fetch('/api/payroll/kpi/' + id + '/decision', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify(payload)
+                      body: JSON.stringify(payload),
+                      credentials: 'same-origin'
                     });
                     if (!response.ok) {
                       let message = 'Unable to update KPI bonus.';
@@ -5915,7 +5928,8 @@ dashboardRouter.get('/payroll', async (req, res) => {
                 setError(errorTarget, '');
                 try {
                   const response = await fetch('/api/payroll/payruns/' + payDate, {
-                    headers: { 'Accept': 'application/json' }
+                    headers: { 'Accept': 'application/json' },
+                    credentials: 'same-origin'
                   });
                   if (!response.ok) {
                     let message = 'Unable to load payroll details.';

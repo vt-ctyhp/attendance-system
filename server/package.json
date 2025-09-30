@@ -13,6 +13,7 @@
     "prisma:generate": "prisma generate",
     "prisma:deploy": "prisma migrate deploy",
     "seed:sample": "ts-node scripts/seedSampleData.ts",
+    "seed:payroll-demo": "ts-node scripts/seedPayrollDemoMonth.ts",
     "lint": "eslint .",
     "test": "node scripts/run-tests.cjs",
     "test:makeup-cap": "node scripts/testMakeupCap.mjs",
