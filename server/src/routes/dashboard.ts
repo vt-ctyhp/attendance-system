@@ -2314,6 +2314,8 @@ const baseStyles = `
   .nav__logout-button:hover { background: #dc2626; }
   .nav a { color: #2563eb; text-decoration: none; font-weight: 500; padding-bottom: 0.25rem; }
   .nav a.active { border-bottom: 2px solid #2563eb; }
+  .nav__link--child { margin-left: 1.35rem; font-size: 0.92rem; position: relative; }
+  .nav__link--child::before { content: ''; position: absolute; left: -0.9rem; top: 50%; width: 6px; height: 6px; border-radius: 999px; background: currentColor; transform: translateY(-50%); opacity: 0.6; }
   .card { background: #fff; padding: 1.25rem; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); margin-top: 1.5rem; max-width: 100%; }
   .stack-form { display: grid; gap: 0.75rem; max-width: 360px; }
   .stack-form label { display: grid; gap: 0.25rem; font-weight: 600; color: #1f2933; }
@@ -2481,6 +2483,8 @@ const baseStyles = `
     body.dashboard .nav { background: rgba(255,255,255,0.85); backdrop-filter: blur(12px); padding: 0.6rem 1rem; border-radius: 999px; box-shadow: 0 16px 32px rgba(15,23,42,0.08); position: sticky; top: clamp(0.75rem,2vw,1.25rem); z-index: 20; }
     body.dashboard .nav a { padding: 0.35rem 0.85rem; border-radius: 999px; font-weight: 600; color: #64748b; }
     body.dashboard .nav a.active { background: #2563eb; color: #fff; box-shadow: 0 12px 24px rgba(37,99,235,0.22); border-bottom: none; }
+    body.dashboard .nav__link--child { margin-left: 1.5rem; padding-left: 0.35rem; padding-right: 0.75rem; color: #475569; }
+    body.dashboard .nav__link--child.active { color: #fff; }
     body.dashboard .nav__account-label { color: #0f172a; }
     body.dashboard .nav__logout-button { background: #dc2626; border-radius: 999px; padding: 0.45rem 1rem; }
     body.dashboard .nav__logout-button:hover { box-shadow: 0 12px 24px rgba(220,38,38,0.25); }
@@ -2548,6 +2552,13 @@ const baseStyles = `
     body.dashboard .empty { background: rgba(15,23,42,0.03); color: #64748b; border-radius: 16px; }
     body.dashboard--payroll .cards-grid--payroll { grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); }
     body.dashboard--payroll .cards-grid--summary { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+    body.dashboard--payroll-summary .cards-grid--summary { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+    body.dashboard--payroll-summary .totals-table { width: 100%; border-collapse: collapse; margin: 0; background: transparent; box-shadow: none; }
+    body.dashboard--payroll-summary .totals-table th { text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.7rem; color: #64748b; padding: 0.5rem 0; background: transparent; }
+    body.dashboard--payroll-summary .totals-table td { text-align: right; font-weight: 700; color: #0f172a; font-variant-numeric: tabular-nums; padding: 0.5rem 0; border-bottom: 1px solid rgba(148,163,184,0.2); }
+    body.dashboard--payroll-summary .totals-table tbody tr:first-child th, body.dashboard--payroll-summary .totals-table tbody tr:first-child td { padding-top: 0; }
+    body.dashboard--payroll-summary .totals-table tbody tr:last-child td { border-bottom: none; padding-bottom: 0; }
+    body.dashboard--payroll-summary .summary-cards { margin: 0; }
     body.dashboard--payroll .summary-card--neutral {
       background: #fff;
       color: #0f172a;
@@ -2708,11 +2719,24 @@ type NavKey =
   | 'requests'
   | 'balances'
   | 'payroll'
+  | 'payroll-holidays'
   | 'settings';
 
 const renderNav = (active: NavKey) => {
-  const link = (href: string, label: string, key: NavKey) =>
-    `<a href="${href}"${active === key ? ' class="active"' : ''}>${label}</a>`;
+  const isPayrollContext = active === 'payroll' || active === 'payroll-holidays';
+  const link = (href: string, label: string, key: NavKey, options?: { child?: boolean }) => {
+    const classes = ['nav__link'];
+    const isActive = key === 'payroll' ? isPayrollContext : active === key;
+    if (options?.child) {
+      classes.push('nav__link--child');
+    }
+    if (isActive) {
+      classes.push('active');
+    }
+    const classAttr = classes.length ? ` class="${classes.join(' ')}"` : '';
+    const ariaCurrent = isActive ? ' aria-current="page"' : '';
+    return `<a href="${href}"${classAttr}${ariaCurrent}>${label}</a>`;
+  };
   const links = [
     link('/dashboard/overview', 'Overview', 'overview'),
     link('/dashboard/today', 'Today', 'today'),
@@ -2720,6 +2744,7 @@ const renderNav = (active: NavKey) => {
     link('/dashboard/requests', 'Requests', 'requests'),
     link('/dashboard/balances', 'Balances', 'balances'),
     link('/dashboard/payroll', 'Payroll', 'payroll'),
+    link('/dashboard/payroll/holidays', 'Holiday Calendar', 'payroll-holidays', { child: true }),
     link('/dashboard/settings', 'Settings', 'settings')
   ];
 
@@ -5323,19 +5348,17 @@ dashboardRouter.get('/payroll', async (req, res) => {
       orderBy: { name: 'asc' },
       select: { id: true, name: true, email: true, active: true }
     }),
-    listEmployeeConfigs(),
-    listHolidays(now, addMonths(now, 12))
+    listEmployeeConfigs()
   ] as const);
 
   const baseData = await baseDataPromise;
   const attendanceData = await listAttendanceFactsForMonth(selectedFactsMonth);
   const bonusCandidates = await listBonusesForPayDate(bonusDateValue);
 
-  const [periods, employees, configSnapshots, holidays]: [
+  const [periods, employees, configSnapshots]: [
     PayrollPeriodRecord[],
     DashboardEmployeeRecord[],
-    EmployeeCompSnapshot[],
-    HolidayRecordList
+    EmployeeCompSnapshot[]
   ] = baseData;
 
   const employeeLookup = new Map(employees.map((employee) => [employee.id, employee]));
@@ -5542,46 +5565,6 @@ dashboardRouter.get('/payroll', async (req, res) => {
   const attendanceRangeNote = attendanceData
     ? renderTimezoneNote(attendanceData.rangeStart, attendanceData.rangeEnd)
     : '';
-
-  const holidayRows = holidays
-    .map((holiday) => {
-      const iso = formatIsoDate(holiday.observedOn);
-      return `
-        <tr>
-          <td>${escapeHtml(holiday.name)}</td>
-          <td>${escapeHtml(formatFullDate(holiday.observedOn))}</td>
-          <td>
-            <button
-              type="button"
-              class="button button-danger"
-              data-holiday-delete
-              data-date="${iso}"
-              data-name="${escapeHtml(holiday.name)}"
-              data-success-message="Holiday removed."
-              data-error-target="holiday-error"
-            >Remove</button>
-          </td>
-        </tr>
-      `;
-    })
-    .join('\n');
-
-  const holidayTable = holidays.length
-    ? `<div class="table-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Date</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${holidayRows}
-          </tbody>
-        </table>
-      </div>`
-    : '<div class="empty">No upcoming holidays recorded.</div>';
 
   const employeeOptions = buildSelectOptions([
     { value: '', label: 'Select employee' },
@@ -6077,29 +6060,6 @@ dashboardRouter.get('/payroll', async (req, res) => {
                 </form>
               </div>
             </section>
-            <section class="card card--table">
-              <div class="card__header">
-                <div>
-                  <h2 class="card__title">Holiday Calendar</h2>
-                  <p class="card__subtitle">Manage observed dates for the next 12 months.</p>
-                </div>
-              </div>
-              <div class="card__body">
-                ${holidayTable}
-                <form data-async="true" data-kind="holiday" data-success-message="Holiday saved." class="stack-form holiday-form">
-                  <label>
-                    <span>Name</span>
-                    <input type="text" name="name" maxlength="200" required />
-                  </label>
-                  <label>
-                    <span>Date</span>
-                    <input type="date" name="observedOn" required />
-                  </label>
-                  <p class="form-error" id="holiday-error" data-error></p>
-                  <button type="submit">Save Holiday</button>
-                </form>
-              </div>
-            </section>
           </div>
           <div class="cards-grid cards-grid--payroll">
             <section class="card card--table" id="bonus-review">
@@ -6202,40 +6162,6 @@ dashboardRouter.get('/payroll', async (req, res) => {
               });
             });
 
-            document.querySelectorAll('[data-holiday-delete]').forEach((button) => {
-              button.addEventListener('click', async () => {
-                const date = button.getAttribute('data-date');
-                if (!date) return;
-                const name = button.getAttribute('data-name') || 'this holiday';
-                if (!window.confirm('Remove ' + name + '?')) {
-                  return;
-                }
-                const errorTarget = button.getAttribute('data-error-target');
-                setError(errorTarget, '');
-                button.setAttribute('disabled', 'true');
-                try {
-                  const response = await fetch('/api/payroll/holidays/' + date, {
-                    method: 'DELETE',
-                    credentials: 'same-origin'
-                  });
-                  if (!response.ok) {
-                    let message = 'Unable to delete holiday.';
-                    try {
-                      const data = await response.json();
-                      if (data && typeof data.error === 'string') message = data.error;
-                      else if (data && typeof data.message === 'string') message = data.message;
-                    } catch (err) {}
-                    throw new Error(message);
-                  }
-                  reloadWithBanner(button.getAttribute('data-success-message') || 'Holiday removed.');
-                } catch (err) {
-                  const message = err instanceof Error ? err.message : 'Unable to delete holiday.';
-                  setError(errorTarget, message);
-                  button.removeAttribute('disabled');
-                }
-              });
-            });
-
             const serializeSchedule = (form) => {
               const start = form.querySelector('input[name="scheduleStart"]');
               const end = form.querySelector('input[name="scheduleEnd"]');
@@ -6315,34 +6241,6 @@ dashboardRouter.get('/payroll', async (req, res) => {
                       throw new Error(message);
                     }
                     reloadWithBanner(form.getAttribute('data-success-message') || 'Attendance recalculation started.');
-                    return;
-                  }
-
-                  if (kind === 'holiday') {
-                    const nameInput = form.querySelector('input[name="name"]');
-                    const dateInput = form.querySelector('input[name="observedOn"]');
-                    if (!(nameInput instanceof HTMLInputElement) || !nameInput.value.trim()) {
-                      throw new Error('Name is required.');
-                    }
-                    if (!(dateInput instanceof HTMLInputElement) || !/^\d{4}-\d{2}-\d{2}$/.test(dateInput.value)) {
-                      throw new Error('Date is required.');
-                    }
-                    const response = await fetch('/api/payroll/holidays', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ name: nameInput.value.trim(), observedOn: dateInput.value }),
-                      credentials: 'same-origin'
-                    });
-                    if (!response.ok) {
-                      let message = 'Unable to save holiday.';
-                      try {
-                        const data = await response.json();
-                        if (data && typeof data.error === 'string') message = data.error;
-                        else if (data && typeof data.message === 'string') message = data.message;
-                      } catch (err) {}
-                      throw new Error(message);
-                    }
-                    reloadWithBanner(form.getAttribute('data-success-message') || 'Holiday saved.');
                     return;
                   }
 
@@ -6651,6 +6549,243 @@ const renderSettingsPage = ({ enabled, employees, logs, message, error }: Settin
 
 
 
+dashboardRouter.get('/payroll/holidays', async (req, res) => {
+  const toOptionalString = (value: unknown) =>
+    typeof value === 'string' && value.trim().length ? value.trim() : undefined;
+
+  const message = toOptionalString(req.query.message);
+  const error = toOptionalString(req.query.error);
+
+  const now = new Date();
+  const windowEnd = addMonths(now, 12);
+  const defaultMonthParam = formatInTimeZone(zonedStartOfMonth(now), DASHBOARD_TIME_ZONE, 'yyyy-MM');
+  const wizardDefaultPayDate = computeNextPayrollPayDate();
+  const parsedWizardPayDate = parseDateInput(wizardDefaultPayDate) ?? zonedStartOfDay(now);
+  const actorId = (req as AuthenticatedRequest | undefined)?.user?.id ?? null;
+
+  await ensurePayrollDemoData(defaultMonthParam, parsedWizardPayDate, actorId);
+
+  const holidays = await listHolidays(now, windowEnd);
+  const nextHoliday = holidays[0];
+  const upcomingCount = holidays.length;
+  const upcomingLabel = upcomingCount === 1 ? 'holiday' : 'holidays';
+  const nextHolidayName = nextHoliday ? nextHoliday.name : 'No holiday scheduled';
+  const nextHolidayDate = nextHoliday
+    ? formatFullDate(nextHoliday.observedOn)
+    : 'Add a holiday to populate the calendar.';
+
+  const holidayRows = holidays
+    .map((holiday) => {
+      const iso = formatIsoDate(holiday.observedOn);
+      return `
+        <tr>
+          <td>${escapeHtml(holiday.name)}</td>
+          <td>${escapeHtml(formatFullDate(holiday.observedOn))}</td>
+          <td>
+            <button
+              type="button"
+              class="button button-danger"
+              data-holiday-delete
+              data-date="${iso}"
+              data-name="${escapeHtml(holiday.name)}"
+              data-success-message="Holiday removed."
+              data-error-target="holiday-error"
+            >Remove</button>
+          </td>
+        </tr>
+      `;
+    })
+    .join('\n');
+
+  const holidayTable = holidays.length
+    ? `<div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Date</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${holidayRows}
+          </tbody>
+        </table>
+      </div>`
+    : '<div class="empty">No upcoming holidays recorded.</div>';
+
+  const messageAlert = message ? `<div class="alert success">${escapeHtml(message)}</div>` : '';
+  const errorAlert = error ? `<div class="alert error">${escapeHtml(error)}</div>` : '';
+  const timezoneNote = renderTimezoneNote(now, windowEnd);
+
+  const html = `
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <title>Holiday Calendar – Payroll</title>
+        <style>${baseStyles}</style>
+      </head>
+      <body class="dashboard dashboard--payroll-holidays">
+        ${renderNav('payroll-holidays')}
+        <main class="page-shell">
+          <header class="page-header">
+            <div class="page-header__content">
+              <p class="page-header__eyebrow">Payroll</p>
+              <h1 class="page-header__title">Holiday Calendar</h1>
+              <p class="page-header__subtitle">Plan, review, and update company-observed holidays for the next 12 months.</p>
+            </div>
+            <div class="page-header__meta">
+              <span>${upcomingCount ? `${upcomingCount} upcoming ${upcomingLabel}` : 'No holidays scheduled'}</span>
+              <a class="button button-secondary" href="/dashboard/payroll">Back to Payroll</a>
+            </div>
+          </header>
+          ${messageAlert}
+          ${errorAlert}
+          <div class="cards-grid cards-grid--payroll cards-grid--summary">
+            <section class="card summary-card summary-card--neutral">
+              <p class="summary-title">Next observed holiday</p>
+              <p class="summary-card__value">${escapeHtml(nextHolidayName)}</p>
+              <div class="summary-card__status"><span>${escapeHtml(nextHolidayDate)}</span></div>
+              <p class="summary-card__meta">${escapeHtml(`Tracking ${upcomingCount} ${upcomingLabel} in the upcoming year.`)}</p>
+              <a class="button button-secondary summary-card__action" href="/dashboard/payroll">Open payroll operations</a>
+            </section>
+          </div>
+          <div class="cards-grid cards-grid--payroll">
+            <section class="card card--table">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Holiday Calendar</h2>
+                  <p class="card__subtitle">Manage observed dates for the next 12 months.</p>
+                </div>
+              </div>
+              <div class="card__body">
+                ${timezoneNote}
+                ${holidayTable}
+                <form data-async="true" data-kind="holiday" data-success-message="Holiday saved." class="stack-form holiday-form">
+                  <label>
+                    <span>Name</span>
+                    <input type="text" name="name" maxlength="200" required />
+                  </label>
+                  <label>
+                    <span>Date</span>
+                    <input type="date" name="observedOn" required />
+                  </label>
+                  <p class="form-error" id="holiday-error" data-error></p>
+                  <button type="submit">Save Holiday</button>
+                </form>
+              </div>
+            </section>
+          </div>
+        </main>
+
+        <script>
+          (() => {
+            const reloadWithBanner = (message, error) => {
+              const url = new URL(window.location.href);
+              if (message) {
+                url.searchParams.set('message', message);
+                url.searchParams.delete('error');
+              } else if (error) {
+                url.searchParams.set('error', error);
+                url.searchParams.delete('message');
+              } else {
+                url.searchParams.delete('message');
+                url.searchParams.delete('error');
+              }
+              window.location.href = url.toString();
+            };
+
+            const setError = (target, text) => {
+              const el = typeof target === 'string' ? document.getElementById(target) : target;
+              if (el) {
+                el.textContent = text;
+              }
+            };
+
+            document.querySelectorAll('[data-holiday-delete]').forEach((button) => {
+              button.addEventListener('click', async () => {
+                const date = button.getAttribute('data-date');
+                if (!date) return;
+                const name = button.getAttribute('data-name') || 'this holiday';
+                if (!window.confirm('Remove ' + name + '?')) {
+                  return;
+                }
+                const errorTarget = button.getAttribute('data-error-target');
+                setError(errorTarget, '');
+                button.setAttribute('disabled', 'true');
+                try {
+                  const response = await fetch('/api/payroll/holidays/' + date, {
+                    method: 'DELETE',
+                    credentials: 'same-origin'
+                  });
+                  if (!response.ok) {
+                    let message = 'Unable to delete holiday.';
+                    try {
+                      const data = await response.json();
+                      if (data && typeof data.error === 'string') message = data.error;
+                      else if (data && typeof data.message === 'string') message = data.message;
+                    } catch (err) {}
+                    throw new Error(message);
+                  }
+                  reloadWithBanner(button.getAttribute('data-success-message') || 'Holiday removed.');
+                } catch (err) {
+                  const message = err instanceof Error ? err.message : 'Unable to delete holiday.';
+                  setError(errorTarget, message);
+                  button.removeAttribute('disabled');
+                }
+              });
+            });
+
+            const holidayForm = document.querySelector('form[data-kind="holiday"]');
+            if (holidayForm instanceof HTMLFormElement) {
+              holidayForm.addEventListener('submit', async (event) => {
+                event.preventDefault();
+                const errorEl = holidayForm.querySelector('[data-error]');
+                setError(errorEl, '');
+                const submitter = event.submitter instanceof HTMLButtonElement ? event.submitter : null;
+                if (submitter) submitter.disabled = true;
+                try {
+                  const nameInput = holidayForm.querySelector('input[name="name"]');
+                  const dateInput = holidayForm.querySelector('input[name="observedOn"]');
+                  if (!(nameInput instanceof HTMLInputElement) || !nameInput.value.trim()) {
+                    throw new Error('Name is required.');
+                  }
+                  if (!(dateInput instanceof HTMLInputElement) || !/^\\d{4}-\\d{2}-\\d{2}$/.test(dateInput.value)) {
+                    throw new Error('Date is required.');
+                  }
+                  const response = await fetch('/api/payroll/holidays', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: nameInput.value.trim(), observedOn: dateInput.value }),
+                    credentials: 'same-origin'
+                  });
+                  if (!response.ok) {
+                    let message = 'Unable to save holiday.';
+                    try {
+                      const data = await response.json();
+                      if (data && typeof data.error === 'string') message = data.error;
+                      else if (data && typeof data.message === 'string') message = data.message;
+                    } catch (err) {}
+                    throw new Error(message);
+                  }
+                  reloadWithBanner(holidayForm.getAttribute('data-success-message') || 'Holiday saved.');
+                } catch (err) {
+                  const message = err instanceof Error ? err.message : 'Unable to save holiday.';
+                  setError(errorEl, message);
+                  if (submitter) submitter.disabled = false;
+                }
+              });
+            }
+          })();
+        </script>
+      </body>
+    </html>
+  `;
+
+  res.type('html').send(html);
+});
+
 dashboardRouter.get('/payroll/summary/:payDate', async (req, res) => {
   const payDateParam = typeof req.params.payDate === 'string' ? req.params.payDate : '';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(payDateParam)) {
@@ -6768,6 +6903,9 @@ dashboardRouter.get('/payroll/summary/:payDate', async (req, res) => {
       nonPtoHours: number;
       makeUpHours: number;
       tardyMinutes: number;
+      tardyEvents: number;
+      scheduledDays: number;
+      onTimeDays: number;
     };
     totalHours: number;
     onTimePercent: number | null;
@@ -6815,7 +6953,10 @@ dashboardRouter.get('/payroll/summary/:payDate', async (req, res) => {
           ptoHours: Math.round(totals.ptoHours * 100) / 100,
           nonPtoHours: Math.round(totals.nonPtoHours * 100) / 100,
           makeUpHours: Math.round(totals.makeUpHours * 100) / 100,
-          tardyMinutes: totals.tardyMinutes
+          tardyMinutes: totals.tardyMinutes,
+          tardyEvents: totals.tardyEvents,
+          scheduledDays: totals.scheduledDays,
+          onTimeDays: totals.onTimeDays
         },
         totalHours,
         onTimePercent,
@@ -6830,6 +6971,47 @@ dashboardRouter.get('/payroll/summary/:payDate', async (req, res) => {
   const attendanceBonusTotal =
     periodTotals.monthlyAttendance + periodTotals.monthlyDeferred + periodTotals.quarterlyAttendance;
   const teamTotalHours = employeeSummaries.reduce((acc, entry) => acc + entry.totalHours, 0);
+
+  const teamAttendanceTotals = employeeSummaries.reduce(
+    (acc, entry) => ({
+      scheduledDays: acc.scheduledDays + entry.totals.scheduledDays,
+      onTimeDays: acc.onTimeDays + entry.totals.onTimeDays,
+      tardyMinutes: acc.tardyMinutes + entry.totals.tardyMinutes,
+      tardyEvents: acc.tardyEvents + entry.totals.tardyEvents
+    }),
+    { scheduledDays: 0, onTimeDays: 0, tardyMinutes: 0, tardyEvents: 0 }
+  );
+
+  const teamBehaviorTotals = employeeSummaries.reduce(
+    (acc, entry) => ({
+      lunchMinutes: acc.lunchMinutes + entry.behavior.lunchMinutes,
+      lunchCount: acc.lunchCount + entry.behavior.lunchCount,
+      breakMinutes: acc.breakMinutes + entry.behavior.breakMinutes,
+      breakCount: acc.breakCount + entry.behavior.breakCount,
+      idleMinutes: acc.idleMinutes + entry.behavior.idleMinutes,
+      idleDays: acc.idleDays + entry.behavior.idleDays
+    }),
+    { lunchMinutes: 0, lunchCount: 0, breakMinutes: 0, breakCount: 0, idleMinutes: 0, idleDays: 0 }
+  );
+
+  const teamOnTimePercent = teamAttendanceTotals.scheduledDays
+    ? (teamAttendanceTotals.onTimeDays / teamAttendanceTotals.scheduledDays) * 100
+    : null;
+  const teamAverageTardy = teamAttendanceTotals.tardyEvents
+    ? teamAttendanceTotals.tardyMinutes / teamAttendanceTotals.tardyEvents
+    : null;
+  const teamAverageLunch = teamBehaviorTotals.lunchCount
+    ? teamBehaviorTotals.lunchMinutes / teamBehaviorTotals.lunchCount
+    : null;
+  const teamAverageBreak = teamBehaviorTotals.breakCount
+    ? teamBehaviorTotals.breakMinutes / teamBehaviorTotals.breakCount
+    : null;
+  const teamAverageIdle = teamBehaviorTotals.idleDays
+    ? teamBehaviorTotals.idleMinutes / teamBehaviorTotals.idleDays
+    : null;
+
+  const hasSummaries = employeeSummaries.length > 0;
+  const noSummariesMessage = 'No payroll lines have been computed for this period.';
 
   const formatPercent = (value: number | null) => {
     if (value === null || !Number.isFinite(value)) return '—';
@@ -6906,19 +7088,86 @@ dashboardRouter.get('/payroll/summary/:payDate', async (req, res) => {
       </div>`
     : '';
 
-  const emptyState = employeeSummaries.length
+  const employeeEmptyState = hasSummaries
     ? ''
-    : '<div class="empty" data-summary-empty>No payroll lines have been computed for this period.</div>';
+    : `<div class="empty" data-summary-empty>${escapeHtml(noSummariesMessage)}</div>`;
 
-  const totalsGrid = `
-    <dl class="totals-grid">
-      <div><dt>Gross</dt><dd>${formatCurrency(periodTotals.finalAmount)}</dd></div>
-      <div><dt>Base Pay</dt><dd>${formatCurrency(periodTotals.base)}</dd></div>
-      <div><dt>Attendance Bonus</dt><dd>${formatCurrency(attendanceBonusTotal)}</dd></div>
-      <div><dt>KPI Bonus</dt><dd>${formatCurrency(periodTotals.kpiBonus)}</dd></div>
-      <div><dt>Total Hours</dt><dd>${formatHours(Math.round(teamTotalHours * 100) / 100)} h</dd></div>
-    </dl>
+  const teamHoursLabel = `${formatHours(Math.round(teamTotalHours * 100) / 100)} h`;
+
+  const teamTotalsTable = `
+    <table class="totals-table">
+      <tbody>
+        <tr><th scope="row">Gross</th><td>${formatCurrency(periodTotals.finalAmount)}</td></tr>
+        <tr><th scope="row">Base</th><td>${formatCurrency(periodTotals.base)}</td></tr>
+        <tr><th scope="row">Attendance Bonus</th><td>${formatCurrency(attendanceBonusTotal)}</td></tr>
+        <tr><th scope="row">KPI Bonus</th><td>${formatCurrency(periodTotals.kpiBonus)}</td></tr>
+      </tbody>
+    </table>
   `;
+
+  const teamTotalsEmptyState = hasSummaries
+    ? ''
+    : `<div class="empty" data-totals-empty>${escapeHtml(noSummariesMessage)}</div>`;
+
+  const teamTotalsContent = hasSummaries
+    ? `<div data-totals-content hidden>
+        ${teamTotalsTable}
+        <p class="meta">Team logged ${escapeHtml(teamHoursLabel)} total hours.</p>
+      </div>`
+    : '';
+
+  const teamMetricsCards = hasSummaries
+    ? (() => {
+        const onTimeMeta = teamAttendanceTotals.scheduledDays
+          ? `${teamAttendanceTotals.onTimeDays} of ${teamAttendanceTotals.scheduledDays} days on time`
+          : 'No scheduled days recorded';
+        const tardyMeta = teamAttendanceTotals.tardyEvents
+          ? `${teamAttendanceTotals.tardyEvents} tardy ${teamAttendanceTotals.tardyEvents === 1 ? 'event' : 'events'}`
+          : 'No tardy events recorded';
+        const lunchMeta = teamBehaviorTotals.lunchCount
+          ? `${teamBehaviorTotals.lunchCount} lunches tracked`
+          : 'No lunches tracked';
+        const breakMeta = teamBehaviorTotals.breakCount
+          ? `${teamBehaviorTotals.breakCount} breaks tracked`
+          : 'No breaks tracked';
+        const idleMeta = teamBehaviorTotals.idleDays
+          ? `${teamBehaviorTotals.idleDays} working ${teamBehaviorTotals.idleDays === 1 ? 'day' : 'days'}`
+          : 'No idle time tracked';
+        return `
+          <div class="summary-cards">
+            <div class="summary-card">
+              <div class="summary-title">On-Time %</div>
+              <div class="summary-value">${escapeHtml(formatPercent(teamOnTimePercent))}</div>
+              <div class="summary-meta">${escapeHtml(onTimeMeta)}</div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-title">Avg Tardy</div>
+              <div class="summary-value">${escapeHtml(formatAverageMinutes(teamAverageTardy))}</div>
+              <div class="summary-meta">${escapeHtml(tardyMeta)}</div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-title">Avg Lunch</div>
+              <div class="summary-value">${escapeHtml(formatAverageMinutes(teamAverageLunch))}</div>
+              <div class="summary-meta">${escapeHtml(lunchMeta)}</div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-title">Avg Break</div>
+              <div class="summary-value">${escapeHtml(formatAverageMinutes(teamAverageBreak))}</div>
+              <div class="summary-meta">${escapeHtml(breakMeta)}</div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-title">Avg Idle</div>
+              <div class="summary-value">${escapeHtml(formatAverageMinutes(teamAverageIdle))}</div>
+              <div class="summary-meta">${escapeHtml(idleMeta)}</div>
+            </div>
+          </div>
+        `;
+      })()
+    : '';
+
+  const teamMetricsEmptyState = hasSummaries
+    ? ''
+    : `<div class="empty" data-metrics-empty>${escapeHtml('Team metrics are unavailable without payroll lines.')}</div>`;
 
   const payDateLabel = formatFullDate(normalizedPayDate);
   const periodRangeLabel = `${formatFullDate(periodStart)} – ${formatFullDate(periodEnd)}`;
@@ -6950,8 +7199,8 @@ dashboardRouter.get('/payroll/summary/:payDate', async (req, res) => {
               <a class="button button-secondary" href="/dashboard/payroll">Back to Payroll</a>
             </div>
           </header>
-          <div class="cards-grid">
-            <section class="card">
+          <div class="cards-grid cards-grid--summary">
+            <section class="card card--table">
               <div class="card__header">
                 <div>
                   <h2 class="card__title">Team Totals</h2>
@@ -6959,7 +7208,24 @@ dashboardRouter.get('/payroll/summary/:payDate', async (req, res) => {
                 </div>
               </div>
               <div class="card__body">
-                ${totalsGrid}
+                <div data-totals-loading class="empty">Loading team totals…</div>
+                <div data-totals-error class="empty empty--error" hidden>Unable to load team totals.</div>
+                ${teamTotalsEmptyState}
+                ${teamTotalsContent}
+              </div>
+            </section>
+            <section class="card">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Team Metrics</h2>
+                  <p class="card__subtitle">Punctuality and behavior insights for the pay period.</p>
+                </div>
+              </div>
+              <div class="card__body">
+                <div data-metrics-loading class="empty">Loading team metrics…</div>
+                <div data-metrics-error class="empty empty--error" hidden>Unable to load team metrics.</div>
+                ${teamMetricsEmptyState}
+                ${hasSummaries ? `<div data-metrics-content hidden>${teamMetricsCards}</div>` : ''}
               </div>
             </section>
           </div>
@@ -6974,7 +7240,7 @@ dashboardRouter.get('/payroll/summary/:payDate', async (req, res) => {
               <div class="card__body">
                 <div data-summary-loading class="empty">Loading payroll summary…</div>
                 <div data-summary-error class="empty empty--error" hidden>Unable to load payroll summary.</div>
-                ${emptyState}
+                ${employeeEmptyState}
                 ${employeeSummaries.length ? `<div data-summary-content hidden>${employeeTable}</div>` : ''}
                 <noscript>${employeeSummaries.length ? employeeTable : '<div class="empty">No payroll lines have been computed for this period.</div>'}</noscript>
               </div>
@@ -6983,14 +7249,17 @@ dashboardRouter.get('/payroll/summary/:payDate', async (req, res) => {
         </main>
         <script>
           (() => {
-            const loading = document.querySelector('[data-summary-loading]');
-            const content = document.querySelector('[data-summary-content]');
-            if (loading) {
-              loading.setAttribute('hidden', 'true');
-            }
-            if (content) {
-              content.removeAttribute('hidden');
-            }
+            const reveal = (key) => {
+              const loading = document.querySelector('[data-' + key + '-loading]');
+              const content = document.querySelector('[data-' + key + '-content]');
+              if (loading) {
+                loading.setAttribute('hidden', 'true');
+              }
+              if (content) {
+                content.removeAttribute('hidden');
+              }
+            };
+            ['summary', 'totals', 'metrics'].forEach(reveal);
           })();
         </script>
       </body>
