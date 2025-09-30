@@ -1,6 +1,15 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { randomUUID } from 'crypto';
-import { addDays, addMonths, endOfDay, endOfMonth, startOfDay, startOfMonth, subDays } from 'date-fns';
+import {
+  addDays,
+  addMonths,
+  differenceInCalendarDays,
+  endOfDay,
+  endOfMonth,
+  startOfDay,
+  startOfMonth,
+  subDays
+} from 'date-fns';
 import { formatInTimeZone, utcToZonedTime, zonedTimeToUtc } from 'date-fns-tz';
 import { z } from 'zod';
 import type { Prisma } from '@prisma/client';
@@ -705,6 +714,369 @@ const parsePeriodTotals = (value: unknown): PeriodTotals => {
   };
 };
 
+const normalizePayDateForDashboard = (payDate: Date) => {
+  const zonedPay = zoned(payDate);
+  const endOfMonthZoned = endOfMonth(zonedPay);
+  const normalized = new Date(zonedPay);
+  normalized.setHours(0, 0, 0, 0);
+  if (zonedPay.getDate() === 15 || zonedPay.getDate() === endOfMonthZoned.getDate()) {
+    return zonedTimeToUtc(normalized, DASHBOARD_TIME_ZONE);
+  }
+  if (zonedPay.getDate() < 15) {
+    normalized.setDate(15);
+  } else {
+    normalized.setTime(endOfMonthZoned.getTime());
+  }
+  normalized.setHours(0, 0, 0, 0);
+  return zonedTimeToUtc(normalized, DASHBOARD_TIME_ZONE);
+};
+
+const computePayPeriodWindow = (payDate: Date) => {
+  const normalizedPayDate = normalizePayDateForDashboard(payDate);
+  const payZoned = zoned(normalizedPayDate);
+  const isFifteenth = payZoned.getDate() === 15;
+  let startZoned: Date;
+  let endZoned: Date;
+  if (isFifteenth) {
+    const prevMonth = addMonths(payZoned, -1);
+    startZoned = new Date(prevMonth);
+    startZoned.setDate(16);
+    endZoned = endOfMonth(prevMonth);
+  } else {
+    startZoned = new Date(payZoned);
+    startZoned.setDate(1);
+    endZoned = new Date(payZoned);
+    endZoned.setDate(15);
+  }
+  const periodStart = zonedTimeToUtc(startOfDay(startZoned), DASHBOARD_TIME_ZONE);
+  const periodEnd = zonedTimeToUtc(endOfDay(endZoned), DASHBOARD_TIME_ZONE);
+  return { payDate: normalizedPayDate, periodStart, periodEnd };
+};
+
+const computePreviousPayDate = (payDate: Date) => {
+  const normalizedPayDate = normalizePayDateForDashboard(payDate);
+  const payZoned = zoned(normalizedPayDate);
+  if (payZoned.getDate() === 15) {
+    const prevMonth = addMonths(payZoned, -1);
+    const prevEnd = endOfMonth(prevMonth);
+    prevEnd.setHours(0, 0, 0, 0);
+    return zonedTimeToUtc(prevEnd, DASHBOARD_TIME_ZONE);
+  }
+  const prev = new Date(payZoned);
+  prev.setDate(15);
+  prev.setHours(0, 0, 0, 0);
+  return zonedTimeToUtc(prev, DASHBOARD_TIME_ZONE);
+};
+
+const formatAttendanceDayLabel = (value: Date) => formatInTimeZone(value, DASHBOARD_TIME_ZONE, 'EEE, MMM d');
+
+const collectAttendanceSummary = async (
+  userId: number,
+  periodStart: Date,
+  periodEnd: Date
+): Promise<PeriodAttendanceSummary> => {
+  const summary: PeriodAttendanceSummary = {
+    details: [],
+    makeUpRequests: [],
+    totals: {
+      workedHours: 0,
+      ptoHours: 0,
+      nonPtoHours: 0,
+      makeUpHours: 0,
+      tardyMinutes: 0,
+      tardyEvents: 0,
+      scheduledDays: 0,
+      onTimeDays: 0,
+      absenceDays: 0
+    }
+  };
+
+  const detailMap = new Map<string, PeriodAttendanceDetail>();
+
+  const monthKeys = new Set<string>();
+  for (let cursor = periodStart; cursor <= periodEnd; cursor = addDays(cursor, 1)) {
+    monthKeys.add(formatInTimeZone(cursor, DASHBOARD_TIME_ZONE, 'yyyy-MM'));
+  }
+
+  for (const monthKey of monthKeys) {
+    const fact = await prisma.attendanceMonthFact.findUnique({
+      where: { userId_monthKey: { userId, monthKey } }
+    });
+    if (!fact) continue;
+
+    const snapshot = (fact.snapshot ?? {}) as AttendanceSnapshotPayload;
+    const days = Array.isArray(snapshot.days) ? snapshot.days : [];
+    let usedSnapshot = false;
+
+    if (days.length) {
+      usedSnapshot = true;
+      for (const raw of days) {
+        if (!raw || typeof raw !== 'object') continue;
+        const isoDate = typeof raw.date === 'string' ? raw.date : '';
+        if (!isoDate) continue;
+        const parsed = parseDateInput(isoDate);
+        if (!parsed) continue;
+        if (parsed < periodStart || parsed > periodEnd) continue;
+        const expectedHours = Math.round(toNumber(raw.expectedHours) * 100) / 100;
+        const workedHours = Math.round(toNumber(raw.workedHours) * 100) / 100;
+        const ptoHours = Math.round(toNumber(raw.ptoHours) * 100) / 100;
+        const nonPtoHours = Math.round(toNumber(raw.nonPtoHours) * 100) / 100;
+        const makeUpHours = Math.round(toNumber(raw.makeUpHours) * 100) / 100;
+        const tardyMinutes = Math.max(0, Math.round(toNumber(raw.tardyMinutes)));
+        const notes = Array.isArray(raw.notes)
+          ? (raw.notes as unknown[]).map((note) => String(note)).filter((note) => note.trim().length)
+          : [];
+        const breakCount = Math.max(0, Math.round(toNumber(raw.breakCount)));
+        const breakMinutes = Math.max(0, Math.round(toNumber(raw.breakMinutes)));
+        const lunchCount = Math.max(0, Math.round(toNumber(raw.lunchCount)));
+        const lunchMinutes = Math.max(0, Math.round(toNumber(raw.lunchMinutes)));
+        const idleMinutes = Math.max(0, Math.round(toNumber(raw.idleMinutes)));
+        const clockIn =
+          typeof raw.clockIn === 'string' && raw.clockIn.trim().length ? raw.clockIn : null;
+        const clockOut =
+          typeof raw.clockOut === 'string' && raw.clockOut.trim().length ? raw.clockOut : null;
+
+        let detail = detailMap.get(isoDate);
+        if (!detail) {
+          detail = {
+            isoDate,
+            label: formatAttendanceDayLabel(parsed),
+            expectedHours,
+            workedHours,
+            ptoHours,
+            nonPtoHours,
+            makeUpHours,
+            tardyMinutes,
+            breakCount,
+            breakMinutes,
+            lunchCount,
+            lunchMinutes,
+            idleMinutes,
+            clockIn,
+            clockOut,
+            notes
+          };
+          summary.details.push(detail);
+          detailMap.set(isoDate, detail);
+        } else {
+          detail.label = formatAttendanceDayLabel(parsed);
+          detail.expectedHours = expectedHours;
+          detail.workedHours = workedHours;
+          detail.ptoHours = ptoHours;
+          detail.nonPtoHours = nonPtoHours;
+          detail.makeUpHours = makeUpHours;
+          detail.tardyMinutes = tardyMinutes;
+          detail.breakCount = breakCount;
+          detail.breakMinutes = breakMinutes;
+          detail.lunchCount = lunchCount;
+          detail.lunchMinutes = lunchMinutes;
+          detail.idleMinutes = idleMinutes;
+          detail.clockIn = clockIn;
+          detail.clockOut = clockOut;
+          detail.notes = notes;
+        }
+        summary.totals.workedHours += workedHours;
+        summary.totals.ptoHours += ptoHours;
+        summary.totals.nonPtoHours += nonPtoHours;
+        summary.totals.makeUpHours += makeUpHours;
+        if (expectedHours > 0) {
+          summary.totals.scheduledDays += 1;
+          if (tardyMinutes === 0) {
+            summary.totals.onTimeDays += 1;
+          }
+        }
+        if (tardyMinutes > 0) {
+          summary.totals.tardyMinutes += tardyMinutes;
+          summary.totals.tardyEvents += 1;
+        }
+        if (notes.includes('Absence')) {
+          summary.totals.absenceDays += 1;
+        }
+      }
+
+      if (Array.isArray(snapshot.makeUpRequests)) {
+        for (const rawRequest of snapshot.makeUpRequests) {
+          if (!rawRequest || typeof rawRequest !== 'object') continue;
+          const startIso = typeof rawRequest.start === 'string' ? rawRequest.start : '';
+          const endIso = typeof rawRequest.end === 'string' ? rawRequest.end : '';
+          if (!startIso || !endIso) continue;
+          const start = parseDateInput(startIso);
+          const end = parseDateInput(endIso);
+          if (!start || !end) continue;
+          if (end < periodStart || start > periodEnd) continue;
+          const idValue = typeof rawRequest.id === 'string' && rawRequest.id.trim().length
+            ? rawRequest.id
+            : `${startIso}-${endIso}`;
+          const hours = Math.round(toNumber(rawRequest.hours) * 100) / 100;
+          summary.makeUpRequests.push({
+            id: idValue,
+            start: formatFullDate(start),
+            end: formatFullDate(end),
+            hours
+          });
+        }
+      }
+    }
+
+    if (!usedSnapshot) {
+      const totalDays = Math.max(1, differenceInCalendarDays(fact.rangeEnd, fact.rangeStart) + 1);
+      const overlapStart = fact.rangeStart > periodStart ? fact.rangeStart : periodStart;
+      const overlapEnd = fact.rangeEnd < periodEnd ? fact.rangeEnd : periodEnd;
+      if (overlapEnd < overlapStart) continue;
+      const overlapDays = Math.max(1, differenceInCalendarDays(overlapEnd, overlapStart) + 1);
+      const ratio = Math.min(1, overlapDays / totalDays);
+      summary.totals.workedHours += Number(fact.workedHours) * ratio;
+      summary.totals.ptoHours += Number(fact.ptoHours) * ratio;
+      summary.totals.nonPtoHours += Number(fact.nonPtoAbsenceHours) * ratio;
+      summary.totals.makeUpHours += Number(fact.matchedMakeUpHours) * ratio;
+      const tardyMinutes = Math.round(Number(fact.tardyMinutes) * ratio);
+      summary.totals.tardyMinutes += tardyMinutes;
+      if (tardyMinutes > 0) {
+        summary.totals.tardyEvents += 1;
+      }
+      const estimatedDays = Math.round(overlapDays);
+      summary.totals.scheduledDays += estimatedDays;
+      if (tardyMinutes === 0) {
+        summary.totals.onTimeDays += estimatedDays;
+      }
+    }
+  }
+
+  const ensureDetailForDate = (date: Date) => {
+    const iso = formatIsoDate(date);
+    let detail = detailMap.get(iso);
+    if (!detail) {
+      const parsedForLabel = parseDateInput(iso) ?? date;
+      detail = {
+        isoDate: iso,
+        label: formatAttendanceDayLabel(parsedForLabel),
+        expectedHours: 0,
+        workedHours: 0,
+        ptoHours: 0,
+        nonPtoHours: 0,
+        makeUpHours: 0,
+        tardyMinutes: 0,
+        breakCount: 0,
+        breakMinutes: 0,
+        lunchCount: 0,
+        lunchMinutes: 0,
+        idleMinutes: 0,
+        clockIn: null,
+        clockOut: null,
+        notes: []
+      };
+      summary.details.push(detail);
+      detailMap.set(iso, detail);
+    }
+    return detail;
+  };
+
+  const [sessions, idleStats] = await Promise.all([
+    prisma.session.findMany({
+      where: {
+        userId,
+        startedAt: { lte: periodEnd },
+        OR: [{ endedAt: null }, { endedAt: { gte: periodStart } }]
+      },
+      select: {
+        startedAt: true,
+        endedAt: true,
+        pauses: {
+          where: { type: { in: ['break', 'lunch'] } },
+          select: { type: true, startedAt: true, endedAt: true, durationMinutes: true }
+        }
+      }
+    }),
+    prisma.minuteStat.findMany({
+      where: {
+        session: { userId },
+        minuteStart: { gte: periodStart, lte: periodEnd },
+        idle: true
+      },
+      select: { minuteStart: true }
+    })
+  ]);
+
+  const now = new Date();
+
+  for (const session of sessions) {
+    const sessionStart = session.startedAt < periodStart ? periodStart : session.startedAt;
+    const rawSessionEnd = session.endedAt ?? now;
+    const sessionEnd = rawSessionEnd > periodEnd ? periodEnd : rawSessionEnd;
+    if (sessionEnd < periodStart || sessionStart > periodEnd) {
+      continue;
+    }
+    const dayDetail = ensureDetailForDate(sessionStart);
+    if (!dayDetail.clockIn || new Date(dayDetail.clockIn).getTime() > session.startedAt.getTime()) {
+      dayDetail.clockIn = session.startedAt.toISOString();
+    }
+    if (session.endedAt) {
+      if (!dayDetail.clockOut || new Date(dayDetail.clockOut).getTime() < session.endedAt.getTime()) {
+        dayDetail.clockOut = session.endedAt.toISOString();
+      }
+    }
+    for (const pause of session.pauses) {
+      if (pause.type !== 'break' && pause.type !== 'lunch') {
+        continue;
+      }
+      const pauseStart = pause.startedAt < periodStart ? periodStart : pause.startedAt;
+      const pauseEndSource = pause.endedAt ?? now;
+      const pauseEnd = pauseEndSource > periodEnd ? periodEnd : pauseEndSource;
+      if (pauseEnd <= pauseStart) {
+        continue;
+      }
+      let duration =
+        typeof pause.durationMinutes === 'number'
+          ? pause.durationMinutes
+          : Math.round((pauseEndSource.getTime() - pause.startedAt.getTime()) / 60000);
+      if (
+        pause.startedAt < periodStart ||
+        pauseEndSource > periodEnd ||
+        !Number.isFinite(duration)
+      ) {
+        duration = Math.round((pauseEnd.getTime() - pauseStart.getTime()) / 60000);
+      }
+      if (!Number.isFinite(duration) || duration < 0) {
+        duration = 0;
+      }
+      const pauseDetail = ensureDetailForDate(pauseStart);
+      if (pause.type === 'break') {
+        pauseDetail.breakCount += 1;
+        pauseDetail.breakMinutes += duration;
+      } else {
+        pauseDetail.lunchCount += 1;
+        pauseDetail.lunchMinutes += duration;
+      }
+    }
+  }
+
+  for (const stat of idleStats) {
+    const detail = ensureDetailForDate(stat.minuteStart);
+    detail.idleMinutes += 1;
+  }
+
+  for (const detail of summary.details) {
+    detail.breakMinutes = Math.round(detail.breakMinutes);
+    detail.lunchMinutes = Math.round(detail.lunchMinutes);
+    detail.idleMinutes = Math.round(detail.idleMinutes);
+  }
+
+  summary.details.sort((a, b) => {
+    const parsedA = parseDateInput(a.isoDate);
+    const parsedB = parseDateInput(b.isoDate);
+    const timeA = parsedA ? parsedA.getTime() : 0;
+    const timeB = parsedB ? parsedB.getTime() : 0;
+    return timeA - timeB;
+  });
+
+  summary.totals.workedHours = Math.round(summary.totals.workedHours * 100) / 100;
+  summary.totals.ptoHours = Math.round(summary.totals.ptoHours * 100) / 100;
+  summary.totals.nonPtoHours = Math.round(summary.totals.nonPtoHours * 100) / 100;
+  summary.totals.makeUpHours = Math.round(summary.totals.makeUpHours * 100) / 100;
+
+  return summary;
+};
+
 type PayrollPeriodRecord = Prisma.PayrollPeriodGetPayload<{
   include: {
     approvedBy: { select: { id: true; name: true } };
@@ -718,6 +1090,64 @@ type DashboardEmployeeRecord = Prisma.UserGetPayload<{
 }>;
 
 type HolidayRecordList = Awaited<ReturnType<typeof listHolidays>>;
+
+type AttendanceSnapshotDay = {
+  date?: string;
+  expectedHours?: number;
+  workedHours?: number;
+  ptoHours?: number;
+  nonPtoHours?: number;
+  makeUpHours?: number;
+  tardyMinutes?: number;
+  breakCount?: number;
+  breakMinutes?: number;
+  lunchCount?: number;
+  lunchMinutes?: number;
+  idleMinutes?: number;
+  clockIn?: string;
+  clockOut?: string;
+  notes?: unknown;
+};
+
+type AttendanceSnapshotPayload = {
+  days?: AttendanceSnapshotDay[];
+  makeUpRequests?: Array<{ id?: string; start?: string; end?: string; hours?: number }>;
+};
+
+type PeriodAttendanceDetail = {
+  isoDate: string;
+  label: string;
+  expectedHours: number;
+  workedHours: number;
+  ptoHours: number;
+  nonPtoHours: number;
+  makeUpHours: number;
+  tardyMinutes: number;
+  breakCount: number;
+  breakMinutes: number;
+  lunchCount: number;
+  lunchMinutes: number;
+  idleMinutes: number;
+  clockIn: string | null;
+  clockOut: string | null;
+  notes: string[];
+};
+
+type PeriodAttendanceSummary = {
+  details: PeriodAttendanceDetail[];
+  makeUpRequests: Array<{ id: string; start: string; end: string; hours: number }>;
+  totals: {
+    workedHours: number;
+    ptoHours: number;
+    nonPtoHours: number;
+    makeUpHours: number;
+    tardyMinutes: number;
+    tardyEvents: number;
+    scheduledDays: number;
+    onTimeDays: number;
+    absenceDays: number;
+  };
+};
 
 const DEMO_PAYROLL_USERS = [
   {
@@ -2068,6 +2498,50 @@ const baseStyles = `
     body.dashboard--payroll .totals-grid dt { margin: 0; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; }
     body.dashboard--payroll .totals-grid dd { margin: 0.25rem 0 0; font-weight: 600; color: #0f172a; font-size: 0.95rem; }
     body.dashboard--payroll .divider { height: 1px; background: rgba(15,23,42,0.08); margin: 1.5rem 0; }
+    body.dashboard--payroll-detail .detail-header { display: flex; align-items: center; justify-content: space-between; gap: clamp(1rem, 3vw, 2rem); margin-bottom: clamp(1.25rem, 3vw, 1.75rem); flex-wrap: wrap; }
+    body.dashboard--payroll-detail .detail-identity { display: flex; align-items: center; gap: clamp(0.75rem, 2vw, 1.5rem); flex-wrap: wrap; }
+    body.dashboard--payroll-detail .detail-back { order: -1; }
+    body.dashboard--payroll-detail .detail-avatar { width: 64px; height: 64px; border-radius: 999px; background: rgba(37,99,235,0.12); color: #1d4ed8; display: grid; place-items: center; font-weight: 700; font-size: 1.6rem; }
+    body.dashboard--payroll-detail .detail-identity-text h1 { margin: 0; font-size: clamp(1.6rem, 4vw, 2.2rem); color: #0f172a; }
+    body.dashboard--payroll-detail .detail-identity-text p { margin: 0.25rem 0 0; font-size: 0.95rem; color: #64748b; }
+    body.dashboard--payroll-detail .detail-meta { display: grid; gap: 0.4rem; justify-items: flex-end; text-align: right; }
+    body.dashboard--payroll-detail .detail-meta span { font-size: 0.9rem; color: #475569; }
+    body.dashboard--payroll-detail .detail-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: clamp(1rem, 3vw, 1.6rem); margin-bottom: clamp(1.25rem, 3vw, 1.75rem); }
+    body.dashboard--payroll-detail .detail-kpi-card { background: #fff; border-radius: 18px; box-shadow: 0 20px 36px rgba(15,23,42,0.08); padding: 1.1rem 1.25rem; display: grid; gap: 0.35rem; }
+    body.dashboard--payroll-detail .detail-kpi-card h3 { margin: 0; font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase; color: #64748b; }
+    body.dashboard--payroll-detail .detail-kpi-card strong { font-size: clamp(1.4rem, 3vw, 1.85rem); color: #0f172a; font-weight: 700; }
+    body.dashboard--payroll-detail .detail-kpi-card span { font-size: 0.82rem; color: #475569; }
+    body.dashboard--payroll-detail .detail-kpi-card .detail-kpi-placeholder { color: #94a3b8; font-style: italic; }
+    body.dashboard--payroll-detail .detail-hours-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+    body.dashboard--payroll-detail .detail-makeup-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.35rem; font-size: 0.85rem; color: #475569; }
+    body.dashboard--payroll-detail .detail-pay-meta { font-size: 0.85rem; color: #475569; }
+    body.dashboard--payroll-detail .detail-mini-table { width: 100%; border-collapse: collapse; }
+    body.dashboard--payroll-detail .detail-mini-table thead th { text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.7rem; color: #64748b; padding-bottom: 0.4rem; }
+    body.dashboard--payroll-detail .detail-mini-table tbody td { font-size: 0.95rem; font-weight: 600; color: #0f172a; padding: 0.45rem 0; }
+    body.dashboard--payroll-detail .detail-mini-table tbody tr + tr td { border-top: 1px solid rgba(15,23,42,0.08); }
+    body.dashboard--payroll-detail .detail-timeline table { width: 100%; border-collapse: collapse; }
+    body.dashboard--payroll-detail .detail-timeline th { text-align: left; font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: #64748b; padding: 0.5rem 0.5rem 0.45rem; }
+    body.dashboard--payroll-detail .detail-timeline td { font-size: 0.9rem; color: #0f172a; padding: 0.5rem; border-top: 1px solid rgba(15,23,42,0.08); }
+    body.dashboard--payroll-detail .detail-timeline tbody tr:hover { background: rgba(37,99,235,0.05); }
+    body.dashboard--payroll-detail .detail-exceptions { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.75rem; }
+    body.dashboard--payroll-detail .detail-exceptions li { border-radius: 14px; border: 1px solid rgba(148,163,184,0.18); background: rgba(15,23,42,0.03); padding: 0.85rem 1rem; display: grid; gap: 0.35rem; }
+    body.dashboard--payroll-detail .detail-exceptions strong { font-size: 0.95rem; color: #0f172a; }
+    body.dashboard--payroll-detail .detail-exceptions span { font-size: 0.8rem; color: #475569; }
+    body.dashboard--payroll-detail .detail-trends { width: 100%; border-collapse: collapse; }
+    body.dashboard--payroll-detail .detail-trends th, body.dashboard--payroll-detail .detail-trends td { text-align: left; padding: 0.55rem 0.5rem; }
+    body.dashboard--payroll-detail .detail-trends thead th { text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.7rem; color: #64748b; }
+    body.dashboard--payroll-detail .detail-trends tbody tr + tr td { border-top: 1px solid rgba(15,23,42,0.08); }
+    body.dashboard--payroll-detail .trend-up { color: #16a34a; font-weight: 600; }
+    body.dashboard--payroll-detail .trend-down { color: #dc2626; font-weight: 600; }
+    body.dashboard--payroll-detail .trend-neutral { color: #475569; font-weight: 600; }
+    body.dashboard--payroll-detail .detail-utilities { display: grid; gap: 1rem; }
+    body.dashboard--payroll-detail .detail-utility-row { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; }
+    body.dashboard--payroll-detail .detail-utility-row label { display: grid; gap: 0.35rem; font-size: 0.85rem; color: #475569; }
+    body.dashboard--payroll-detail .detail-utility-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    body.dashboard--payroll-detail .detail-notes { display: grid; gap: 0.5rem; }
+    body.dashboard--payroll-detail .detail-notes textarea { width: 100%; min-height: 120px; border-radius: 12px; border: 1px dashed rgba(148,163,184,0.4); padding: 0.75rem; resize: vertical; font-family: inherit; font-size: 0.95rem; background: rgba(15,23,42,0.02); color: #475569; }
+    body.dashboard--payroll-detail .detail-notes textarea:focus { outline: none; border-color: rgba(37,99,235,0.45); }
+    body.dashboard--payroll-detail .detail-notes textarea[readonly] { opacity: 0.9; }
     body.dashboard--payroll .secondary-form { display: flex; flex-direction: column; gap: 0.75rem; }
     body.dashboard--payroll .secondary-form__title { margin: 0; font-size: 1rem; font-weight: 600; }
     body.dashboard--payroll .checkbox-field { display: inline-flex; gap: 0.4rem; align-items: center; font-weight: 600; }
@@ -2086,6 +2560,9 @@ const baseStyles = `
     @media (max-width: 960px) {
       body.dashboard .page-header { text-align: center; flex-direction: column; align-items: stretch; }
       body.dashboard .page-header__meta { text-align: center; justify-items: center; }
+      body.dashboard--payroll-detail .detail-header { flex-direction: column; align-items: flex-start; }
+      body.dashboard--payroll-detail .detail-meta { justify-items: flex-start; text-align: left; width: 100%; }
+      body.dashboard--payroll-detail .detail-meta span { justify-self: flex-start; }
     }
     @media (max-width: 720px) {
       body.dashboard .cards-grid { grid-template-columns: 1fr; }
@@ -2096,6 +2573,10 @@ const baseStyles = `
       body.dashboard .page-controls { flex-direction: column; align-items: stretch; }
       .drilldown-panel__footer .button { width: 100%; }
       body.dashboard .table-scroll table { min-width: 520px; }
+      body.dashboard--payroll-detail .detail-utility-row { flex-direction: column; align-items: stretch; }
+      body.dashboard--payroll-detail .detail-utility-actions { justify-content: stretch; width: 100%; }
+      body.dashboard--payroll-detail .detail-utility-actions .button { width: 100%; }
+      body.dashboard--payroll-detail .detail-kpis { grid-template-columns: 1fr; }
     }
 `;
 
@@ -4977,14 +5458,10 @@ dashboardRouter.get('/payroll', async (req, res) => {
                 target="_blank"
                 rel="noopener"
               >Export CSV</a>
-              <button
-                type="button"
+              <a
                 class="button button-secondary"
-                data-payroll-detail
-                data-pay-date="${payDateIso}"
-                data-period-title="${escapeHtml(formatFullDate(period.payDate))}"
-                data-error-target="${errorTargetId}"
-              >View Details</button>
+                href="/dashboard/payroll/period/${payDateIso}"
+              >View Details</a>
             </div>
             <p class="form-error" id="${errorTargetId}" role="alert"></p>
           </td>
@@ -5669,23 +6146,6 @@ dashboardRouter.get('/payroll', async (req, res) => {
           </div>
         </main>
 
-        <div class="drilldown-shell" id="payroll-drilldown" hidden>
-          <div class="drilldown-backdrop" data-close-drilldown></div>
-          <aside class="drilldown-panel" role="dialog" aria-modal="true" aria-labelledby="payroll-drilldown-title">
-            <div class="drilldown-panel__header">
-              <div class="drilldown-panel__heading">
-                <h2 id="payroll-drilldown-title">Payroll Details</h2>
-                <p id="payroll-drilldown-subtitle"></p>
-              </div>
-              <button type="button" class="drilldown-close" data-close-drilldown>&times;</button>
-            </div>
-            <div class="drilldown-panel__content" id="payroll-drilldown-content"></div>
-            <div class="drilldown-panel__footer">
-              <button type="button" class="button button-secondary" data-close-drilldown>Close</button>
-            </div>
-          </aside>
-        </div>
-
         <script>
           (() => {
             const reloadWithBanner = (message, error) => {
@@ -6000,135 +6460,6 @@ dashboardRouter.get('/payroll', async (req, res) => {
               });
             });
 
-            const drilldown = document.getElementById('payroll-drilldown');
-            const drilldownContent = document.getElementById('payroll-drilldown-content');
-            const drilldownTitle = document.getElementById('payroll-drilldown-title');
-            const drilldownSubtitle = document.getElementById('payroll-drilldown-subtitle');
-            const closeDrilldown = () => {
-              drilldown?.setAttribute('data-open', 'false');
-              setTimeout(() => {
-                drilldown?.setAttribute('hidden', '');
-                document.body.classList.remove('drilldown-locked');
-                document.querySelectorAll('.drilldown-row-active').forEach((row) => {
-                  row.classList.remove('drilldown-row-active');
-                });
-              }, 250);
-            };
-            drilldown?.querySelectorAll('[data-close-drilldown]').forEach((el) => {
-              el.addEventListener('click', () => closeDrilldown());
-            });
-
-            const formatCurrencyLocal = (value) => new Intl.NumberFormat('en-US', {
-              style: 'currency',
-              currency: 'USD'
-            }).format(Number(value) || 0);
-
-            const formatDateLocal = (iso) => {
-              try {
-                return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(iso));
-              } catch (err) {
-                return iso;
-              }
-            };
-
-            const formatDateTimeLocal = (iso) => {
-              try {
-                return new Intl.DateTimeFormat(undefined, {
-                  month: 'short',
-                  day: 'numeric',
-                  year: 'numeric',
-                  hour: 'numeric',
-                  minute: '2-digit'
-                }).format(new Date(iso));
-              } catch (err) {
-                return iso;
-              }
-            };
-
-            const openDrilldown = (row, period) => {
-              if (!drilldown || !drilldownContent || !drilldownTitle || !period) return;
-              document.querySelectorAll('.drilldown-row-active').forEach((active) => {
-                active.classList.remove('drilldown-row-active');
-              });
-              if (row) row.classList.add('drilldown-row-active');
-              drilldown.removeAttribute('hidden');
-              drilldown.setAttribute('data-open', 'true');
-              document.body.classList.add('drilldown-locked');
-              drilldownTitle.textContent = 'Payroll for ' + formatDateLocal(period.payDate);
-              const status = period.status ? String(period.status) : 'draft';
-              drilldownSubtitle.textContent = 'Status: ' + status.charAt(0).toUpperCase() + status.slice(1);
-              const totals = period.totals || {};
-              const summary = \`
-                <div class="drilldown-section">
-                  <h3>Summary</h3>
-                  <div class="drilldown-grid">
-                    <dl><dt>Period</dt><dd>
-                      \${formatDateLocal(period.periodStart)} – \${formatDateLocal(period.periodEnd)}
-                    </dd></dl>
-                    <dl><dt>Computed</dt><dd>\${period.computedAt ? formatDateTimeLocal(period.computedAt) : '—'}</dd></dl>
-                    <dl><dt>Base</dt><dd>\${formatCurrencyLocal(totals.base)}</dd></dl>
-                    <dl><dt>Monthly</dt><dd>\${formatCurrencyLocal(totals.monthlyAttendance)}</dd></dl>
-                    <dl><dt>Deferred</dt><dd>\${formatCurrencyLocal(totals.monthlyDeferred)}</dd></dl>
-                    <dl><dt>Quarterly</dt><dd>\${formatCurrencyLocal(totals.quarterlyAttendance)}</dd></dl>
-                    <dl><dt>KPI</dt><dd>\${formatCurrencyLocal(totals.kpiBonus)}</dd></dl>
-                    <dl><dt>Total</dt><dd>\${formatCurrencyLocal(totals.finalAmount)}</dd></dl>
-                  </div>
-                </div>
-              \`;
-              const lines = Array.isArray(period.lines) ? period.lines : [];
-              const lineRows = lines
-                .map((line) => {
-                  const employee = line.user?.name || ('User ' + line.userId);
-                  const email = line.user?.email || '';
-                  return \`
-                    <tr>
-                      <td>\${employee}<div class="meta">\${email}</div></td>
-                      <td>\${formatCurrencyLocal(line.baseAmount)}</td>
-                      <td>\${formatCurrencyLocal(line.monthlyAttendance)}</td>
-                      <td>\${formatCurrencyLocal(line.monthlyDeferred)}</td>
-                      <td>\${formatCurrencyLocal(line.quarterlyAttendance)}</td>
-                  <td>\${formatCurrencyLocal(line.kpiBonus)}</td>
-                      <td>\${formatCurrencyLocal(line.finalAmount)}</td>
-                    </tr>
-                  \`;
-                })
-                .join('');
-              const linesTable = lines.length
-                ? \`<div class="table-scroll"><table><thead><tr><th>Employee</th><th>Base</th><th>Monthly</th><th>Deferred</th><th>Quarterly</th><th>KPI</th><th>Total</th></tr></thead><tbody>\${lineRows}</tbody></table></div>\`
-                : '<div class="empty">No payroll lines found.</div>';
-              drilldownContent.innerHTML = summary + linesTable;
-            };
-
-            document.querySelectorAll('[data-payroll-detail]').forEach((button) => {
-              button.addEventListener('click', async () => {
-                const payDate = button.getAttribute('data-pay-date');
-                if (!payDate) return;
-                const errorTarget = button.getAttribute('data-error-target');
-                setError(errorTarget, '');
-                try {
-                  const response = await fetch('/api/payroll/payruns/' + payDate, {
-                    headers: { 'Accept': 'application/json' },
-                    credentials: 'same-origin'
-                  });
-                  if (!response.ok) {
-                    let message = 'Unable to load payroll details.';
-                    try {
-                      const data = await response.json();
-                      if (data && typeof data.error === 'string') message = data.error;
-                      else if (data && typeof data.message === 'string') message = data.message;
-                    } catch (err) {}
-                    throw new Error(message);
-                  }
-                  const data = await response.json();
-                  if (!data || !data.period) throw new Error('Payroll period not found.');
-                  const row = document.querySelector('[data-period-row="' + payDate + '"]');
-                  openDrilldown(row instanceof HTMLElement ? row : null, data.period);
-                } catch (err) {
-                  const message = err instanceof Error ? err.message : 'Unable to load payroll details.';
-                  setError(errorTarget, message);
-                }
-              });
-            });
           })();
         </script>
       </body>
@@ -6318,6 +6649,739 @@ const renderSettingsPage = ({ enabled, employees, logs, message, error }: Settin
     </html>
   `;
 };
+
+
+dashboardRouter.get('/payroll/period/:payDate', async (req, res) => {
+  const payDateParam = typeof req.params.payDate === 'string' ? req.params.payDate : '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(payDateParam)) {
+    res.status(404).type('html').send('<!doctype html><html><body>Payroll period not found.</body></html>');
+    return;
+  }
+
+  const parsedPayDate = parseDateInput(payDateParam);
+  if (!parsedPayDate) {
+    res.status(404).type('html').send('<!doctype html><html><body>Payroll period not found.</body></html>');
+    return;
+  }
+
+  const actorId = (req as AuthenticatedRequest | undefined)?.user?.id ?? null;
+  const { payDate: normalizedPayDate, periodStart, periodEnd } = computePayPeriodWindow(parsedPayDate);
+
+  const startMonthKey = formatInTimeZone(periodStart, DASHBOARD_TIME_ZONE, 'yyyy-MM');
+  const endMonthKey = formatInTimeZone(periodEnd, DASHBOARD_TIME_ZONE, 'yyyy-MM');
+  await ensurePayrollDemoData(startMonthKey, normalizedPayDate, actorId);
+  if (endMonthKey !== startMonthKey) {
+    await ensurePayrollDemoData(endMonthKey, normalizedPayDate, actorId);
+  }
+
+  const period = await getPayrollPeriod(normalizedPayDate);
+  const periods = await prisma.payrollPeriod.findMany({
+    orderBy: { payDate: 'desc' },
+    take: 12
+  });
+
+  const periodOptions = periods.length
+    ? buildSelectOptions(
+        periods.map((entry) => {
+          const status = normalizePayrollStatus(entry.status);
+          const label = `${formatFullDate(entry.payDate)} (${payrollStatusLabels[status]})`;
+          return { value: formatIsoDate(entry.payDate), label };
+        }),
+        formatIsoDate(normalizedPayDate)
+      )
+    : '';
+
+  if (!period) {
+    const payDateLabel = formatFullDate(normalizedPayDate);
+    const html = `
+      <!doctype html>
+      <html lang="en">
+        <head>
+          <meta charset="utf-8" />
+          <title>Payroll Period – ${escapeHtml(payDateLabel)}</title>
+          <style>${baseStyles}</style>
+        </head>
+        <body class="dashboard dashboard--payroll-detail">
+          ${renderNav('payroll')}
+          <main class="page-shell">
+            <header class="detail-header">
+              <div class="detail-identity">
+                <a class="button button-secondary detail-back" href="/dashboard/payroll">Back to Payroll</a>
+                <div class="detail-avatar">?</div>
+                <div class="detail-identity-text">
+                  <h1>${escapeHtml(payDateLabel)}</h1>
+                  <p>No payroll run is available for this pay date yet.</p>
+                </div>
+              </div>
+              <div class="detail-meta">
+                <span>${escapeHtml(formatFullDate(periodStart))} – ${escapeHtml(formatFullDate(periodEnd))}</span>
+              </div>
+            </header>
+            <div class="card">
+              <div class="card__body">
+                <div class="empty">No payroll period was found for ${escapeHtml(payDateLabel)}.</div>
+              </div>
+            </div>
+          </main>
+        </body>
+      </html>
+    `;
+    res.status(404).type('html').send(html);
+    return;
+  }
+
+  const lines = period.lines ?? [];
+  const employeeIdParam = typeof req.query.employeeId === 'string' ? req.query.employeeId : undefined;
+  const employeeIdCandidate = employeeIdParam && /^\d+$/.test(employeeIdParam)
+    ? Number.parseInt(employeeIdParam, 10)
+    : undefined;
+  const sortedLines = lines
+    .slice()
+    .sort((a, b) => (a.user?.name ?? `User ${a.userId}`).localeCompare(b.user?.name ?? `User ${b.userId}`));
+  const selectedLine = sortedLines.find((line) => line.userId === employeeIdCandidate) ?? sortedLines[0] ?? null;
+  const selectedEmployeeId = selectedLine?.userId ?? null;
+  const employeeRecord = selectedEmployeeId
+    ? await prisma.user.findUnique({
+        where: { id: selectedEmployeeId },
+        select: { id: true, name: true, email: true, role: true }
+      })
+    : null;
+
+  const attendanceSummary = selectedEmployeeId
+    ? await collectAttendanceSummary(selectedEmployeeId, periodStart, periodEnd)
+    : null;
+
+  const totals = attendanceSummary?.totals ?? {
+    workedHours: 0,
+    ptoHours: 0,
+    nonPtoHours: 0,
+    makeUpHours: 0,
+    tardyMinutes: 0,
+    tardyEvents: 0,
+    scheduledDays: 0,
+    onTimeDays: 0,
+    absenceDays: 0
+  };
+
+  const previousPayDate = computePreviousPayDate(normalizedPayDate);
+  const previousWindow = computePayPeriodWindow(previousPayDate);
+  const previousStartKey = formatInTimeZone(previousWindow.periodStart, DASHBOARD_TIME_ZONE, 'yyyy-MM');
+  const previousEndKey = formatInTimeZone(previousWindow.periodEnd, DASHBOARD_TIME_ZONE, 'yyyy-MM');
+  await ensurePayrollDemoData(previousStartKey, previousWindow.payDate, actorId);
+  if (previousEndKey !== previousStartKey) {
+    await ensurePayrollDemoData(previousEndKey, previousWindow.payDate, actorId);
+  }
+  const previousSummary = selectedEmployeeId
+    ? await collectAttendanceSummary(selectedEmployeeId, previousWindow.periodStart, previousWindow.periodEnd)
+    : null;
+
+  const onTimePercentage = totals.scheduledDays > 0 ? (totals.onTimeDays / totals.scheduledDays) * 100 : null;
+  const previousOnTimePercentage = previousSummary && previousSummary.totals.scheduledDays > 0
+    ? (previousSummary.totals.onTimeDays / previousSummary.totals.scheduledDays) * 100
+    : null;
+
+  const detailList = attendanceSummary?.details ?? [];
+  const summarizeBehavior = (summary: PeriodAttendanceSummary | null) => {
+    const aggregate = {
+      averageLunch: null as number | null,
+      lunchCount: 0,
+      lunchMinutes: 0,
+      averageBreak: null as number | null,
+      breakCount: 0,
+      breakMinutes: 0,
+      averageIdle: null as number | null,
+      idleMinutes: 0,
+      idleDays: 0
+    };
+    if (!summary) {
+      return aggregate;
+    }
+    for (const detail of summary.details) {
+      if (detail.lunchCount > 0) {
+        aggregate.lunchCount += detail.lunchCount;
+        aggregate.lunchMinutes += detail.lunchMinutes;
+      }
+      if (detail.breakCount > 0) {
+        aggregate.breakCount += detail.breakCount;
+        aggregate.breakMinutes += detail.breakMinutes;
+      }
+      aggregate.idleMinutes += detail.idleMinutes;
+      if (detail.expectedHours > 0 || detail.workedHours > 0 || detail.ptoHours > 0) {
+        aggregate.idleDays += 1;
+      }
+    }
+    aggregate.averageLunch = aggregate.lunchCount > 0
+      ? Math.round((aggregate.lunchMinutes / aggregate.lunchCount) * 10) / 10
+      : null;
+    aggregate.averageBreak = aggregate.breakCount > 0
+      ? Math.round((aggregate.breakMinutes / aggregate.breakCount) * 10) / 10
+      : null;
+    aggregate.averageIdle = aggregate.idleDays > 0
+      ? Math.round((aggregate.idleMinutes / aggregate.idleDays) * 10) / 10
+      : null;
+    return aggregate;
+  };
+
+  const currentBehavior = summarizeBehavior(attendanceSummary);
+  const previousBehavior = summarizeBehavior(previousSummary);
+
+  const formatPercent = (value: number | null) => {
+    if (value === null || !Number.isFinite(value)) return '—';
+    const rounded = Math.round(value * 10) / 10;
+    return `${rounded % 1 === 0 ? rounded.toFixed(0) : rounded.toFixed(1)}%`;
+  };
+
+  const formatHoursDisplay = (value: number) => `${formatHours(Math.round(value * 100) / 100)} h`;
+
+  const formatAverageMinutes = (value: number | null) => {
+    if (value === null || !Number.isFinite(value)) {
+      return '—';
+    }
+    const rounded = Math.round(value * 10) / 10;
+    return `${rounded % 1 === 0 ? rounded.toFixed(0) : rounded.toFixed(1)} min`;
+  };
+
+  const payLine = selectedLine
+    ? {
+        baseAmount: Math.round(Number(selectedLine.baseAmount) * 100) / 100,
+        monthlyAttendance: Math.round(Number(selectedLine.monthlyAttendance) * 100) / 100,
+        monthlyDeferred: Math.round(Number(selectedLine.monthlyDeferred) * 100) / 100,
+        quarterlyAttendance: Math.round(Number(selectedLine.quarterlyAttendance) * 100) / 100,
+        kpiBonus: Math.round(Number(selectedLine.kpiBonus) * 100) / 100,
+        finalAmount: Math.round(Number(selectedLine.finalAmount) * 100) / 100
+      }
+    : null;
+
+  const payComponents = payLine
+    ? [
+        { label: 'Base Earnings', amount: payLine.baseAmount },
+        { label: 'Monthly Attendance Bonus', amount: payLine.monthlyAttendance },
+        { label: 'Deferred Monthly Bonus', amount: payLine.monthlyDeferred },
+        { label: 'Quarterly Attendance Bonus', amount: payLine.quarterlyAttendance },
+        { label: 'KPI Bonus', amount: payLine.kpiBonus }
+      ]
+    : [];
+  const payComponentTotal = payComponents.reduce((acc, item) => acc + item.amount, 0);
+  const finalAmount = payLine?.finalAmount ?? 0;
+  const reconciliationDelta = Math.round((payComponentTotal - finalAmount) * 100) / 100;
+
+  const employeeName = employeeRecord?.name ?? selectedLine?.user?.name ?? (selectedEmployeeId ? `User ${selectedEmployeeId}` : 'Select an employee');
+  const employeeEmail = employeeRecord?.email ?? selectedLine?.user?.email ?? '';
+  const employeeRoleLabel = employeeRecord?.role
+    ? `${employeeRecord.role.charAt(0).toUpperCase()}${employeeRecord.role.slice(1)}`
+    : 'Employee';
+  const employeeInitials = (employeeName
+    .split(/\s+/)
+    .map((part) => part.charAt(0))
+    .filter(Boolean)
+    .join('')
+    .slice(0, 2)
+    .toUpperCase() || '?');
+
+  const statusValue = normalizePayrollStatus(period.status);
+  const statusChip = `<span class="${payrollStatusClasses[statusValue]}">${escapeHtml(payrollStatusLabels[statusValue])}</span>`;
+
+  const payDateLabel = formatFullDate(normalizedPayDate);
+  const periodRangeLabel = `${formatFullDate(periodStart)} – ${formatFullDate(periodEnd)}`;
+  const computedLabel = period.computedAt ? `Computed ${escapeHtml(formatDateTime(period.computedAt))}` : 'Not computed yet';
+
+  const kpiCards = [
+    {
+      label: 'PTO Hours',
+      value: totals.ptoHours ? formatHoursDisplay(totals.ptoHours) : '—',
+      meta: totals.ptoHours ? 'Approved PTO this period' : 'No PTO recorded'
+    },
+    {
+      label: 'Non-PTO Hours',
+      value: totals.nonPtoHours ? formatHoursDisplay(totals.nonPtoHours) : '—',
+      meta: totals.nonPtoHours ? 'Approved non-PTO time' : 'No non-PTO time recorded'
+    },
+    {
+      label: 'Make-up Hours',
+      value: totals.makeUpHours ? formatHoursDisplay(totals.makeUpHours) : '—',
+      meta: totals.makeUpHours ? 'Matched within period' : 'No make-up time applied'
+    },
+    {
+      label: 'Tardiness Minutes',
+      value: `${totals.tardyMinutes} min`,
+      meta: totals.tardyEvents ? `${totals.tardyEvents} event${totals.tardyEvents === 1 ? '' : 's'}` : 'On time throughout'
+    },
+    {
+      label: 'On-Time Attendance',
+      value: formatPercent(onTimePercentage),
+      meta: totals.scheduledDays
+        ? `${totals.onTimeDays} of ${totals.scheduledDays} scheduled day${totals.scheduledDays === 1 ? '' : 's'}`
+        : 'No scheduled days'
+    },
+    {
+      label: 'Avg Lunch Duration',
+      value: currentBehavior.averageLunch !== null ? formatAverageMinutes(currentBehavior.averageLunch) : '—',
+      meta: currentBehavior.lunchCount
+        ? `${currentBehavior.lunchCount} lunch${currentBehavior.lunchCount === 1 ? '' : 'es'} · ${currentBehavior.lunchMinutes} min total`
+        : 'No lunches recorded',
+      placeholder: currentBehavior.averageLunch === null
+    },
+    {
+      label: 'Avg Break Duration',
+      value: currentBehavior.averageBreak !== null ? formatAverageMinutes(currentBehavior.averageBreak) : '—',
+      meta: currentBehavior.breakCount
+        ? `${currentBehavior.breakCount} break${currentBehavior.breakCount === 1 ? '' : 's'} · ${currentBehavior.breakMinutes} min total`
+        : 'No breaks recorded',
+      placeholder: currentBehavior.averageBreak === null
+    },
+    {
+      label: 'Avg Idle Minutes',
+      value: currentBehavior.averageIdle !== null ? formatAverageMinutes(currentBehavior.averageIdle) : '—',
+      meta:
+        currentBehavior.idleMinutes > 0
+          ? `${currentBehavior.idleMinutes} min across ${currentBehavior.idleDays} day${currentBehavior.idleDays === 1 ? '' : 's'}`
+          : 'No idle time recorded',
+      placeholder: currentBehavior.averageIdle === null
+    }
+  ]
+    .map((card) => {
+      const meta = card.meta ? `<span>${escapeHtml(card.meta)}</span>` : '';
+      const value = card.placeholder ? `<strong class="detail-kpi-placeholder">${escapeHtml(card.value)}</strong>` : `<strong>${escapeHtml(card.value)}</strong>`;
+      return `
+        <article class="detail-kpi-card">
+          <h3>${escapeHtml(card.label)}</h3>
+          ${value}
+          ${meta}
+        </article>
+      `;
+    })
+    .join('\n');
+
+  const hoursTable = `
+    <table class="detail-mini-table">
+      <thead>
+        <tr><th>Hours</th><th>Total</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Worked</td><td>${formatHoursDisplay(totals.workedHours)}</td></tr>
+        <tr><td>PTO</td><td>${totals.ptoHours ? formatHoursDisplay(totals.ptoHours) : '—'}</td></tr>
+        <tr><td>Non-PTO</td><td>${totals.nonPtoHours ? formatHoursDisplay(totals.nonPtoHours) : '—'}</td></tr>
+        <tr><td>Make-up</td><td>${totals.makeUpHours ? formatHoursDisplay(totals.makeUpHours) : '—'}</td></tr>
+      </tbody>
+    </table>
+  `;
+
+  const payTable = payLine
+    ? `
+      <table class="detail-mini-table">
+        <thead>
+          <tr><th>Component</th><th>Amount</th></tr>
+        </thead>
+        <tbody>
+          ${payComponents
+            .map(
+              (component) => `
+                <tr>
+                  <td>${escapeHtml(component.label)}</td>
+                  <td>${formatCurrency(component.amount)}</td>
+                </tr>
+              `
+            )
+            .join('')}
+          <tr>
+            <td><strong>Total</strong></td>
+            <td><strong>${formatCurrency(payComponentTotal)}</strong></td>
+          </tr>
+        </tbody>
+      </table>
+    `
+    : '<div class="empty">Select an employee to review payroll details.</div>';
+
+  const reconciliationNote = payLine
+    ? reconciliationDelta === 0
+      ? '<p class="detail-pay-meta">Components reconcile to the final payout.</p>'
+      : `<p class="detail-pay-meta">Difference vs. final payout: ${formatCurrency(reconciliationDelta)}.</p>`
+    : '';
+
+  const makeUpRequests = attendanceSummary?.makeUpRequests ?? [];
+  const makeUpList = makeUpRequests.length
+    ? `<div><p class="detail-pay-meta"><strong>Matched make-up requests</strong></p><ul class="detail-makeup-list">${makeUpRequests
+        .map((request) => `<li>${escapeHtml(request.start)} – ${escapeHtml(request.end)} · ${formatHoursDisplay(request.hours)}</li>`)
+        .join('')}</ul></div>`
+    : '';
+
+  const formatShiftRange = (startIso: string | null, endIso: string | null) => {
+    const toTime = (iso: string | null) => {
+      if (!iso) return null;
+      const parsed = new Date(iso);
+      return Number.isNaN(parsed.getTime()) ? null : formatTimeOfDay(parsed);
+    };
+    const startText = toTime(startIso);
+    const endText = toTime(endIso);
+    if (!startText && !endText) {
+      return '—';
+    }
+    if (startText && endText) {
+      return `${startText} – ${endText}`;
+    }
+    return `${startText ?? '—'} – ${endText ?? '—'}`;
+  };
+
+  const formatPauseSummary = (count: number, minutes: number) => {
+    if (!count && !minutes) {
+      return '—';
+    }
+    const parts = [] as string[];
+    if (count) {
+      parts.push(`${count}×`);
+    }
+    if (minutes) {
+      parts.push(`${minutes} min`);
+    }
+    return parts.join(' · ');
+  };
+
+  const timelineRows = detailList.length
+    ? detailList
+        .map((detail) => {
+          const expected = detail.expectedHours ? formatHoursDisplay(detail.expectedHours) : '—';
+          const worked = detail.workedHours ? formatHoursDisplay(detail.workedHours) : '—';
+          const pto = detail.ptoHours ? formatHoursDisplay(detail.ptoHours) : '—';
+          const makeUp = detail.makeUpHours ? formatHoursDisplay(detail.makeUpHours) : '—';
+          const nonPto = detail.nonPtoHours ? formatHoursDisplay(detail.nonPtoHours) : '—';
+          const tardy = detail.tardyMinutes ? `${detail.tardyMinutes} min` : '—';
+          const shift = formatShiftRange(detail.clockIn, detail.clockOut);
+          const breaks = formatPauseSummary(detail.breakCount, detail.breakMinutes);
+          const lunches = formatPauseSummary(detail.lunchCount, detail.lunchMinutes);
+          const idle = detail.idleMinutes ? `${detail.idleMinutes} min` : '—';
+          const notes = detail.notes.length
+            ? detail.notes.map((note) => `<div>${escapeHtml(note)}</div>`).join('')
+            : '—';
+          return `
+            <tr>
+              <td>${escapeHtml(detail.label)}</td>
+              <td>${escapeHtml(expected)}</td>
+              <td>${escapeHtml(shift)}</td>
+              <td>${escapeHtml(worked)}</td>
+              <td>${escapeHtml(pto)}</td>
+              <td>${escapeHtml(makeUp)}</td>
+              <td>${escapeHtml(nonPto)}</td>
+              <td>${escapeHtml(tardy)}</td>
+              <td>${escapeHtml(breaks)}</td>
+              <td>${escapeHtml(lunches)}</td>
+              <td>${escapeHtml(idle)}</td>
+              <td>${notes === '—' ? '—' : notes}</td>
+            </tr>
+          `;
+        })
+        .join('\n')
+    : '';
+
+  const timelineSection = attendanceSummary?.details.length
+    ? `
+        <div class="table-scroll detail-timeline">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Expected</th>
+                <th>Shift</th>
+                <th>Worked</th>
+                <th>PTO</th>
+                <th>Make-up</th>
+                <th>Non-PTO</th>
+                <th>Tardy</th>
+                <th>Breaks</th>
+                <th>Lunch</th>
+                <th>Idle</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${timelineRows}
+            </tbody>
+          </table>
+        </div>
+      `
+    : '<div class="empty">Day-level attendance details are not available for this period.</div>';
+
+  const exceptionItems: Array<{ label: string; detail: string }> = [];
+  if (totals.tardyEvents > 0) {
+    exceptionItems.push({
+      label: 'Tardy arrivals',
+      detail: `${totals.tardyEvents} event${totals.tardyEvents === 1 ? '' : 's'} · ${totals.tardyMinutes} min`
+    });
+  }
+  if (totals.absenceDays > 0) {
+    exceptionItems.push({
+      label: 'Absence alerts',
+      detail: `${totals.absenceDays} day${totals.absenceDays === 1 ? '' : 's'} flagged`
+    });
+  }
+  if (totals.nonPtoHours > 0) {
+    exceptionItems.push({
+      label: 'Non-PTO usage',
+      detail: formatHoursDisplay(totals.nonPtoHours)
+    });
+  }
+  const missingPunches = detailList.filter(
+    (detail) => detail.expectedHours > 0 && (!detail.clockIn || !detail.clockOut)
+  );
+  if (missingPunches.length) {
+    exceptionItems.push({
+      label: 'Missing punches',
+      detail: `${missingPunches.length} day${missingPunches.length === 1 ? '' : 's'} to review`
+    });
+  }
+  const longLunches = detailList.filter((detail) => detail.lunchMinutes > 75);
+  if (longLunches.length) {
+    const totalLongLunch = longLunches.reduce((sum, detail) => sum + detail.lunchMinutes, 0);
+    exceptionItems.push({
+      label: 'Long lunches',
+      detail: `${longLunches.length} day${longLunches.length === 1 ? '' : 's'} · ${totalLongLunch} min`
+    });
+  }
+  const longBreaks = detailList.filter((detail) => detail.breakMinutes > 45);
+  if (longBreaks.length) {
+    const totalLongBreak = longBreaks.reduce((sum, detail) => sum + detail.breakMinutes, 0);
+    exceptionItems.push({
+      label: 'Extended breaks',
+      detail: `${longBreaks.length} day${longBreaks.length === 1 ? '' : 's'} · ${totalLongBreak} min`
+    });
+  }
+  const idleSpikes = detailList.filter((detail) => detail.idleMinutes >= 60);
+  if (idleSpikes.length) {
+    const totalIdle = idleSpikes.reduce((sum, detail) => sum + detail.idleMinutes, 0);
+    exceptionItems.push({
+      label: 'Idle spikes',
+      detail: `${idleSpikes.length} day${idleSpikes.length === 1 ? '' : 's'} · ${totalIdle} min`
+    });
+  }
+  const exceptionsHtml = exceptionItems.length
+    ? `<ul class="detail-exceptions">${exceptionItems
+        .map((item) => `<li><strong>${escapeHtml(item.label)}</strong><span>${escapeHtml(item.detail)}</span></li>`)
+        .join('')}</ul>`
+    : '<div class="empty">No exceptions recorded for this employee.</div>';
+
+  const renderDelta = (current: number | null, previous: number | null, unit: 'percent' | 'minutes', invert = false) => {
+    if (current === null || previous === null || !Number.isFinite(current) || !Number.isFinite(previous)) {
+      return '<span class="trend-neutral">—</span>';
+    }
+    const rounded = Math.round((current - previous) * 10) / 10;
+    if (Math.abs(rounded) < 0.05) {
+      return '<span class="trend-neutral">—</span>';
+    }
+    const improved = invert ? rounded < 0 : rounded > 0;
+    const arrow = improved ? '▲' : '▼';
+    const className = improved ? 'trend-up' : 'trend-down';
+    const absValue = Math.abs(rounded);
+    const formatted = absValue % 1 === 0 ? absValue.toFixed(0) : absValue.toFixed(1);
+    const suffix = unit === 'percent' ? ' pts' : ' min';
+    return `<span class="${className}">${arrow} ${formatted}${suffix}</span>`;
+  };
+
+  const previousTardyMinutes = previousSummary ? previousSummary.totals.tardyMinutes : null;
+  const trendsRows = `
+    <tr>
+      <td>On-time Attendance</td>
+      <td>${formatPercent(onTimePercentage)}</td>
+      <td>${formatPercent(previousOnTimePercentage)}</td>
+      <td>${renderDelta(onTimePercentage, previousOnTimePercentage, 'percent')}</td>
+    </tr>
+    <tr>
+      <td>Avg Lunch Duration</td>
+      <td>${escapeHtml(formatAverageMinutes(currentBehavior.averageLunch))}</td>
+      <td>${escapeHtml(formatAverageMinutes(previousBehavior.averageLunch))}</td>
+      <td>${renderDelta(currentBehavior.averageLunch, previousBehavior.averageLunch, 'minutes', true)}</td>
+    </tr>
+    <tr>
+      <td>Avg Break Duration</td>
+      <td>${escapeHtml(formatAverageMinutes(currentBehavior.averageBreak))}</td>
+      <td>${escapeHtml(formatAverageMinutes(previousBehavior.averageBreak))}</td>
+      <td>${renderDelta(currentBehavior.averageBreak, previousBehavior.averageBreak, 'minutes', true)}</td>
+    </tr>
+    <tr>
+      <td>Avg Idle Minutes</td>
+      <td>${escapeHtml(formatAverageMinutes(currentBehavior.averageIdle))}</td>
+      <td>${escapeHtml(formatAverageMinutes(previousBehavior.averageIdle))}</td>
+      <td>${renderDelta(currentBehavior.averageIdle, previousBehavior.averageIdle, 'minutes', true)}</td>
+    </tr>
+    <tr>
+      <td>Tardiness Minutes</td>
+      <td>${totals.tardyMinutes} min</td>
+      <td>${previousTardyMinutes !== null ? `${previousTardyMinutes} min` : '—'}</td>
+      <td>${renderDelta(totals.tardyMinutes, previousTardyMinutes, 'minutes', true)}</td>
+    </tr>
+  `;
+
+  const employeeOptions = sortedLines.length
+    ? buildSelectOptions(
+        sortedLines.map((line) => ({ value: String(line.userId), label: line.user?.name ?? `User ${line.userId}` })),
+        selectedEmployeeId ? String(selectedEmployeeId) : undefined
+      )
+    : '';
+
+  const html = `
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <title>Payroll Period – ${escapeHtml(payDateLabel)}</title>
+        <style>${baseStyles}</style>
+      </head>
+      <body class="dashboard dashboard--payroll-detail">
+        ${renderNav('payroll')}
+        <main class="page-shell">
+          <header class="detail-header">
+            <div class="detail-identity">
+              <a class="button button-secondary detail-back" href="/dashboard/payroll">Back to Payroll</a>
+              <div class="detail-avatar">${escapeHtml(employeeInitials)}</div>
+              <div class="detail-identity-text">
+                <h1>${escapeHtml(employeeName)}</h1>
+                <p>${escapeHtml(employeeRoleLabel)}${employeeEmail ? ` · ${escapeHtml(employeeEmail)}` : ''}</p>
+              </div>
+            </div>
+            <div class="detail-meta">
+              ${statusChip}
+              <span>${escapeHtml(periodRangeLabel)}</span>
+              <span>${escapeHtml(computedLabel)}</span>
+            </div>
+          </header>
+          <section class="detail-kpis">
+            ${kpiCards}
+          </section>
+          <div class="cards-grid">
+            <section class="card">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Hours &amp; Pay Calculation</h2>
+                  <p class="card__subtitle">How hours and payroll inputs reconcile to the final amount.</p>
+                </div>
+              </div>
+              <div class="card__body detail-hours-grid">
+                ${hoursTable}
+                ${payTable}
+              </div>
+              <div class="card__body">
+                ${reconciliationNote}
+                ${makeUpList}
+              </div>
+            </section>
+            <section class="card">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Attendance Timeline Summary</h2>
+                  <p class="card__subtitle">Clock-ins, lunches, breaks, and idle signals for the period.</p>
+                </div>
+              </div>
+              <div class="card__body">
+                ${timelineSection}
+              </div>
+            </section>
+          </div>
+          <div class="cards-grid">
+            <section class="card">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Exceptions &amp; Flags</h2>
+                  <p class="card__subtitle">Policy breaches and anomalies to review.</p>
+                </div>
+              </div>
+              <div class="card__body">
+                ${exceptionsHtml}
+              </div>
+            </section>
+            <section class="card">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Trends vs. Prior Period</h2>
+                  <p class="card__subtitle">How this employee is trending period-over-period.</p>
+                </div>
+              </div>
+              <div class="card__body">
+                <table class="detail-trends">
+                  <thead>
+                    <tr>
+                      <th>Metric</th>
+                      <th>Current</th>
+                      <th>Prior</th>
+                      <th>Change</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${trendsRows}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+          <section class="card">
+            <div class="card__header">
+              <div>
+                <h2 class="card__title">Utilities</h2>
+                <p class="card__subtitle">Jump to another period, export, or capture notes.</p>
+              </div>
+            </div>
+            <div class="card__body detail-utilities">
+              <div class="detail-utility-row">
+                <label>
+                  <span>Payroll period</span>
+                  <select data-period-select>
+                    ${periodOptions}
+                  </select>
+                </label>
+                <label>
+                  <span>Employee</span>
+                  <select data-employee-select>
+                    ${employeeOptions}
+                  </select>
+                </label>
+              </div>
+              <div class="detail-utility-actions">
+                <button type="button" class="button button-secondary" data-print>Print</button>
+                <a class="button" href="/api/payroll/payruns/${formatIsoDate(normalizedPayDate)}/export" target="_blank" rel="noopener">Export CSV</a>
+              </div>
+              <label class="detail-notes">
+                <span>Review Notes</span>
+                <textarea readonly placeholder="Use Payroll notes to capture manager follow-ups."></textarea>
+              </label>
+            </div>
+          </section>
+        </main>
+        <script>
+          (() => {
+            const employeeSelect = document.querySelector('[data-employee-select]');
+            if (employeeSelect instanceof HTMLSelectElement) {
+              employeeSelect.addEventListener('change', () => {
+                const url = new URL(window.location.href);
+                if (employeeSelect.value) {
+                  url.searchParams.set('employeeId', employeeSelect.value);
+                } else {
+                  url.searchParams.delete('employeeId');
+                }
+                window.location.href = url.toString();
+              });
+            }
+            const periodSelect = document.querySelector('[data-period-select]');
+            if (periodSelect instanceof HTMLSelectElement) {
+              periodSelect.addEventListener('change', () => {
+                if (!periodSelect.value) return;
+                const base = new URL('/dashboard/payroll/period/' + periodSelect.value, window.location.origin);
+                const current = new URL(window.location.href);
+                const employee = current.searchParams.get('employeeId');
+                if (employee) {
+                  base.searchParams.set('employeeId', employee);
+                }
+                window.location.href = base.toString();
+              });
+            }
+            const printButton = document.querySelector('[data-print]');
+            if (printButton instanceof HTMLButtonElement) {
+              printButton.addEventListener('click', () => window.print());
+            }
+          })();
+        </script>
+      </body>
+    </html>
+  `;
+
+  res.type('html').send(html);
+});
 
 dashboardRouter.get('/settings', async (req, res) => {
   const toOptionalString = (value: unknown) => (typeof value === 'string' && value.trim() ? value.trim() : undefined);
