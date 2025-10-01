@@ -19,7 +19,10 @@ import {
   updateConfig,
   loadQueue,
   saveQueue,
-  getDefaultServerBaseUrl
+  getDefaultServerBaseUrl,
+  normalizeServerBaseUrl,
+  resolveAvailableProductionServerBaseUrl,
+  isManagedProductionServerBaseUrl
 } from './config';
 import { autoUpdater } from 'electron-updater';
 import type { UpdateDownloadedEvent, UpdateInfo } from 'electron-updater';
@@ -292,32 +295,6 @@ function defaultSecondInstanceHandler() {
   });
 }
 
-const normalizeBaseUrl = (input: string) => {
-  const trimmed = input.trim();
-  if (!trimmed) {
-    throw new Error('Server URL is required');
-  }
-  const withoutTrailingSlash = trimmed.replace(/\/+$/, '');
-  const withProtocol = /^https?:\/\//i.test(withoutTrailingSlash)
-    ? withoutTrailingSlash
-    : `https://${withoutTrailingSlash}`;
-  const url = new URL(withProtocol);
-  const hostname = url.hostname.toLowerCase();
-  const shouldForceHttps = hostname !== 'localhost' && hostname !== '127.0.0.1' && hostname !== '::1';
-  if (shouldForceHttps) {
-    url.protocol = 'https:';
-  }
-  url.username = '';
-  url.password = '';
-  url.hash = '';
-  url.search = '';
-  let pathname = url.pathname.replace(/\/+$/, '');
-  if (pathname === '/' || pathname === '') {
-    pathname = '';
-  }
-  return `${url.protocol}//${url.host}${pathname}`;
-};
-
 const shouldOpenPresenceWindow = () => presenceUiMode === 'popup' || presenceUiMode === 'both';
 
 const closePresenceWindow = (promptId?: string, options?: { suppressDismiss?: boolean }) => {
@@ -481,7 +458,7 @@ const bootstrapConfiguration = async () => {
   const envOverride = process.env.SERVER_BASE_URL;
   if (envOverride) {
     try {
-      const normalized = normalizeBaseUrl(envOverride);
+      const normalized = normalizeServerBaseUrl(envOverride);
       baseUrl = normalized;
       if (config.serverBaseUrl !== normalized) {
         await updateConfig({ serverBaseUrl: normalized });
@@ -492,17 +469,35 @@ const bootstrapConfiguration = async () => {
     }
   }
 
+  let normalizedStored: string | null = null;
   try {
-    const normalizedStored = normalizeBaseUrl(config.serverBaseUrl);
+    normalizedStored = normalizeServerBaseUrl(config.serverBaseUrl);
+  } catch (error) {
+    logger.warn('Stored server base URL invalid, resetting to default', error);
+  }
+
+  if (normalizedStored) {
     baseUrl = normalizedStored;
     if (normalizedStored !== config.serverBaseUrl) {
       await updateConfig({ serverBaseUrl: normalizedStored });
     }
-  } catch (error) {
-    logger.warn('Stored server base URL invalid, resetting to default', error);
-    const fallback = normalizeBaseUrl(getDefaultServerBaseUrl());
-    const updated = await updateConfig({ serverBaseUrl: fallback });
-    baseUrl = updated.serverBaseUrl;
+  } else {
+    const fallback = getDefaultServerBaseUrl();
+    baseUrl = fallback;
+    await updateConfig({ serverBaseUrl: fallback });
+  }
+
+  if ((app.isPackaged || process.env.NODE_ENV === 'production') && isManagedProductionServerBaseUrl(baseUrl)) {
+    try {
+      const resolved = await resolveAvailableProductionServerBaseUrl(baseUrl);
+      if (resolved !== baseUrl) {
+        logger.info('Switching server base URL after availability probe', { previous: baseUrl, next: resolved });
+        baseUrl = resolved;
+        await updateConfig({ serverBaseUrl: resolved });
+      }
+    } catch (error) {
+      logger.warn('Failed to resolve production server base URL, retaining current value', error);
+    }
   }
 };
 
@@ -591,7 +586,7 @@ const handleIpc = () => {
     if (!serverBaseUrl.trim()) {
       throw new Error('Server URL is required');
     }
-    const normalized = normalizeBaseUrl(serverBaseUrl);
+    const normalized = normalizeServerBaseUrl(serverBaseUrl);
     const rawEmail = typeof payload?.workEmail === 'string' ? payload.workEmail : null;
     const trimmedEmail = rawEmail && rawEmail.trim().length > 0 ? rawEmail.trim().toLowerCase() : null;
     const updated = await updateConfig({ serverBaseUrl: normalized, workEmail: trimmedEmail });
@@ -602,7 +597,7 @@ const handleIpc = () => {
   });
 
   ipcMain.handle('attendance:test-server-url', async (_event, url: string) => {
-    const normalized = normalizeBaseUrl(url);
+    const normalized = normalizeServerBaseUrl(url);
     const healthUrl = `${normalized}/api/health`;
 
     try {

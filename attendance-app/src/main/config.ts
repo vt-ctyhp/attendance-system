@@ -24,13 +24,101 @@ export interface PersistedQueueItem {
 const CONFIG_FILE_NAME = 'attendance-config.json';
 const QUEUE_FILE_NAME = 'offline-queue.json';
 
-const DEV_SERVER_BASE_URL = 'http://localhost:4000';
-const PROD_SERVER_BASE_URL = 'https://attendance.vvsjewelco.com';
+type SimpleFetch = (input: string, init?: { method?: string; signal?: AbortSignal }) => Promise<{ ok: boolean; status: number }>;
+
+export function normalizeServerBaseUrl(input: string): string {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    throw new Error('Server URL is required');
+  }
+  const withoutTrailingSlash = trimmed.replace(/\/+$/, '');
+  const withProtocol = /^https?:\/\//i.test(withoutTrailingSlash)
+    ? withoutTrailingSlash
+    : `https://${withoutTrailingSlash}`;
+  const url = new URL(withProtocol);
+  const hostname = url.hostname.toLowerCase();
+  const shouldForceHttps = hostname !== 'localhost' && hostname !== '127.0.0.1' && hostname !== '::1';
+  if (shouldForceHttps) {
+    url.protocol = 'https:';
+  }
+  url.username = '';
+  url.password = '';
+  url.hash = '';
+  url.search = '';
+  let pathname = url.pathname.replace(/\/+$/, '');
+  if (pathname === '/' || pathname === '') {
+    pathname = '';
+  }
+  return `${url.protocol}//${url.host}${pathname}`;
+}
+
+const DEV_SERVER_BASE_URL = normalizeServerBaseUrl('http://localhost:4000');
+
+const RAW_PRODUCTION_SERVER_BASE_URLS = [
+  'https://attendance-system-j9ns.onrender.com',
+  'https://attendance.vvsjewelco.com'
+];
+
+export const PRODUCTION_SERVER_BASE_URLS = Object.freeze(
+  RAW_PRODUCTION_SERVER_BASE_URLS.map((url) => normalizeServerBaseUrl(url))
+);
+
+const PRODUCTION_HEALTH_PATH = '/api/health';
+const PRODUCTION_HEALTH_TIMEOUT_MS = 4_000;
+
+const isProductionRuntime = () => app.isPackaged || process.env.NODE_ENV === 'production';
 
 const resolveDefaultServerBaseUrl = () =>
-  app.isPackaged || process.env.NODE_ENV === 'production' ? PROD_SERVER_BASE_URL : DEV_SERVER_BASE_URL;
+  isProductionRuntime() ? PRODUCTION_SERVER_BASE_URLS[0] : DEV_SERVER_BASE_URL;
 
 const DEFAULT_SERVER_BASE_URL = resolveDefaultServerBaseUrl();
+
+const getFetch = (): SimpleFetch | null => {
+  const candidate = (globalThis as unknown as { fetch?: SimpleFetch }).fetch;
+  return typeof candidate === 'function' ? candidate : null;
+};
+
+const probeServerHealth = async (baseUrl: string): Promise<boolean> => {
+  const fetchFn = getFetch();
+  if (!fetchFn) {
+    logger.debug('Global fetch implementation unavailable; skipping server health probe');
+    return false;
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PRODUCTION_HEALTH_TIMEOUT_MS);
+  timeout.unref?.();
+  try {
+    const target = new URL(PRODUCTION_HEALTH_PATH, baseUrl).toString();
+    const response = await fetchFn(target, { method: 'GET', signal: controller.signal });
+    if (response.ok || response.status === 401) {
+      return true;
+    }
+    logger.debug({ target, status: response.status }, 'config.health_probe_unexpected_status');
+    return false;
+  } catch (error) {
+    logger.debug({ baseUrl, error }, 'config.health_probe_failed');
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
+export const isManagedProductionServerBaseUrl = (value: string) =>
+  PRODUCTION_SERVER_BASE_URLS.includes(value);
+
+export const resolveAvailableProductionServerBaseUrl = async (
+  currentBaseUrl?: string
+): Promise<string> => {
+  for (const candidate of PRODUCTION_SERVER_BASE_URLS) {
+    if (await probeServerHealth(candidate)) {
+      return candidate;
+    }
+  }
+  if (currentBaseUrl && isManagedProductionServerBaseUrl(currentBaseUrl)) {
+    return currentBaseUrl;
+  }
+  return PRODUCTION_SERVER_BASE_URLS[0];
+};
 
 let cachedConfig: AppConfig | null = null;
 
@@ -49,13 +137,22 @@ export const getConfig = async (): Promise<AppConfig> => {
   try {
     const raw = await fs.readFile(configPath, 'utf-8');
     const data = JSON.parse(raw) as Partial<AppConfig>;
+    const normalizedServerBaseUrl =
+      typeof data.serverBaseUrl === 'string' && data.serverBaseUrl.trim().length > 0
+        ? normalizeServerBaseUrl(data.serverBaseUrl)
+        : DEFAULT_SERVER_BASE_URL;
     const config: AppConfig = {
       deviceId: data.deviceId ?? randomUUID(),
-      serverBaseUrl: data.serverBaseUrl ?? DEFAULT_SERVER_BASE_URL,
+      serverBaseUrl: normalizedServerBaseUrl,
       workEmail: typeof data.workEmail === 'string' && data.workEmail.trim().length > 0 ? data.workEmail : null
     };
 
-    if (!data.deviceId || !data.serverBaseUrl || data.workEmail !== config.workEmail) {
+    if (
+      !data.deviceId ||
+      !data.serverBaseUrl ||
+      data.serverBaseUrl !== normalizedServerBaseUrl ||
+      data.workEmail !== config.workEmail
+    ) {
       await saveConfig(config);
     }
 
@@ -91,6 +188,9 @@ export const updateConfig = async (partial: Partial<AppConfig>): Promise<AppConf
     workEmail: current.workEmail,
     ...partial
   };
+  if (typeof partial.serverBaseUrl === 'string') {
+    next.serverBaseUrl = normalizeServerBaseUrl(partial.serverBaseUrl);
+  }
   if (typeof next.workEmail === 'string') {
     const trimmedEmail = next.workEmail.trim();
     next.workEmail = trimmedEmail.length > 0 ? trimmedEmail : null;

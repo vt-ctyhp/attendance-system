@@ -1,8 +1,8 @@
 {
   "name": "attendance-app",
-  "version": "1.0.0",
+  "version": "1.0.6",
   "private": true,
-"description": "Attendance tracking Electron app",
+  "description": "Attendance tracking Electron app",
   "author": "vt",
   "main": "dist/main/main.js",
   "repository": {
