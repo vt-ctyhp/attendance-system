@@ -15,7 +15,7 @@
     "seed:sample": "ts-node scripts/seedSampleData.ts",
     "seed:payroll-demo": "ts-node scripts/seedPayrollDemoMonth.ts",
     "lint": "eslint .",
-    "test": "node scripts/run-tests.cjs",
+    "test": "vitest run --dir tests --reporter verbose",
     "test:makeup-cap": "node scripts/testMakeupCap.mjs",
     "test:watch": "vitest"
   },
