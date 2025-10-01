@@ -967,6 +967,8 @@ let state: AttendanceState = {
   }
 };
 
+const SHOW_PRESENCE = false;
+
 const dom = {
   heroTitle: document.getElementById('hero-title')!,
   heroStatus: document.getElementById('hero-status')!,
@@ -975,7 +977,7 @@ const dom = {
   clockToggle: document.getElementById('clock-toggle') as HTMLButtonElement,
   breakToggle: document.getElementById('break-toggle') as HTMLButtonElement,
   lunchToggle: document.getElementById('lunch-toggle') as HTMLButtonElement,
-  presenceButton: document.getElementById('presence-button') as HTMLButtonElement,
+  presenceButton: document.getElementById('presence-button') as HTMLButtonElement | null,
   downloadButton: document.getElementById('download-report') as HTMLButtonElement,
   snapshotLabel: document.getElementById('snapshot-label')!,
   statsList: document.getElementById('stats-list')!,
@@ -995,11 +997,12 @@ const dom = {
   makeupProgress: document.getElementById('makeup-progress')!
 };
 
-dom.presenceButton.hidden = true;
-dom.presenceButton.style.display = 'none';
-dom.presenceButton.setAttribute('aria-hidden', 'true');
-dom.presenceButton.setAttribute('tabindex', '-1');
-dom.presenceButton.remove();
+if (!SHOW_PRESENCE && dom.presenceButton) {
+  dom.presenceButton.hidden = true;
+  dom.presenceButton.style.display = 'none';
+  dom.presenceButton.setAttribute('aria-hidden', 'true');
+  dom.presenceButton.setAttribute('tabindex', '-1');
+}
 
 dom.timesheetView.value = state.timesheet.view;
 
@@ -1206,7 +1209,9 @@ const updateControls = () => {
   const disabled = state.session.status === 'clocked_out';
   dom.breakToggle.disabled = disabled;
   dom.lunchToggle.disabled = disabled;
-  dom.presenceButton.disabled = true;
+  if (dom.presenceButton) {
+    dom.presenceButton.disabled = true;
+  }
 };
 
 const pushActivity = (message: string, category: ActivityCategory) => {
@@ -1659,7 +1664,7 @@ const initialize = () => {
   dom.clockToggle.addEventListener('click', handleClockToggle);
   dom.breakToggle.addEventListener('click', handleBreakToggle);
   dom.lunchToggle.addEventListener('click', handleLunchToggle);
-  if (!dom.presenceButton.hidden) {
+  if (SHOW_PRESENCE && dom.presenceButton && !dom.presenceButton.hidden) {
     dom.presenceButton.addEventListener('click', handlePresence);
   }
   dom.requestForm.addEventListener('submit', handleRequestSubmit);
