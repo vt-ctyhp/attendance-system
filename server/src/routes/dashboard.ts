@@ -2551,6 +2551,11 @@ const baseStyles = `
     body.dashboard .alert.error { background: rgba(220,38,38,0.14); color: #dc2626; }
     body.dashboard .empty { background: rgba(15,23,42,0.03); color: #64748b; border-radius: 16px; }
     body.dashboard--payroll .cards-grid--payroll { grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); }
+    @media (min-width: 1024px) {
+      body.dashboard--payroll .cards-grid--payroll.cards-grid--payroll-split { grid-template-columns: repeat(4, minmax(0, 1fr)); grid-auto-flow: dense; }
+      body.dashboard--payroll .cards-grid--payroll.cards-grid--payroll-split > .card--span-quarter { grid-column: span 1; }
+      body.dashboard--payroll .cards-grid--payroll.cards-grid--payroll-split > .card--span-three-quarter { grid-column: span 3; }
+    }
     body.dashboard--payroll .cards-grid--summary { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
     body.dashboard--payroll-summary .cards-grid--summary { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
     body.dashboard--payroll-summary .totals-table { width: 100%; border-collapse: collapse; margin: 0; background: transparent; box-shadow: none; }
@@ -5867,19 +5872,8 @@ dashboardRouter.get('/payroll', async (req, res) => {
           ${messageAlert}
           ${errorAlert}
           ${summaryCards}
-          <div class="cards-grid cards-grid--payroll">
-            <section class="card card--table" id="payroll-periods">
-              <div class="card__header">
-                <div>
-                  <h2 class="card__title">Payroll Periods</h2>
-                  <p class="card__subtitle">Limited to the 12 most recent runs.</p>
-                </div>
-              </div>
-              <div class="card__body">
-                ${payrollTable}
-              </div>
-            </section>
-            <section class="card" id="run-payroll">
+          <div class="cards-grid cards-grid--payroll cards-grid--payroll-split">
+            <section class="card card--span-quarter" id="run-payroll">
               <div class="card__header">
                 <div>
                   <h2 class="card__title">Run Payroll</h2>
@@ -5922,6 +5916,17 @@ dashboardRouter.get('/payroll', async (req, res) => {
                     </div>
                   </li>
                 </ol>
+              </div>
+            </section>
+            <section class="card card--table card--span-three-quarter" id="payroll-periods">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Payroll Periods</h2>
+                  <p class="card__subtitle">Limited to the 12 most recent runs.</p>
+                </div>
+              </div>
+              <div class="card__body">
+                ${payrollTable}
               </div>
             </section>
           </div>
