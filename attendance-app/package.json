@@ -2,7 +2,7 @@
   "name": "attendance-app",
   "version": "1.0.0",
   "private": true,
-"description": "Attendance tracking Electron app",
+  "description": "Attendance tracking Electron app",
   "author": "vt",
   "main": "dist/main/main.js",
   "repository": {
@@ -14,7 +14,7 @@
     "clean": "rimraf dist",
     "build:ts": "tsc",
     "build:renderer": "esbuild src/renderer/index.ts --bundle --platform=browser --format=iife --outfile=dist/renderer/index.js --sourcemap",
-    "copy:assets": "copyfiles -u 1 \"src/**/*.html\" dist",
+    "copy:assets": "copyfiles -u 1 \"src/**/*.html\" \"src/assets/**/*\" dist",
     "prepare:dist": "npm run clean && npm run build:ts && npm run build:renderer && npm run copy:assets",
     "build": "cross-env NODE_ENV=production npm run prepare:dist",
     "start": "npm run prepare:dist && electron .",
@@ -87,11 +87,11 @@
   "devDependencies": {
     "@types/node": "^20.11.17",
     "copyfiles": "^2.4.1",
+    "cross-env": "^7.0.3",
     "electron": "^29.1.0",
     "electron-builder": "^24.9.1",
     "esbuild": "^0.21.5",
     "jsdom": "^24.1.3",
-    "cross-env": "^7.0.3",
     "rimraf": "^5.0.5",
     "typescript": "^5.4.2",
     "vitest": "^1.6.0"
@@ -100,7 +100,7 @@
     "active-win": "^9.0.0",
     "dotenv": "^16.4.5",
     "electron-log": "^5.1.2",
-    "electron-updater": "^6.1.7",
+    "electron-updater": "^6.6.2",
     "npm": "^11.6.1",
     "start": "^5.1.0"
   }

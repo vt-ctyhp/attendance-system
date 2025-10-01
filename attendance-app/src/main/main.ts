@@ -19,7 +19,8 @@ import {
   updateConfig,
   loadQueue,
   saveQueue,
-  getDefaultServerBaseUrl
+  getDefaultServerBaseUrl,
+  resolvePreferredServerBaseUrl
 } from './config';
 import { autoUpdater } from 'electron-updater';
 import type { UpdateDownloadedEvent, UpdateInfo } from 'electron-updater';
@@ -96,7 +97,7 @@ const triggerManualUpdateCheck = () => {
   updateRequestSource = 'manual';
   autoUpdater
     .checkForUpdates()
-    .catch((error) => {
+    .catch((error: unknown) => {
       logger.error('Manual update check failed', error);
       showInfoMessage({
         type: 'error',
@@ -188,7 +189,7 @@ const setupAutoUpdates = () => {
 
   autoUpdater
     .checkForUpdatesAndNotify()
-    .catch((error) => logger.warn('Automatic update check failed', error));
+    .catch((error: unknown) => logger.warn('Automatic update check failed', error));
 };
 
 const createUpdateMenuItem = (): MenuItemConstructorOptions => ({
@@ -492,18 +493,32 @@ const bootstrapConfiguration = async () => {
     }
   }
 
+  let storedBaseUrl = config.serverBaseUrl;
+
   try {
-    const normalizedStored = normalizeBaseUrl(config.serverBaseUrl);
-    baseUrl = normalizedStored;
+    const normalizedStored = normalizeBaseUrl(storedBaseUrl);
+    storedBaseUrl = normalizedStored;
     if (normalizedStored !== config.serverBaseUrl) {
-      await updateConfig({ serverBaseUrl: normalizedStored });
+      const updated = await updateConfig({ serverBaseUrl: normalizedStored });
+      storedBaseUrl = updated.serverBaseUrl;
     }
   } catch (error) {
     logger.warn('Stored server base URL invalid, resetting to default', error);
     const fallback = normalizeBaseUrl(getDefaultServerBaseUrl());
     const updated = await updateConfig({ serverBaseUrl: fallback });
-    baseUrl = updated.serverBaseUrl;
+    storedBaseUrl = updated.serverBaseUrl;
   }
+
+  const { baseUrl: resolvedBaseUrl, reason } = await resolvePreferredServerBaseUrl(storedBaseUrl);
+  if (resolvedBaseUrl !== storedBaseUrl) {
+    const updated = await updateConfig({ serverBaseUrl: resolvedBaseUrl });
+    storedBaseUrl = updated.serverBaseUrl;
+    logger.info('Server base URL auto-updated', { baseUrl: storedBaseUrl, source: reason });
+  } else {
+    logger.info('Resolved server base URL', { baseUrl: storedBaseUrl, source: reason });
+  }
+
+  baseUrl = storedBaseUrl;
 };
 
 const getSystemStatus = async () => {

@@ -25,12 +25,16 @@ const CONFIG_FILE_NAME = 'attendance-config.json';
 const QUEUE_FILE_NAME = 'offline-queue.json';
 
 const DEV_SERVER_BASE_URL = 'http://localhost:4000';
-const PROD_SERVER_BASE_URL = 'https://attendance.vvsjewelco.com';
+const PROD_SERVER_PRIMARY_BASE_URL = 'https://attendance-system-j9ns.onrender.com';
+const PROD_SERVER_FALLBACK_BASE_URL = 'https://attendance.vvsjewelco.com';
 
-const resolveDefaultServerBaseUrl = () =>
-  app.isPackaged || process.env.NODE_ENV === 'production' ? PROD_SERVER_BASE_URL : DEV_SERVER_BASE_URL;
+const PROD_SERVER_BASE_URLS = [PROD_SERVER_PRIMARY_BASE_URL, PROD_SERVER_FALLBACK_BASE_URL] as const;
 
-const DEFAULT_SERVER_BASE_URL = resolveDefaultServerBaseUrl();
+const isProductionLike = () => app.isPackaged || process.env.NODE_ENV === 'production';
+
+const getDefaultServerBaseUrls = (): string[] =>
+  isProductionLike() ? [...PROD_SERVER_BASE_URLS] : [DEV_SERVER_BASE_URL];
+
 
 let cachedConfig: AppConfig | null = null;
 
@@ -51,7 +55,7 @@ export const getConfig = async (): Promise<AppConfig> => {
     const data = JSON.parse(raw) as Partial<AppConfig>;
     const config: AppConfig = {
       deviceId: data.deviceId ?? randomUUID(),
-      serverBaseUrl: data.serverBaseUrl ?? DEFAULT_SERVER_BASE_URL,
+      serverBaseUrl: data.serverBaseUrl ?? getDefaultServerBaseUrl(),
       workEmail: typeof data.workEmail === 'string' && data.workEmail.trim().length > 0 ? data.workEmail : null
     };
 
@@ -64,7 +68,7 @@ export const getConfig = async (): Promise<AppConfig> => {
   } catch (error) {
     const config: AppConfig = {
       deviceId: randomUUID(),
-      serverBaseUrl: DEFAULT_SERVER_BASE_URL,
+      serverBaseUrl: getDefaultServerBaseUrl(),
       workEmail: null
     };
     await saveConfig(config);
@@ -124,4 +128,62 @@ export const saveQueue = async (items: PersistedQueueItem[]): Promise<void> => {
   await fs.writeFile(queuePath, JSON.stringify(items, null, 2), 'utf-8');
 };
 
-export const getDefaultServerBaseUrl = () => resolveDefaultServerBaseUrl();
+const SERVER_HEALTH_ENDPOINT = '/api/health';
+const SERVER_HEALTH_TIMEOUT_MS = 3000;
+
+export type ServerBaseUrlResolutionReason = 'stored' | 'primary' | 'fallback' | 'default' | 'unchanged';
+
+export const getDefaultServerBaseUrl = () => getDefaultServerBaseUrls()[0];
+
+export const getDefaultServerBaseUrlOptions = (): string[] => getDefaultServerBaseUrls();
+
+const isServerReachable = async (baseUrl: string): Promise<boolean> => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), SERVER_HEALTH_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${baseUrl}${SERVER_HEALTH_ENDPOINT}`, {
+      method: 'GET',
+      signal: controller.signal
+    });
+    return response.ok || response.status === 401;
+  } catch (error) {
+    logger.info('Server health check failed', {
+      baseUrl,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
+export const resolvePreferredServerBaseUrl = async (
+  current?: string
+): Promise<{ baseUrl: string; reason: ServerBaseUrlResolutionReason }> => {
+  const trimmedCurrent = typeof current === 'string' && current.trim().length > 0 ? current : undefined;
+
+  if (!isProductionLike()) {
+    if (trimmedCurrent) {
+      return { baseUrl: trimmedCurrent, reason: 'stored' };
+    }
+    return { baseUrl: getDefaultServerBaseUrl(), reason: 'default' };
+  }
+
+  const defaults = getDefaultServerBaseUrls();
+  const orderedCandidates = Array.from(new Set([trimmedCurrent, ...defaults].filter(Boolean))) as string[];
+
+  for (const candidate of orderedCandidates) {
+    const reachable = await isServerReachable(candidate);
+    if (reachable) {
+      if (candidate === trimmedCurrent) {
+        return { baseUrl: candidate, reason: 'stored' };
+      }
+      if (candidate === defaults[0]) {
+        return { baseUrl: candidate, reason: 'primary' };
+      }
+      return { baseUrl: candidate, reason: 'fallback' };
+    }
+  }
+
+  return { baseUrl: trimmedCurrent ?? defaults[0], reason: 'unchanged' };
+};
