@@ -94,6 +94,7 @@
     idleHours: data.idle,
     breaks: data.breaks,
     lunches: data.lunches,
+    tardyMinutes: data.tardy ?? 0,
     presenceMisses: data.presence,
     note: data.note
   });
@@ -207,10 +208,11 @@
       totals.idleHours += day.idleHours;
       totals.breaks += day.breaks;
       totals.lunches += day.lunches;
+      totals.tardyMinutes += day.tardyMinutes;
       totals.presenceMisses += day.presenceMisses;
       return totals;
     },
-    { activeHours: 0, idleHours: 0, breaks: 0, lunches: 0, presenceMisses: 0 }
+    { activeHours: 0, idleHours: 0, breaks: 0, lunches: 0, tardyMinutes: 0, presenceMisses: 0 }
   );
   var greeting = (date) => {
     const hour = date.getHours();
@@ -441,34 +443,34 @@
   var now = /* @__PURE__ */ new Date();
   var weekStart = startOfWeek(now);
   var weeklyTemplate = [
-    { active: 7.8, idle: 0.4, breaks: 2, lunches: 1, presence: 0, note: "Floor reset complete." },
-    { active: 7.6, idle: 0.5, breaks: 2, lunches: 1, presence: 0 },
-    { active: 7.9, idle: 0.6, breaks: 3, lunches: 1, presence: 1, note: "Missed presence check at 2:10\u202Fpm." },
-    { active: 8.2, idle: 0.3, breaks: 2, lunches: 1, presence: 0 },
-    { active: 7.4, idle: 0.5, breaks: 2, lunches: 1, presence: 0 },
-    { active: 5, idle: 0.7, breaks: 2, lunches: 1, presence: 0, note: "Partial shift for inventory count." },
-    { active: 0, idle: 0, breaks: 0, lunches: 0, presence: 0, note: "Scheduled day off." }
+    { active: 7.8, idle: 0.4, breaks: 2, lunches: 1, presence: 0, tardy: 0, note: "Floor reset complete." },
+    { active: 7.6, idle: 0.5, breaks: 2, lunches: 1, presence: 0, tardy: 0 },
+    { active: 7.9, idle: 0.6, breaks: 3, lunches: 1, presence: 1, tardy: 15, note: "Missed presence check at 2:10\u202Fpm." },
+    { active: 8.2, idle: 0.3, breaks: 2, lunches: 1, presence: 0, tardy: 0 },
+    { active: 7.4, idle: 0.5, breaks: 2, lunches: 1, presence: 0, tardy: 0 },
+    { active: 5, idle: 0.7, breaks: 2, lunches: 1, presence: 0, tardy: 0, note: "Partial shift for inventory count." },
+    { active: 0, idle: 0, breaks: 0, lunches: 0, presence: 0, tardy: 0, note: "Scheduled day off." }
   ];
   var weeklyDays = weeklyTemplate.map((data, index) => createDay(addDays(weekStart, index), data));
   var previousWeekTemplate = [
-    { active: 7.5, idle: 0.6, breaks: 2, lunches: 1, presence: 0 },
-    { active: 7.9, idle: 0.4, breaks: 2, lunches: 1, presence: 0 },
-    { active: 8.1, idle: 0.5, breaks: 3, lunches: 1, presence: 0 },
-    { active: 7.7, idle: 0.6, breaks: 2, lunches: 1, presence: 0 },
-    { active: 7.3, idle: 0.6, breaks: 2, lunches: 1, presence: 0 },
-    { active: 4.5, idle: 0.5, breaks: 1, lunches: 1, presence: 0 },
-    { active: 0, idle: 0, breaks: 0, lunches: 0, presence: 0 }
+    { active: 7.5, idle: 0.6, breaks: 2, lunches: 1, presence: 0, tardy: 0 },
+    { active: 7.9, idle: 0.4, breaks: 2, lunches: 1, presence: 0, tardy: 0 },
+    { active: 8.1, idle: 0.5, breaks: 3, lunches: 1, presence: 0, tardy: 0 },
+    { active: 7.7, idle: 0.6, breaks: 2, lunches: 1, presence: 0, tardy: 0 },
+    { active: 7.3, idle: 0.6, breaks: 2, lunches: 1, presence: 0, tardy: 0 },
+    { active: 4.5, idle: 0.5, breaks: 1, lunches: 1, presence: 0, tardy: 0 },
+    { active: 0, idle: 0, breaks: 0, lunches: 0, presence: 0, tardy: 0 }
   ];
   var previousWeekStart = addDays(weekStart, -7);
   var previousWeekDays = previousWeekTemplate.map((data, index) => createDay(addDays(previousWeekStart, index), data));
   var earlyWeekTemplate = [
-    { active: 7.2, idle: 0.5, breaks: 2, lunches: 1, presence: 0 },
-    { active: 7.8, idle: 0.4, breaks: 2, lunches: 1, presence: 0 },
-    { active: 7.6, idle: 0.5, breaks: 2, lunches: 1, presence: 0 },
-    { active: 8, idle: 0.4, breaks: 2, lunches: 1, presence: 0 },
-    { active: 7.1, idle: 0.6, breaks: 2, lunches: 1, presence: 0 },
-    { active: 0, idle: 0, breaks: 0, lunches: 0, presence: 0 },
-    { active: 0, idle: 0, breaks: 0, lunches: 0, presence: 0 }
+    { active: 7.2, idle: 0.5, breaks: 2, lunches: 1, presence: 0, tardy: 0 },
+    { active: 7.8, idle: 0.4, breaks: 2, lunches: 1, presence: 0, tardy: 0 },
+    { active: 7.6, idle: 0.5, breaks: 2, lunches: 1, presence: 0, tardy: 0 },
+    { active: 8, idle: 0.4, breaks: 2, lunches: 1, presence: 0, tardy: 0 },
+    { active: 7.1, idle: 0.6, breaks: 2, lunches: 1, presence: 0, tardy: 0 },
+    { active: 0, idle: 0, breaks: 0, lunches: 0, presence: 0, tardy: 0 },
+    { active: 0, idle: 0, breaks: 0, lunches: 0, presence: 0, tardy: 0 }
   ];
   var earlyWeekStart = addDays(previousWeekStart, -7);
   var earlyWeekDays = earlyWeekTemplate.map((data, index) => createDay(addDays(earlyWeekStart, index), data));
@@ -513,6 +515,7 @@
     lunchMinutes: todayEntry.lunches > 0 ? todayEntry.lunches * 45 : 0,
     breaksCount: todayEntry.breaks,
     lunchCount: todayEntry.lunches,
+    tardyMinutes: todayEntry.tardyMinutes,
     presenceMisses: todayEntry.presenceMisses
   };
   var state = {
@@ -639,12 +642,18 @@
       },
       {
         id: "activity-4",
+        timestamp: addMinutes(now, -150).toISOString(),
+        message: "Idle from 1:55\u202Fpm \u2013 2:05\u202Fpm (10 minutes).",
+        category: "idle"
+      },
+      {
+        id: "activity-5",
         timestamp: addMinutes(now, -130).toISOString(),
         message: "Clocked in from store kiosk.",
         category: "session"
       },
       {
-        id: "activity-5",
+        id: "activity-6",
         timestamp: addMinutes(now, -280).toISOString(),
         message: "Approved time-off request for Oct 3 \u2013 Oct 4.",
         category: "request"
@@ -682,6 +691,11 @@
     activityList: document.getElementById("activity-list"),
     makeupProgress: document.getElementById("makeup-progress")
   };
+  dom.presenceButton.hidden = true;
+  dom.presenceButton.style.display = "none";
+  dom.presenceButton.setAttribute("aria-hidden", "true");
+  dom.presenceButton.setAttribute("tabindex", "-1");
+  dom.presenceButton.remove();
   dom.timesheetView.value = state.timesheet.view;
   var updateTimesheetFromToday = () => {
     const hours = state.today.activeMinutes / 60;
@@ -693,6 +707,7 @@
         day.idleHours = Math.round(idleHours * 100) / 100;
         day.breaks = state.today.breaksCount;
         day.lunches = state.today.lunchCount;
+        day.tardyMinutes = state.today.tardyMinutes;
         day.presenceMisses = state.today.presenceMisses;
         period.totals = recomputeTotals(period.days);
       }
@@ -737,11 +752,6 @@
         label: "Lunch",
         value: formatDurationMinutes(state.today.lunchMinutes),
         meta: state.today.lunchCount ? `${state.today.lunchCount} lunch` : "No lunch logged"
-      },
-      {
-        label: "Presence misses",
-        value: `${state.today.presenceMisses}`,
-        meta: state.session.lastPresenceCheck ? `Last check ${formatRelative(state.session.lastPresenceCheck)}` : "Awaiting check"
       }
     ];
     dom.statsList.innerHTML = stats.map(
@@ -758,9 +768,8 @@
     const period = state.timesheet.periods[state.timesheet.view];
     dom.timesheetLabel.textContent = period.label;
     dom.timesheetBody.innerHTML = period.days.map((day) => {
-      const presence = day.presenceMisses > 0 ? `${day.presenceMisses} miss` : "On track";
-      const presenceClass = day.presenceMisses > 0 ? "pill pill--pending" : "pill";
       const noteRow = day.note ? `<div class="form-hint">${escapeHtml(day.note)}</div>` : "";
+      const tardyValue = `${day.tardyMinutes}`;
       return `
         <tr>
           <td>
@@ -771,7 +780,7 @@
           <td>${escapeHtml(formatHours(day.idleHours))}</td>
           <td>${day.breaks}</td>
           <td>${day.lunches}</td>
-          <td><span class="${presenceClass}">${escapeHtml(presence)}</span></td>
+          <td>${escapeHtml(tardyValue)}</td>
         </tr>
       `;
     }).join("\n");
@@ -845,7 +854,7 @@
     const disabled = state.session.status === "clocked_out";
     dom.breakToggle.disabled = disabled;
     dom.lunchToggle.disabled = disabled;
-    dom.presenceButton.disabled = disabled;
+    dom.presenceButton.disabled = true;
   };
   var pushActivity = (message, category) => {
     state.activity.unshift({
@@ -1107,14 +1116,14 @@
   };
   var handleDownload = () => {
     const period = state.timesheet.periods[state.timesheet.view];
-    const header = ["Date", "Active Hours", "Idle Hours", "Breaks", "Lunches", "Presence Misses", "Note"];
+    const header = ["Date", "Active Hours", "Idle Hours", "Breaks", "Lunches", "Tardy (m)", "Note"];
     const rows = period.days.map((day) => [
       day.label,
       formatHours(day.activeHours),
       formatHours(day.idleHours),
       `${day.breaks}`,
       `${day.lunches}`,
-      `${day.presenceMisses}`,
+      `${day.tardyMinutes}`,
       day.note ?? ""
     ]);
     const csv = [header, ...rows].map((line) => line.map((value) => `"${value.replace(/"/g, '""')}"`).join(",")).join("\n");
@@ -1141,7 +1150,8 @@
       idleHours: day.idleHours,
       breaks: day.breaks,
       lunches: day.lunches,
-      presenceMisses: day.presenceMisses,
+      tardyMinutes: day.tardyMinutes ?? day.presenceMisses ?? 0,
+      presenceMisses: day.presenceMisses ?? 0,
       note: void 0
     })),
     totals: {
@@ -1149,7 +1159,8 @@
       idleHours: period.totals.idleHours,
       breaks: period.totals.breaks,
       lunches: period.totals.lunches,
-      presenceMisses: period.totals.presenceMisses
+      tardyMinutes: period.totals.tardyMinutes ?? period.totals.presenceMisses ?? 0,
+      presenceMisses: period.totals.presenceMisses ?? 0
     }
   });
   var applyOverview = (overview) => {
@@ -1207,6 +1218,8 @@
       activity: overview.activity.slice(),
       makeUpCap: { ...overview.makeUpCap }
     };
+    state.today.tardyMinutes = state.today.tardyMinutes ?? (state.today.presenceMisses ?? 0);
+    state.today.presenceMisses = state.today.presenceMisses ?? 0;
     appContext.sessionId = overview.session.id;
     dom.timesheetView.value = state.timesheet.view;
     updateTimesheetFromToday();
@@ -1255,7 +1268,9 @@
     dom.clockToggle.addEventListener("click", handleClockToggle);
     dom.breakToggle.addEventListener("click", handleBreakToggle);
     dom.lunchToggle.addEventListener("click", handleLunchToggle);
-    dom.presenceButton.addEventListener("click", handlePresence);
+    if (!dom.presenceButton.hidden) {
+      dom.presenceButton.addEventListener("click", handlePresence);
+    }
     dom.requestForm.addEventListener("submit", handleRequestSubmit);
     dom.timesheetView.addEventListener("change", handleTimesheetChange);
     dom.downloadButton.addEventListener("click", handleDownload);
