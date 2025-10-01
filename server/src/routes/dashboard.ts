@@ -2615,6 +2615,8 @@ const baseStyles = `
     body.dashboard--payroll .step-list span { font-size: 0.9rem; color: #475569; }
     body.dashboard--payroll .step-list form { margin: 0; }
     body.dashboard--payroll .step-list .stack-form { max-width: none; }
+    body.dashboard--payroll #run-payroll .stack-form { gap: 0.25rem; }
+    body.dashboard--payroll #run-payroll .stack-form .meta { margin: 0 0 0.15rem; }
     body.dashboard--payroll .step-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
     body.dashboard--payroll .status-chip { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.25rem 0.6rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; background: rgba(148,163,184,0.18); color: #334155; }
     body.dashboard--payroll .status-chip--draft { background: rgba(148,163,184,0.3); color: #334155; }
