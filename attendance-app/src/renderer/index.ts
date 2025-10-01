@@ -14,6 +14,7 @@ interface TimesheetDay {
   idleHours: number;
   breaks: number;
   lunches: number;
+  tardyMinutes: number;
   presenceMisses: number;
   note?: string;
 }
@@ -23,6 +24,7 @@ interface TimesheetTotals {
   idleHours: number;
   breaks: number;
   lunches: number;
+  tardyMinutes: number;
   presenceMisses: number;
 }
 
@@ -77,6 +79,7 @@ interface TodaySnapshot {
   lunchMinutes: number;
   breaksCount: number;
   lunchCount: number;
+  tardyMinutes: number;
   presenceMisses: number;
 }
 
@@ -122,7 +125,8 @@ interface OverviewTimesheetDay {
   idleHours: number;
   breaks: number;
   lunches: number;
-  presenceMisses: number;
+  tardyMinutes?: number;
+  presenceMisses?: number;
 }
 
 interface OverviewTimesheetPeriod {
@@ -134,7 +138,8 @@ interface OverviewTimesheetPeriod {
     idleHours: number;
     breaks: number;
     lunches: number;
-    presenceMisses: number;
+    tardyMinutes?: number;
+    presenceMisses?: number;
   };
 }
 
@@ -287,7 +292,15 @@ const escapeHtml = (value: string) =>
 
 const createDay = (
   date: Date,
-  data: { active: number; idle: number; breaks: number; lunches: number; presence: number; note?: string }
+  data: {
+    active: number;
+    idle: number;
+    breaks: number;
+    lunches: number;
+    presence: number;
+    tardy?: number;
+    note?: string;
+  }
 ): TimesheetDay => ({
   date: isoDate(date),
   label: formatDayLabel(date),
@@ -295,6 +308,7 @@ const createDay = (
   idleHours: data.idle,
   breaks: data.breaks,
   lunches: data.lunches,
+  tardyMinutes: data.tardy ?? 0,
   presenceMisses: data.presence,
   note: data.note
 });
@@ -447,10 +461,11 @@ const recomputeTotals = (days: TimesheetDay[]): TimesheetTotals =>
       totals.idleHours += day.idleHours;
       totals.breaks += day.breaks;
       totals.lunches += day.lunches;
+      totals.tardyMinutes += day.tardyMinutes;
       totals.presenceMisses += day.presenceMisses;
       return totals;
     },
-    { activeHours: 0, idleHours: 0, breaks: 0, lunches: 0, presenceMisses: 0 }
+    { activeHours: 0, idleHours: 0, breaks: 0, lunches: 0, tardyMinutes: 0, presenceMisses: 0 }
   );
 
 const greeting = (date: Date) => {
@@ -717,38 +732,38 @@ const now = new Date();
 const weekStart = startOfWeek(now);
 
 const weeklyTemplate = [
-  { active: 7.8, idle: 0.4, breaks: 2, lunches: 1, presence: 0, note: 'Floor reset complete.' },
-  { active: 7.6, idle: 0.5, breaks: 2, lunches: 1, presence: 0 },
-  { active: 7.9, idle: 0.6, breaks: 3, lunches: 1, presence: 1, note: 'Missed presence check at 2:10 pm.' },
-  { active: 8.2, idle: 0.3, breaks: 2, lunches: 1, presence: 0 },
-  { active: 7.4, idle: 0.5, breaks: 2, lunches: 1, presence: 0 },
-  { active: 5.0, idle: 0.7, breaks: 2, lunches: 1, presence: 0, note: 'Partial shift for inventory count.' },
-  { active: 0, idle: 0, breaks: 0, lunches: 0, presence: 0, note: 'Scheduled day off.' }
+  { active: 7.8, idle: 0.4, breaks: 2, lunches: 1, presence: 0, tardy: 0, note: 'Floor reset complete.' },
+  { active: 7.6, idle: 0.5, breaks: 2, lunches: 1, presence: 0, tardy: 0 },
+  { active: 7.9, idle: 0.6, breaks: 3, lunches: 1, presence: 1, tardy: 15, note: 'Missed presence check at 2:10 pm.' },
+  { active: 8.2, idle: 0.3, breaks: 2, lunches: 1, presence: 0, tardy: 0 },
+  { active: 7.4, idle: 0.5, breaks: 2, lunches: 1, presence: 0, tardy: 0 },
+  { active: 5.0, idle: 0.7, breaks: 2, lunches: 1, presence: 0, tardy: 0, note: 'Partial shift for inventory count.' },
+  { active: 0, idle: 0, breaks: 0, lunches: 0, presence: 0, tardy: 0, note: 'Scheduled day off.' }
 ] as const;
 
 const weeklyDays = weeklyTemplate.map((data, index) => createDay(addDays(weekStart, index), data));
 
 const previousWeekTemplate = [
-  { active: 7.5, idle: 0.6, breaks: 2, lunches: 1, presence: 0 },
-  { active: 7.9, idle: 0.4, breaks: 2, lunches: 1, presence: 0 },
-  { active: 8.1, idle: 0.5, breaks: 3, lunches: 1, presence: 0 },
-  { active: 7.7, idle: 0.6, breaks: 2, lunches: 1, presence: 0 },
-  { active: 7.3, idle: 0.6, breaks: 2, lunches: 1, presence: 0 },
-  { active: 4.5, idle: 0.5, breaks: 1, lunches: 1, presence: 0 },
-  { active: 0, idle: 0, breaks: 0, lunches: 0, presence: 0 }
+  { active: 7.5, idle: 0.6, breaks: 2, lunches: 1, presence: 0, tardy: 0 },
+  { active: 7.9, idle: 0.4, breaks: 2, lunches: 1, presence: 0, tardy: 0 },
+  { active: 8.1, idle: 0.5, breaks: 3, lunches: 1, presence: 0, tardy: 0 },
+  { active: 7.7, idle: 0.6, breaks: 2, lunches: 1, presence: 0, tardy: 0 },
+  { active: 7.3, idle: 0.6, breaks: 2, lunches: 1, presence: 0, tardy: 0 },
+  { active: 4.5, idle: 0.5, breaks: 1, lunches: 1, presence: 0, tardy: 0 },
+  { active: 0, idle: 0, breaks: 0, lunches: 0, presence: 0, tardy: 0 }
 ] as const;
 
 const previousWeekStart = addDays(weekStart, -7);
 const previousWeekDays = previousWeekTemplate.map((data, index) => createDay(addDays(previousWeekStart, index), data));
 
 const earlyWeekTemplate = [
-  { active: 7.2, idle: 0.5, breaks: 2, lunches: 1, presence: 0 },
-  { active: 7.8, idle: 0.4, breaks: 2, lunches: 1, presence: 0 },
-  { active: 7.6, idle: 0.5, breaks: 2, lunches: 1, presence: 0 },
-  { active: 8.0, idle: 0.4, breaks: 2, lunches: 1, presence: 0 },
-  { active: 7.1, idle: 0.6, breaks: 2, lunches: 1, presence: 0 },
-  { active: 0, idle: 0, breaks: 0, lunches: 0, presence: 0 },
-  { active: 0, idle: 0, breaks: 0, lunches: 0, presence: 0 }
+  { active: 7.2, idle: 0.5, breaks: 2, lunches: 1, presence: 0, tardy: 0 },
+  { active: 7.8, idle: 0.4, breaks: 2, lunches: 1, presence: 0, tardy: 0 },
+  { active: 7.6, idle: 0.5, breaks: 2, lunches: 1, presence: 0, tardy: 0 },
+  { active: 8.0, idle: 0.4, breaks: 2, lunches: 1, presence: 0, tardy: 0 },
+  { active: 7.1, idle: 0.6, breaks: 2, lunches: 1, presence: 0, tardy: 0 },
+  { active: 0, idle: 0, breaks: 0, lunches: 0, presence: 0, tardy: 0 },
+  { active: 0, idle: 0, breaks: 0, lunches: 0, presence: 0, tardy: 0 }
 ] as const;
 
 const earlyWeekStart = addDays(previousWeekStart, -7);
@@ -801,6 +816,7 @@ const todaySnapshot: TodaySnapshot = {
   lunchMinutes: todayEntry.lunches > 0 ? todayEntry.lunches * 45 : 0,
   breaksCount: todayEntry.breaks,
   lunchCount: todayEntry.lunches,
+  tardyMinutes: todayEntry.tardyMinutes,
   presenceMisses: todayEntry.presenceMisses
 };
 
@@ -979,6 +995,12 @@ const dom = {
   makeupProgress: document.getElementById('makeup-progress')!
 };
 
+dom.presenceButton.hidden = true;
+dom.presenceButton.style.display = 'none';
+dom.presenceButton.setAttribute('aria-hidden', 'true');
+dom.presenceButton.setAttribute('tabindex', '-1');
+dom.presenceButton.remove();
+
 dom.timesheetView.value = state.timesheet.view;
 
 const updateTimesheetFromToday = () => {
@@ -991,6 +1013,7 @@ const updateTimesheetFromToday = () => {
       day.idleHours = Math.round(idleHours * 100) / 100;
       day.breaks = state.today.breaksCount;
       day.lunches = state.today.lunchCount;
+      day.tardyMinutes = state.today.tardyMinutes;
       day.presenceMisses = state.today.presenceMisses;
       period.totals = recomputeTotals(period.days);
     }
@@ -1049,11 +1072,6 @@ const renderSnapshot = () => {
       label: 'Lunch',
       value: formatDurationMinutes(state.today.lunchMinutes),
       meta: state.today.lunchCount ? `${state.today.lunchCount} lunch` : 'No lunch logged'
-    },
-    {
-      label: 'Presence misses',
-      value: `${state.today.presenceMisses}`,
-      meta: state.session.lastPresenceCheck ? `Last check ${formatRelative(state.session.lastPresenceCheck)}` : 'Awaiting check'
     }
   ];
 
@@ -1076,9 +1094,8 @@ const renderTimesheet = () => {
 
   dom.timesheetBody.innerHTML = period.days
     .map((day) => {
-      const presence = day.presenceMisses > 0 ? `${day.presenceMisses} miss` : 'On track';
-      const presenceClass = day.presenceMisses > 0 ? 'pill pill--pending' : 'pill';
       const noteRow = day.note ? `<div class="form-hint">${escapeHtml(day.note)}</div>` : '';
+      const tardyValue = `${day.tardyMinutes}`;
       return `
         <tr>
           <td>
@@ -1089,7 +1106,7 @@ const renderTimesheet = () => {
           <td>${escapeHtml(formatHours(day.idleHours))}</td>
           <td>${day.breaks}</td>
           <td>${day.lunches}</td>
-          <td><span class="${presenceClass}">${escapeHtml(presence)}</span></td>
+          <td>${escapeHtml(tardyValue)}</td>
         </tr>
       `;
     })
@@ -1189,7 +1206,7 @@ const updateControls = () => {
   const disabled = state.session.status === 'clocked_out';
   dom.breakToggle.disabled = disabled;
   dom.lunchToggle.disabled = disabled;
-  dom.presenceButton.disabled = disabled;
+  dom.presenceButton.disabled = true;
 };
 
 const pushActivity = (message: string, category: ActivityCategory) => {
@@ -1467,14 +1484,14 @@ const handleTimesheetChange = () => {
 
 const handleDownload = () => {
   const period = state.timesheet.periods[state.timesheet.view];
-  const header = ['Date', 'Active Hours', 'Idle Hours', 'Breaks', 'Lunches', 'Presence Misses', 'Note'];
+  const header = ['Date', 'Active Hours', 'Idle Hours', 'Breaks', 'Lunches', 'Tardy (m)', 'Note'];
   const rows = period.days.map((day) => [
     day.label,
     formatHours(day.activeHours),
     formatHours(day.idleHours),
     `${day.breaks}`,
     `${day.lunches}`,
-    `${day.presenceMisses}`,
+    `${day.tardyMinutes}`,
     day.note ?? ''
   ]);
 
@@ -1508,7 +1525,8 @@ const mapOverviewPeriod = (period: OverviewTimesheetPeriod): TimesheetPeriod => 
     idleHours: day.idleHours,
     breaks: day.breaks,
     lunches: day.lunches,
-    presenceMisses: day.presenceMisses,
+    tardyMinutes: day.tardyMinutes ?? day.presenceMisses ?? 0,
+    presenceMisses: day.presenceMisses ?? 0,
     note: undefined
   })),
   totals: {
@@ -1516,7 +1534,8 @@ const mapOverviewPeriod = (period: OverviewTimesheetPeriod): TimesheetPeriod => 
     idleHours: period.totals.idleHours,
     breaks: period.totals.breaks,
     lunches: period.totals.lunches,
-    presenceMisses: period.totals.presenceMisses
+    tardyMinutes: period.totals.tardyMinutes ?? period.totals.presenceMisses ?? 0,
+    presenceMisses: period.totals.presenceMisses ?? 0
   }
 });
 
@@ -1579,6 +1598,9 @@ const applyOverview = (overview: OverviewResponse) => {
     makeUpCap: { ...overview.makeUpCap }
   };
 
+  state.today.tardyMinutes = state.today.tardyMinutes ?? (state.today.presenceMisses ?? 0);
+  state.today.presenceMisses = state.today.presenceMisses ?? 0;
+
   appContext.sessionId = overview.session.id;
 
   dom.timesheetView.value = state.timesheet.view;
@@ -1637,7 +1659,9 @@ const initialize = () => {
   dom.clockToggle.addEventListener('click', handleClockToggle);
   dom.breakToggle.addEventListener('click', handleBreakToggle);
   dom.lunchToggle.addEventListener('click', handleLunchToggle);
-  dom.presenceButton.addEventListener('click', handlePresence);
+  if (!dom.presenceButton.hidden) {
+    dom.presenceButton.addEventListener('click', handlePresence);
+  }
   dom.requestForm.addEventListener('submit', handleRequestSubmit);
   dom.timesheetView.addEventListener('change', handleTimesheetChange);
   dom.downloadButton.addEventListener('click', handleDownload);
