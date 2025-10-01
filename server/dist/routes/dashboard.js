@@ -5473,7 +5473,7 @@ exports.dashboardRouter.get('/payroll', async (req, res) => {
                             aria-expanded="false"
                             aria-controls="compensation-accrual"
                           >
-                            <span>Accrual & Balances</span>
+                            <span>Time Off Balances</span>
                             <span class="compensation-group__chevron" aria-hidden="true">⌄</span>
                           </button>
                           <p class="compensation-group__hint">Manage PTO accrual settings and current banked hours.</p>
@@ -5628,7 +5628,11 @@ exports.dashboardRouter.get('/payroll', async (req, res) => {
               });
               if (header instanceof HTMLElement) {
                 header.addEventListener('click', (event) => {
-                  if (event.target instanceof HTMLButtonElement) return;
+                  const target = event.target instanceof Node ? event.target : null;
+                  const button = target instanceof HTMLElement
+                    ? target.closest('[data-compensation-toggle]')
+                    : target?.parentElement?.closest('[data-compensation-toggle]');
+                  if (button) return;
                   handleToggle();
                 });
               }
