@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.payrollRouter = void 0;
 const express_1 = require("express");
 const zod_1 = require("zod");
+const date_fns_tz_1 = require("date-fns-tz");
 const auth_1 = require("../auth");
 const asyncHandler_1 = require("../middleware/asyncHandler");
 const validation_1 = require("../utils/validation");
@@ -10,6 +11,7 @@ const config_1 = require("../services/payroll/config");
 const attendance_1 = require("../services/payroll/attendance");
 const bonuses_1 = require("../services/payroll/bonuses");
 const payroll_1 = require("../services/payroll/payroll");
+const constants_1 = require("../services/payroll/constants");
 const payrollRouter = (0, express_1.Router)();
 exports.payrollRouter = payrollRouter;
 payrollRouter.use(auth_1.authenticate, (0, auth_1.requireRole)(['admin']));
@@ -114,7 +116,10 @@ payrollRouter.get('/attendance/:month', (0, asyncHandler_1.asyncHandler)(async (
 }));
 const dateParamSchema = zod_1.z.object({ payDate: zod_1.z.string().min(1) });
 const parsePayDate = (value) => {
-    const parsed = new Date(value);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        throw new Error('Invalid pay date');
+    }
+    const parsed = (0, date_fns_tz_1.zonedTimeToUtc)(`${value}T00:00:00`, constants_1.PAYROLL_TIME_ZONE);
     if (Number.isNaN(parsed.getTime())) {
         throw new Error('Invalid pay date');
     }
