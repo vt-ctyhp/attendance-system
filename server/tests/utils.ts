@@ -18,6 +18,19 @@ interface HandlerResult<T = unknown> {
 const createMockResponse = <T>() => {
   let status = 200;
   let data: T | null = null;
+  let completed = false;
+
+  let resolveCompletion: (() => void) | null = null;
+  const completion = new Promise<void>((resolve) => {
+    resolveCompletion = resolve;
+  });
+
+  const finish = () => {
+    if (!completed) {
+      completed = true;
+      resolveCompletion?.();
+    }
+  };
 
   const res = {
     status(code: number) {
@@ -26,16 +39,24 @@ const createMockResponse = <T>() => {
     },
     json(payload: unknown) {
       data = payload as T;
+      finish();
       return this;
     },
     send(payload?: unknown) {
       data = (payload as T) ?? null;
+      finish();
+      return this;
+    },
+    end() {
+      finish();
       return this;
     },
     result(): HandlerResult<T> {
       return { status, data };
-    }
-  } as any;
+    },
+    waitForCompletion: () => completion,
+    ensureFinished: finish
+  } as const;
 
   return res;
 };
@@ -69,7 +90,17 @@ export const callHandler = async <T = unknown>(
     }
   };
 
-  await Promise.resolve(handler(req as AuthenticatedRequest, res, next));
+  const maybePromise = handler(req as AuthenticatedRequest, res as any, next);
+  if (maybePromise instanceof Promise) {
+    await maybePromise;
+  }
+
+  if (nextCalledWithError) {
+    throw nextCalledWithError;
+  }
+
+  await res.waitForCompletion();
+  res.ensureFinished();
 
   if (nextCalledWithError) {
     throw nextCalledWithError;

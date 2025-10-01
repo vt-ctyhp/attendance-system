@@ -27,21 +27,31 @@ const resetFeatureFlags = async () => {
 
 const resetDatabase = async () => {
   const client = await getPrisma();
-  await client.$transaction([
-    client.event.deleteMany(),
-    client.minuteStat.deleteMany(),
-    client.presencePrompt.deleteMany(),
-    client.timeRequest.deleteMany(),
-    client.refreshToken.deleteMany(),
-    client.authAuditLog.deleteMany(),
-    client.sessionPause.deleteMany(),
-    client.config.deleteMany(),
-    client.session.deleteMany(),
-    client.balanceLedger.deleteMany(),
-    client.ptoBalance.deleteMany(),
-    client.timesheetEditRequest.deleteMany(),
-    client.user.deleteMany()
-  ]);
+  const tables = [
+    '"AttendanceMonthFact"',
+    '"BalanceLedger"',
+    '"BonusCandidate"',
+    '"PayrollAuditLog"',
+    '"PayrollLine"',
+    '"PayrollPeriod"',
+    '"PresencePrompt"',
+    '"SessionPause"',
+    '"MinuteStat"',
+    '"Event"',
+    '"TimeRequest"',
+    '"TimesheetEditRequest"',
+    '"EmployeeCompConfig"',
+    '"AccrualRule"',
+    '"Config"',
+    '"RefreshToken"',
+    '"PtoBalance"',
+    '"Holiday"',
+    '"AuthAuditLog"',
+    '"Session"',
+    '"User"'
+  ];
+
+  await client.$executeRawUnsafe(`TRUNCATE TABLE ${tables.join(', ')} RESTART IDENTITY CASCADE`);
   await resetFeatureFlags();
 };
 

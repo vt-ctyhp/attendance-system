@@ -17,3 +17,4 @@ server/local-pg/
 # Build outputs
 attendance-app/dist/
 **/*.map
+server/.env.test
