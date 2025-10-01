@@ -1,0 +1,62 @@
+name: Desktop Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-mac:
+    name: macOS DMG/ZIP
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        working-directory: attendance-app
+        run: npm ci
+
+      - name: Build sources
+        working-directory: attendance-app
+        run: npm run build
+
+      - name: Package mac artifacts
+        working-directory: attendance-app
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --mac --publish always
+
+  build-win:
+    name: Windows NSIS
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        working-directory: attendance-app
+        run: npm ci
+
+      - name: Build sources
+        working-directory: attendance-app
+        run: npm run build
+
+      - name: Package Windows installer
+        working-directory: attendance-app
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --win --publish always
