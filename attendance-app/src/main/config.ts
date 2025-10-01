@@ -23,7 +23,14 @@ export interface PersistedQueueItem {
 
 const CONFIG_FILE_NAME = 'attendance-config.json';
 const QUEUE_FILE_NAME = 'offline-queue.json';
-const DEFAULT_SERVER_BASE_URL = 'http://localhost:4000';
+
+const DEV_SERVER_BASE_URL = 'http://localhost:4000';
+const PROD_SERVER_BASE_URL = 'https://attendance.vvsjewelco.com';
+
+const resolveDefaultServerBaseUrl = () =>
+  app.isPackaged || process.env.NODE_ENV === 'production' ? PROD_SERVER_BASE_URL : DEV_SERVER_BASE_URL;
+
+const DEFAULT_SERVER_BASE_URL = resolveDefaultServerBaseUrl();
 
 let cachedConfig: AppConfig | null = null;
 
@@ -117,4 +124,4 @@ export const saveQueue = async (items: PersistedQueueItem[]): Promise<void> => {
   await fs.writeFile(queuePath, JSON.stringify(items, null, 2), 'utf-8');
 };
 
-export const getDefaultServerBaseUrl = () => DEFAULT_SERVER_BASE_URL;
+export const getDefaultServerBaseUrl = () => resolveDefaultServerBaseUrl();

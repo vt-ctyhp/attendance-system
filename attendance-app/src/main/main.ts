@@ -5,8 +5,10 @@ import {
   Tray,
   nativeImage,
   ipcMain,
-  powerMonitor
+  powerMonitor,
+  dialog
 } from 'electron';
+import type { MenuItemConstructorOptions, MessageBoxOptions } from 'electron';
 import path from 'path';
 import dotenv from 'dotenv';
 import { initializeLogging, logger } from './logger';
@@ -19,6 +21,8 @@ import {
   saveQueue,
   getDefaultServerBaseUrl
 } from './config';
+import { autoUpdater } from 'electron-updater';
+import type { UpdateDownloadedEvent, UpdateInfo } from 'electron-updater';
 
 type ActiveWindowModule = typeof import('active-win');
 type ActiveWindowResult = Awaited<ReturnType<ActiveWindowModule['activeWindow']>>;
@@ -54,6 +58,215 @@ const normalizePresenceUiMode = (value?: string | null): PresenceUiMode => {
 let presenceUiMode: PresenceUiMode = normalizePresenceUiMode(process.env.PRESENCE_UI);
 let presenceWindow: BrowserWindow | null = null;
 let activePresencePrompt: PresencePromptPayload | null = null;
+
+let updateCheckActive = false;
+let updateRequestSource: 'manual' | null = null;
+
+const presentMessageBox = (options: MessageBoxOptions) => {
+  const targetWindow = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+  return targetWindow ? dialog.showMessageBox(targetWindow, options) : dialog.showMessageBox(options);
+};
+
+const showInfoMessage = (options: MessageBoxOptions) => {
+  void presentMessageBox(options).catch((error: unknown) => {
+    logger.warn('Failed to display message box', error);
+  });
+};
+
+const triggerManualUpdateCheck = () => {
+  if (!app.isPackaged) {
+    showInfoMessage({
+      type: 'info',
+      title: 'Updates Unavailable',
+      message: 'Automatic updates are only available in packaged builds.'
+    });
+    return;
+  }
+
+  if (updateCheckActive) {
+    showInfoMessage({
+      type: 'info',
+      title: 'Update In Progress',
+      message: 'An update check is already running.'
+    });
+    return;
+  }
+
+  updateCheckActive = true;
+  updateRequestSource = 'manual';
+  autoUpdater
+    .checkForUpdates()
+    .catch((error) => {
+      logger.error('Manual update check failed', error);
+      showInfoMessage({
+        type: 'error',
+        title: 'Update Check Failed',
+        message: 'Unable to check for updates.',
+        detail: error instanceof Error ? error.message : String(error)
+      });
+      updateCheckActive = false;
+      updateRequestSource = null;
+    });
+};
+
+const setupAutoUpdates = () => {
+  if (!app.isPackaged) {
+    logger.info('Auto updates disabled in development mode');
+    return;
+  }
+
+  autoUpdater.logger = logger;
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on('checking-for-update', () => {
+    logger.info('Checking for application updates');
+  });
+
+  autoUpdater.on('update-available', (info: UpdateInfo) => {
+    logger.info('Update available', { version: info.version });
+    if (updateRequestSource === 'manual') {
+      showInfoMessage({
+        type: 'info',
+        title: 'Update Available',
+        message: `Version ${info.version} is downloading.`,
+        detail: 'You will be prompted to install once the download completes.'
+      });
+    }
+  });
+
+  autoUpdater.on('update-not-available', (info: UpdateInfo) => {
+    logger.info('No updates available', { version: info.version });
+    if (updateRequestSource === 'manual') {
+      showInfoMessage({
+        type: 'info',
+        title: 'Up To Date',
+        message: 'You already have the latest version installed.',
+        detail: `Current version: ${app.getVersion()}`
+      });
+    }
+    updateCheckActive = false;
+    updateRequestSource = null;
+  });
+
+  autoUpdater.on('update-downloaded', (info: UpdateDownloadedEvent) => {
+    logger.info('Update downloaded', { version: info.version });
+    updateCheckActive = false;
+    updateRequestSource = null;
+    void presentMessageBox({
+        type: 'question',
+        buttons: ['Install and Restart', 'Later'],
+        defaultId: 0,
+        cancelId: 1,
+        title: 'Update Ready',
+        message: `Version ${info.version} has been downloaded.`,
+        detail: 'Install the update now?'
+      })
+      .then((result) => {
+        if (result.response === 0) {
+          autoUpdater.quitAndInstall();
+        }
+      })
+      .catch((error: unknown) => {
+        logger.warn('Failed to present update confirmation', error);
+      });
+  });
+
+  autoUpdater.on('error', (error: Error) => {
+    logger.error('Auto update error', error);
+    if (updateRequestSource === 'manual') {
+      showInfoMessage({
+        type: 'error',
+        title: 'Update Error',
+        message: 'An error occurred while checking for updates.',
+        detail: error instanceof Error ? error.message : String(error)
+      });
+    }
+    updateCheckActive = false;
+    updateRequestSource = null;
+  });
+
+  autoUpdater
+    .checkForUpdatesAndNotify()
+    .catch((error) => logger.warn('Automatic update check failed', error));
+};
+
+const createUpdateMenuItem = (): MenuItemConstructorOptions => ({
+  label: 'Check for Updates…',
+  click: () => triggerManualUpdateCheck()
+});
+
+const buildApplicationMenu = () => {
+  const template: MenuItemConstructorOptions[] = [];
+
+  if (process.platform === 'darwin') {
+    template.push({
+      label: app.name,
+      submenu: [
+        { role: 'about' },
+        { type: 'separator' },
+        createUpdateMenuItem(),
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' }
+      ]
+    });
+  } else {
+    template.push({
+      label: 'File',
+      submenu: [createUpdateMenuItem(), { type: 'separator' }, { role: 'quit' }]
+    });
+  }
+
+  template.push({
+    label: 'Edit',
+    submenu: [
+      { role: 'undo' },
+      { role: 'redo' },
+      { type: 'separator' },
+      { role: 'cut' },
+      { role: 'copy' },
+      { role: 'paste' },
+      { role: 'selectAll' }
+    ]
+  });
+
+  template.push({
+    label: 'View',
+    submenu: [
+      { role: 'reload' },
+      { role: 'toggleDevTools' },
+      { type: 'separator' },
+      { role: 'resetZoom' },
+      { role: 'zoomIn' },
+      { role: 'zoomOut' },
+      { type: 'separator' },
+      { role: 'togglefullscreen' }
+    ]
+  });
+
+  template.push({
+    label: 'Window',
+    submenu:
+      process.platform === 'darwin'
+        ? [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }, { role: 'front' }]
+        : [{ role: 'minimize' }, { role: 'close' }]
+  });
+
+  if (process.platform !== 'darwin') {
+    template.push({
+      label: 'Help',
+      submenu: [createUpdateMenuItem()]
+    });
+  }
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+};
 
 const trayIconDataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIW2NgYGD4DwABBAEAAXcQ0wAAAABJRU5ErkJggg==';
 
@@ -223,6 +436,10 @@ const createTray = () => {
           mainWindow.focus();
         }
       }
+    },
+    {
+      label: 'Check for Updates…',
+      click: () => triggerManualUpdateCheck()
     },
     { type: 'separator' },
     {
@@ -469,7 +686,9 @@ app.whenReady().then(async () => {
   setupPowerMonitorLogging();
   createWindow();
   createTray();
+  buildApplicationMenu();
   applyAutoLaunch();
+  setupAutoUpdates();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
