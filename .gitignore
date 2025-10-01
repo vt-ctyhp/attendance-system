@@ -13,3 +13,7 @@ server/local-pg/
 /attendance-system/
 /integrate-worktree/
 /main-merge/
+
+# Build outputs
+attendance-app/dist/
+**/*.map
