@@ -2624,9 +2624,10 @@ const baseStyles = `
     body.dashboard--payroll .status-chip--earned { background: rgba(22,163,74,0.18); color: #15803d; }
     body.dashboard--payroll .status-chip--denied { background: rgba(220,38,38,0.18); color: #991b1b; }
     body.dashboard--payroll .status-chip--warn { background: rgba(251,191,36,0.24); color: #b45309; }
-    body.dashboard--payroll .totals-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 0.6rem; }
+    body.dashboard--payroll .totals-grid { display: flex; flex-direction: column; gap: 0.5rem; }
+    body.dashboard--payroll .totals-grid > div { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
     body.dashboard--payroll .totals-grid dt { margin: 0; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; }
-    body.dashboard--payroll .totals-grid dd { margin: 0.25rem 0 0; font-weight: 600; color: #0f172a; font-size: 0.95rem; }
+    body.dashboard--payroll .totals-grid dd { margin: 0; font-weight: 600; color: #0f172a; font-size: 0.95rem; text-align: right; }
     body.dashboard--payroll .divider { height: 1px; background: rgba(15,23,42,0.08); margin: 1.5rem 0; }
     body.dashboard--payroll-detail .detail-header { display: flex; align-items: center; justify-content: space-between; gap: clamp(1rem, 3vw, 2rem); margin-bottom: clamp(1.25rem, 3vw, 1.75rem); flex-wrap: wrap; }
     body.dashboard--payroll-detail .detail-identity { display: flex; align-items: center; gap: clamp(0.75rem, 2vw, 1.5rem); flex-wrap: wrap; }
