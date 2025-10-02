@@ -47,50 +47,52 @@
         background: var(--card);
         border-radius: 24px;
         padding: clamp(1.75rem, 4vw, 2.75rem);
-        display: flex;
-        flex-direction: column;
-        gap: clamp(1.5rem, 3vw, 2.5rem);
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) clamp(7rem, 24vw, 11rem);
+        grid-template-rows: auto auto;
+        column-gap: clamp(1.5rem, 3vw, 2.5rem);
+        row-gap: clamp(1rem, 2vw, 1.5rem);
+        align-items: stretch;
         box-shadow: var(--shadow);
         position: relative;
         overflow: hidden;
       }
 
       .hero__identity {
+        grid-column: 1;
+        grid-row: 1;
         display: flex;
         flex-direction: column;
         gap: clamp(0.75rem, 2vw, 1.35rem);
-      }
-
-      .hero__status-row {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
-        align-items: center;
-        gap: clamp(1.25rem, 3vw, 2rem);
+        align-self: start;
       }
 
       .hero__status {
+        grid-column: 1;
+        grid-row: 2;
         display: grid;
         gap: 0.35rem;
         justify-items: flex-start;
         text-align: left;
+        align-self: start;
       }
 
       .hero__avatar {
-        width: clamp(7rem, 22vw, 10rem);
-        height: clamp(7rem, 22vw, 10rem);
-        border-radius: 999px;
-        background: rgba(37, 99, 235, 0.14);
+        grid-column: 2;
+        grid-row: 1 / span 2;
+        justify-self: end;
+        align-self: end;
         display: flex;
-        align-items: center;
+        align-items: flex-end;
         justify-content: center;
-        overflow: hidden;
+        width: clamp(11rem, 40vw, 17rem);
+        min-width: clamp(8rem, 24vw, 12rem);
+        height: 100%;
+        min-height: min(100%, clamp(8rem, 24vw, 12rem));
+        max-height: clamp(13rem, 44vw, 20rem);
         opacity: 0;
         transition: opacity 0.25s ease;
-        box-shadow: 0 22px 55px rgba(37, 99, 235, 0.2);
         pointer-events: none;
-        justify-self: end;
-        min-width: clamp(7rem, 22vw, 10rem);
-        min-height: clamp(7rem, 22vw, 10rem);
       }
 
       .hero__avatar--visible {
@@ -99,7 +101,8 @@
 
       .hero__avatar img {
         width: 100%;
-        height: 100%;
+        height: auto;
+        max-height: 100%;
         display: block;
       }
 
@@ -147,6 +150,22 @@
         gap: 0.75rem;
         align-items: center;
       }
+
+      .hero__actions {
+        margin-top: clamp(1.5rem, 3vw, 2rem);
+        display: flex;
+        flex-direction: column;
+        gap: clamp(0.65rem, 2vw, 0.85rem);
+        align-items: stretch;
+        width: 100%;
+      }
+
+      .hero__actions button {
+        width: 100%;
+        justify-content: center;
+      }
+
+
 
       button {
         border: none;
@@ -486,52 +505,33 @@
         background: var(--danger);
       }
 
-      @media (max-width: 780px) {
-        .hero__status-row {
+      @media (max-width: 380px) {
+        .hero {
           grid-template-columns: 1fr;
+          grid-template-rows: auto auto auto;
+        }
+
+        .hero__status {
+          grid-column: 1;
+          grid-row: 2;
           justify-items: center;
           text-align: center;
         }
 
-        .hero__status {
-          justify-items: center;
-        }
-
         .hero__avatar {
+          grid-column: 1;
+          grid-row: 3;
           justify-self: center;
           margin-top: 0.75rem;
-          width: clamp(5rem, 28vw, 6.5rem);
-          height: clamp(5rem, 28vw, 6.5rem);
-          box-shadow: 0 18px 40px rgba(37, 99, 235, 0.18);
+          width: clamp(10rem, 76vw, 14rem);
+          min-width: clamp(8rem, 60vw, 12rem);
+          min-height: clamp(8rem, 60vw, 12rem);
+          max-width: clamp(11rem, 84vw, 16rem);
+          max-height: clamp(12rem, 84vw, 18rem);
         }
 
-        .controls {
-          justify-content: center;
-        }
-
-        button {
-          width: 100%;
-          justify-content: center;
-        }
-      }
-
-      @media (min-width: 381px) {
-        .hero__status-row {
-          grid-template-columns: minmax(0, 1fr) auto;
-          justify-items: stretch;
-          text-align: left;
-        }
-
-        .hero__status {
-          justify-items: flex-start;
-        }
-
-        .hero__avatar {
-          justify-self: end;
-          margin-top: 0;
-          width: clamp(7rem, 22vw, 10rem);
-          height: clamp(7rem, 22vw, 10rem);
-          box-shadow: 0 22px 55px rgba(37, 99, 235, 0.2);
+        .hero__actions {
+          align-items: stretch;
         }
       }
 
@@ -559,18 +559,16 @@
             </p>
           </div>
         </div>
-        <div class="hero__status-row">
-          <div class="hero__status">
-            <span class="hero__status-label">Status</span>
-            <span class="hero__status-value" id="hero-status">Clocked Out</span>
-            <span class="hero__status-meta" id="hero-duration">&mdash;</span>
-            <span class="hero__status-meta" id="hero-presence">Presence check in &mdash;</span>
-          </div>
-          <div class="hero__avatar" id="hero-avatar" aria-hidden="true"></div>
+        <div class="hero__status">
+          <span class="hero__status-label">Status</span>
+          <span class="hero__status-value" id="hero-status">Clocked Out</span>
+          <span class="hero__status-meta" id="hero-duration">&mdash;</span>
+          <span class="hero__status-meta" id="hero-presence">Presence check in &mdash;</span>
         </div>
+        <div class="hero__avatar" id="hero-avatar" aria-hidden="true"></div>
       </header>
 
-      <section class="controls">
+      <section class="controls hero__actions">
         <button class="primary" id="clock-toggle">Clock In</button>
         <button class="secondary" id="break-toggle">Start Break</button>
         <button class="secondary" id="lunch-toggle">Start Lunch</button>
