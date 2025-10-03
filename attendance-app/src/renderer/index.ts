@@ -1,3 +1,5 @@
+import { resolveHeroAvatarPaths, type HeroAvatarStatus } from './avatarResolver';
+
 const MINUTE = 60_000;
 
 type SessionStatus = 'clocked_out' | 'working' | 'break' | 'lunch';
@@ -968,9 +970,34 @@ let state: AttendanceState = {
 };
 
 const SHOW_PRESENCE = false;
+const HERO_AVATAR_OVERTIME_THRESHOLD_MINUTES = 9 * 60;
+
+const MOTIVATION_PHRASES = [
+  "Let’s have a fantastic day!",
+  'Today is going to be even better than tomorrow.',
+  'Small steps every day lead to big success.',
+  'Your focus today builds your future.',
+  'Progress, not perfection.',
+  'Choose positivity and the rest will follow.',
+  'Make today count — it’s a fresh start.',
+  'Consistency beats intensity.',
+  'A little progress each day adds up to big results.',
+  'Your hard work today is tomorrow’s reward.'
+] as const;
+
+const HERO_SUBTITLE_FALLBACK = MOTIVATION_PHRASES[0];
+
+const getDailyMotivation = (date: Date = new Date()): string => {
+  const millisInDay = 86_400_000;
+  const daysSinceEpoch = Math.floor(date.getTime() / millisInDay);
+  const index = ((daysSinceEpoch % MOTIVATION_PHRASES.length) + MOTIVATION_PHRASES.length) % MOTIVATION_PHRASES.length;
+  return MOTIVATION_PHRASES[index] ?? HERO_SUBTITLE_FALLBACK;
+};
 
 const dom = {
+  heroAvatar: document.getElementById('hero-avatar') as HTMLDivElement | null,
   heroTitle: document.getElementById('hero-title')!,
+  heroSubtitle: document.getElementById('hero-subtitle')!,
   heroStatus: document.getElementById('hero-status')!,
   heroDuration: document.getElementById('hero-duration')!,
   heroPresence: document.getElementById('hero-presence')!,
@@ -997,6 +1024,89 @@ const dom = {
   makeupProgress: document.getElementById('makeup-progress')!
 };
 
+let heroAvatarImg: HTMLImageElement | null = null;
+let currentHeroAvatarStatus: HeroAvatarStatus | null = null;
+
+const ensureHeroAvatarImage = () => {
+  if (!dom.heroAvatar) {
+    return null;
+  }
+  if (!heroAvatarImg) {
+    heroAvatarImg = document.createElement('img');
+    heroAvatarImg.alt = '';
+    heroAvatarImg.decoding = 'async';
+    heroAvatarImg.loading = 'eager';
+    dom.heroAvatar.appendChild(heroAvatarImg);
+  }
+  return heroAvatarImg;
+};
+
+const updateHeroAvatarForStatus = (status: HeroAvatarStatus) => {
+  if (!dom.heroAvatar) {
+    return;
+  }
+
+  if (currentHeroAvatarStatus === status) {
+    return;
+  }
+
+  const image = ensureHeroAvatarImage();
+  if (!image) {
+    return;
+  }
+
+  currentHeroAvatarStatus = status;
+  const { primary, fallback } = resolveHeroAvatarPaths(status);
+  const candidates = Array.from(new Set([primary, fallback]));
+  let attempt = 0;
+
+  const attemptLoad = () => {
+    if (attempt >= candidates.length) {
+      if (!image.src) {
+        dom.heroAvatar?.classList.remove('hero__avatar--visible');
+        dom.heroAvatar?.setAttribute('aria-hidden', 'true');
+      }
+      return;
+    }
+
+    const candidate = candidates[attempt];
+    const probe = new Image();
+    probe.decoding = 'async';
+    probe.onload = () => {
+      image.src = candidate;
+      image.dataset.status = status;
+      dom.heroAvatar?.classList.add('hero__avatar--visible');
+      dom.heroAvatar?.setAttribute('aria-hidden', 'false');
+    };
+    probe.onerror = () => {
+      attempt += 1;
+      attemptLoad();
+    };
+    probe.src = candidate;
+  };
+
+  attemptLoad();
+};
+
+const initializeHeroAvatar = () => {
+  if (!dom.heroAvatar) {
+    return;
+  }
+  dom.heroAvatar.setAttribute('aria-hidden', 'true');
+  ensureHeroAvatarImage();
+};
+
+initializeHeroAvatar();
+
+const initializeHeroSubtitle = () => {
+  if (!dom.heroSubtitle) {
+    return;
+  }
+  dom.heroSubtitle.textContent = getDailyMotivation();
+};
+
+initializeHeroSubtitle();
+
 if (!SHOW_PRESENCE && dom.presenceButton) {
   dom.presenceButton.hidden = true;
   dom.presenceButton.style.display = 'none';
@@ -1005,6 +1115,39 @@ if (!SHOW_PRESENCE && dom.presenceButton) {
 }
 
 dom.timesheetView.value = state.timesheet.view;
+
+const resolveHeroAvatarStatus = (): HeroAvatarStatus => {
+  if (state.session.status === 'clocked_out') {
+    return 'ClockedOut';
+  }
+
+  if (state.session.status === 'break') {
+    return 'OnBreak';
+  }
+
+  if (state.session.status === 'lunch') {
+    return 'OnLunch';
+  }
+
+  if (state.session.status === 'working') {
+    if (state.today.presenceMisses > 0) {
+      return 'PresenceMissed';
+    }
+
+    const nextPresence = state.session.nextPresenceCheck;
+    if (nextPresence && nextPresence.getTime() <= Date.now()) {
+      return 'PresenceDue';
+    }
+
+    if (state.today.activeMinutes >= HERO_AVATAR_OVERTIME_THRESHOLD_MINUTES) {
+      return 'Overtime';
+    }
+
+    return 'Working';
+  }
+
+  return 'Working';
+};
 
 const updateTimesheetFromToday = () => {
   const hours = state.today.activeMinutes / 60;
@@ -1033,6 +1176,8 @@ const renderHero = () => {
       : state.session.status === 'lunch'
       ? 'At Lunch'
       : 'Clocked Out';
+
+  updateHeroAvatarForStatus(resolveHeroAvatarStatus());
 
   const duration = (() => {
     switch (state.session.status) {

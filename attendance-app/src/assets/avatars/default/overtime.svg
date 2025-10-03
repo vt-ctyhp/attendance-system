@@ -1,0 +1,12 @@
+<svg width="96" height="96" viewBox="0 0 96 96" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title">
+  <title>Overtime avatar placeholder</title>
+  <defs>
+    <linearGradient id="overtimeGradient" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#7c3aed" />
+      <stop offset="100%" stop-color="#38bdf8" />
+    </linearGradient>
+  </defs>
+  <circle cx="48" cy="48" r="44" fill="url(#overtimeGradient)" />
+  <path d="M48 30a18 18 0 1 1-18 18" stroke="#ffffff" stroke-width="6" fill="none" stroke-linecap="round" opacity="0.85" />
+  <path d="M48 36v14l10 6" stroke="#ffffff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" opacity="0.9" />
+</svg>

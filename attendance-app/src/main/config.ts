@@ -53,25 +53,26 @@ export function normalizeServerBaseUrl(input: string): string {
 }
 
 const DEV_SERVER_BASE_URL = normalizeServerBaseUrl('http://localhost:4000');
+const PROD_SERVER_PRIMARY_BASE_URL = normalizeServerBaseUrl('https://attendance-system-j9ns.onrender.com');
+const PROD_SERVER_FALLBACK_BASE_URL = normalizeServerBaseUrl('https://attendance.vvsjewelco.com');
 
-const RAW_PRODUCTION_SERVER_BASE_URLS = [
-  'https://attendance-system-j9ns.onrender.com',
-  'https://attendance.vvsjewelco.com'
-];
-
-export const PRODUCTION_SERVER_BASE_URLS = Object.freeze(
-  RAW_PRODUCTION_SERVER_BASE_URLS.map((url) => normalizeServerBaseUrl(url))
-);
+export const PRODUCTION_SERVER_BASE_URLS = Object.freeze([
+  PROD_SERVER_PRIMARY_BASE_URL,
+  PROD_SERVER_FALLBACK_BASE_URL
+]);
 
 const PRODUCTION_HEALTH_PATH = '/api/health';
 const PRODUCTION_HEALTH_TIMEOUT_MS = 4_000;
 
-const isProductionRuntime = () => app.isPackaged || process.env.NODE_ENV === 'production';
+const isProductionLike = () => app.isPackaged || process.env.NODE_ENV === 'production';
 
-const resolveDefaultServerBaseUrl = () =>
-  isProductionRuntime() ? PRODUCTION_SERVER_BASE_URLS[0] : DEV_SERVER_BASE_URL;
+const getDefaultServerBaseUrls = (): string[] =>
+  isProductionLike() ? [...PRODUCTION_SERVER_BASE_URLS] : [DEV_SERVER_BASE_URL];
+
+const resolveDefaultServerBaseUrl = () => getDefaultServerBaseUrls()[0];
 
 const DEFAULT_SERVER_BASE_URL = resolveDefaultServerBaseUrl();
+
 
 const getFetch = (): SimpleFetch | null => {
   const candidate = (globalThis as unknown as { fetch?: SimpleFetch }).fetch;
@@ -161,7 +162,7 @@ export const getConfig = async (): Promise<AppConfig> => {
   } catch (error) {
     const config: AppConfig = {
       deviceId: randomUUID(),
-      serverBaseUrl: DEFAULT_SERVER_BASE_URL,
+      serverBaseUrl: getDefaultServerBaseUrl(),
       workEmail: null
     };
     await saveConfig(config);
@@ -224,4 +225,56 @@ export const saveQueue = async (items: PersistedQueueItem[]): Promise<void> => {
   await fs.writeFile(queuePath, JSON.stringify(items, null, 2), 'utf-8');
 };
 
+export type ServerBaseUrlResolutionReason = 'stored' | 'primary' | 'fallback' | 'default' | 'unchanged';
+
 export const getDefaultServerBaseUrl = () => resolveDefaultServerBaseUrl();
+
+export const getDefaultServerBaseUrlOptions = (): string[] => getDefaultServerBaseUrls();
+
+const tryNormalizeServerBaseUrl = (value?: string): string | undefined => {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  try {
+    return normalizeServerBaseUrl(trimmed);
+  } catch (error) {
+    logger.debug({ value, error }, 'config.normalize_server_base_url_failed');
+    return undefined;
+  }
+};
+
+export const resolvePreferredServerBaseUrl = async (
+  current?: string
+): Promise<{ baseUrl: string; reason: ServerBaseUrlResolutionReason }> => {
+  const normalizedCurrent = tryNormalizeServerBaseUrl(current);
+
+  if (!isProductionLike()) {
+    if (normalizedCurrent) {
+      return { baseUrl: normalizedCurrent, reason: 'stored' };
+    }
+    return { baseUrl: getDefaultServerBaseUrl(), reason: 'default' };
+  }
+
+  const defaults = getDefaultServerBaseUrlOptions();
+  const orderedCandidates = Array.from(new Set([normalizedCurrent, ...defaults])).filter(
+    (value): value is string => typeof value === 'string' && value.length > 0
+  );
+
+  for (const candidate of orderedCandidates) {
+    if (await probeServerHealth(candidate)) {
+      if (candidate === normalizedCurrent) {
+        return { baseUrl: candidate, reason: 'stored' };
+      }
+      if (candidate === defaults[0]) {
+        return { baseUrl: candidate, reason: 'primary' };
+      }
+      return { baseUrl: candidate, reason: 'fallback' };
+    }
+  }
+
+  return { baseUrl: normalizedCurrent ?? defaults[0], reason: 'unchanged' };
+};

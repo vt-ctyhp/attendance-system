@@ -44,14 +44,72 @@
       }
 
       .hero {
+        --hero-pad: clamp(1.75rem, 4vw, 2.75rem);
         background: var(--card);
         border-radius: 24px;
-        padding: clamp(1.75rem, 4vw, 2.75rem);
-        display: flex;
-        gap: clamp(1.5rem, 4vw, 3rem);
-        align-items: flex-start;
-        justify-content: space-between;
+        padding: var(--hero-pad);
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) clamp(7rem, 24vw, 11rem);
+        grid-template-rows: auto auto;
+        column-gap: clamp(1.5rem, 3vw, 2.5rem);
+        row-gap: clamp(0.75rem, 2vw, 1.25rem);
+        align-items: start;
+        align-content: start;
         box-shadow: var(--shadow);
+        overflow: hidden;
+        position: relative;
+      }
+
+      .hero__identity {
+        grid-column: 1;
+        grid-row: 1;
+        display: flex;
+        flex-direction: column;
+        gap: clamp(0.75rem, 2vw, 1.35rem);
+        align-self: start;
+        position: relative;
+        z-index: 1;
+      }
+
+      .hero__status {
+        grid-column: 1;
+        grid-row: 2;
+        display: grid;
+        gap: 0.25rem;
+        justify-items: flex-start;
+        text-align: left;
+        align-self: end;
+        margin: 0;
+        position: relative;
+        z-index: 1;
+      }
+
+      .hero__avatar {
+        position: absolute;
+        inset-inline-end: 0;
+        inset-block-end: clamp(0rem, calc(var(--hero-pad) * 0.15), 0.75rem);
+        transform: translate(3%, 6%);
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        align-items: flex-end;
+        width: clamp(11rem, 40vw, 17rem);
+        min-width: clamp(8rem, 24vw, 12rem);
+        opacity: 0;
+        transition: opacity 0.25s ease;
+        pointer-events: none;
+        z-index: 0;
+      }
+
+      .hero__avatar--visible {
+        opacity: 1;
+      }
+
+      .hero__avatar img {
+        width: 100%;
+        height: auto;
+        max-height: 90%;
+        display: block;
       }
 
       .hero__eyebrow {
@@ -73,13 +131,6 @@
         color: var(--muted);
         font-size: clamp(0.95rem, 2vw, 1.05rem);
         max-width: 42ch;
-      }
-
-      .hero__status {
-        display: grid;
-        gap: 0.35rem;
-        justify-items: flex-end;
-        text-align: right;
       }
 
       .hero__status-label {
@@ -105,6 +156,22 @@
         gap: 0.75rem;
         align-items: center;
       }
+
+      .hero__actions {
+        margin-top: clamp(1.5rem, 3vw, 2rem);
+        display: flex;
+        flex-direction: column;
+        gap: clamp(0.65rem, 2vw, 0.85rem);
+        align-items: stretch;
+        width: 100%;
+      }
+
+      .hero__actions button {
+        width: 100%;
+        justify-content: center;
+      }
+
+
 
       button {
         border: none;
@@ -444,24 +511,29 @@
         background: var(--danger);
       }
 
-      @media (max-width: 780px) {
-        .hero {
-          flex-direction: column;
-          align-items: stretch;
-        }
-
+      @media (max-width: 380px) {
         .hero__status {
-          justify-items: flex-start;
-          text-align: left;
+          grid-column: 1;
+          grid-row: 2;
+          justify-items: center;
+          text-align: center;
         }
 
-        .controls {
-          justify-content: center;
+        .hero__avatar {
+          position: static;
+          transform: none;
+          grid-column: 1;
+          grid-row: 3;
+          justify-self: center;
+          margin-top: 0.75rem;
+          width: clamp(10rem, 76vw, 14rem);
+          min-width: clamp(8rem, 60vw, 12rem);
+          max-width: clamp(11rem, 84vw, 16rem);
+          align-items: center;
         }
 
-        button {
-          width: 100%;
-          justify-content: center;
+        .hero__actions {
+          align-items: stretch;
         }
       }
 
@@ -479,13 +551,15 @@
   <body>
     <main class="app-shell">
       <header class="hero">
-        <div>
-          <div class="hero__eyebrow">Attendance System</div>
-          <h1 class="hero__title" id="hero-title">Welcome back</h1>
-          <p class="hero__subtitle">
-            Monitor your workday, log pauses, respond to presence checks, and keep requests moving without
-            leaving this page.
-          </p>
+        <div class="hero__identity">
+          <div>
+            <div class="hero__eyebrow">Attendance System</div>
+            <h1 class="hero__title" id="hero-title">Welcome back</h1>
+            <p class="hero__subtitle" id="hero-subtitle">
+              Monitor your workday, log pauses, respond to presence checks, and keep requests moving without
+              leaving this page.
+            </p>
+          </div>
         </div>
         <div class="hero__status">
           <span class="hero__status-label">Status</span>
@@ -493,9 +567,10 @@
           <span class="hero__status-meta" id="hero-duration">&mdash;</span>
           <span class="hero__status-meta" id="hero-presence">Presence check in &mdash;</span>
         </div>
+        <div class="hero__avatar" id="hero-avatar" aria-hidden="true"></div>
       </header>
 
-      <section class="controls">
+      <section class="controls hero__actions">
         <button class="primary" id="clock-toggle">Clock In</button>
         <button class="secondary" id="break-toggle">Start Break</button>
         <button class="secondary" id="lunch-toggle">Start Lunch</button>

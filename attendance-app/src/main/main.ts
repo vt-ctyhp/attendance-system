@@ -21,8 +21,7 @@ import {
   saveQueue,
   getDefaultServerBaseUrl,
   normalizeServerBaseUrl,
-  resolveAvailableProductionServerBaseUrl,
-  isManagedProductionServerBaseUrl
+  resolvePreferredServerBaseUrl
 } from './config';
 import { autoUpdater } from 'electron-updater';
 import type { UpdateDownloadedEvent, UpdateInfo } from 'electron-updater';
@@ -99,7 +98,7 @@ const triggerManualUpdateCheck = () => {
   updateRequestSource = 'manual';
   autoUpdater
     .checkForUpdates()
-    .catch((error) => {
+    .catch((error: unknown) => {
       logger.error('Manual update check failed', error);
       showInfoMessage({
         type: 'error',
@@ -191,7 +190,7 @@ const setupAutoUpdates = () => {
 
   autoUpdater
     .checkForUpdatesAndNotify()
-    .catch((error) => logger.warn('Automatic update check failed', error));
+    .catch((error: unknown) => logger.warn('Automatic update check failed', error));
 };
 
 const createUpdateMenuItem = (): MenuItemConstructorOptions => ({
@@ -469,36 +468,33 @@ const bootstrapConfiguration = async () => {
     }
   }
 
-  let normalizedStored: string | null = null;
+  let storedBaseUrl = config.serverBaseUrl;
+
   try {
-    normalizedStored = normalizeServerBaseUrl(config.serverBaseUrl);
+    const normalizedStored = normalizeServerBaseUrl(storedBaseUrl);
+    if (normalizedStored !== storedBaseUrl) {
+      const updated = await updateConfig({ serverBaseUrl: normalizedStored });
+      storedBaseUrl = updated.serverBaseUrl;
+    } else {
+      storedBaseUrl = normalizedStored;
+    }
   } catch (error) {
     logger.warn('Stored server base URL invalid, resetting to default', error);
-  }
-
-  if (normalizedStored) {
-    baseUrl = normalizedStored;
-    if (normalizedStored !== config.serverBaseUrl) {
-      await updateConfig({ serverBaseUrl: normalizedStored });
-    }
-  } else {
     const fallback = getDefaultServerBaseUrl();
-    baseUrl = fallback;
-    await updateConfig({ serverBaseUrl: fallback });
+    const updated = await updateConfig({ serverBaseUrl: fallback });
+    storedBaseUrl = updated.serverBaseUrl;
   }
 
-  if ((app.isPackaged || process.env.NODE_ENV === 'production') && isManagedProductionServerBaseUrl(baseUrl)) {
-    try {
-      const resolved = await resolveAvailableProductionServerBaseUrl(baseUrl);
-      if (resolved !== baseUrl) {
-        logger.info('Switching server base URL after availability probe', { previous: baseUrl, next: resolved });
-        baseUrl = resolved;
-        await updateConfig({ serverBaseUrl: resolved });
-      }
-    } catch (error) {
-      logger.warn('Failed to resolve production server base URL, retaining current value', error);
-    }
+  const { baseUrl: resolvedBaseUrl, reason } = await resolvePreferredServerBaseUrl(storedBaseUrl);
+  if (resolvedBaseUrl !== storedBaseUrl) {
+    const updated = await updateConfig({ serverBaseUrl: resolvedBaseUrl });
+    storedBaseUrl = updated.serverBaseUrl;
+    logger.info('Server base URL auto-updated', { baseUrl: storedBaseUrl, source: reason });
+  } else {
+    logger.info('Resolved server base URL', { baseUrl: storedBaseUrl, source: reason });
   }
+
+  baseUrl = storedBaseUrl;
 };
 
 const getSystemStatus = async () => {
