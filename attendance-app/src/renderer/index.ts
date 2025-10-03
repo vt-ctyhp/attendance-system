@@ -973,21 +973,43 @@ let state: AttendanceState = {
   }
 };
 
-let presenceEnabled = true;
+let presenceEnabled = false;
+let presenceButtonListenerAttached = false;
 const applyPresenceVisibility = () => {
-  if (!dom.presenceButton) {
-    return;
+  if (dom.presenceButton) {
+    if (presenceEnabled) {
+      if (!presenceButtonListenerAttached) {
+        dom.presenceButton.addEventListener('click', handlePresence);
+        presenceButtonListenerAttached = true;
+      }
+      dom.presenceButton.hidden = false;
+      dom.presenceButton.style.removeProperty('display');
+      dom.presenceButton.removeAttribute('aria-hidden');
+      dom.presenceButton.removeAttribute('tabindex');
+    } else {
+      if (presenceButtonListenerAttached) {
+        dom.presenceButton.removeEventListener('click', handlePresence);
+        presenceButtonListenerAttached = false;
+      }
+      dom.presenceButton.hidden = true;
+      dom.presenceButton.style.display = 'none';
+      dom.presenceButton.setAttribute('aria-hidden', 'true');
+      dom.presenceButton.setAttribute('tabindex', '-1');
+    }
   }
-  if (presenceEnabled) {
-    dom.presenceButton.hidden = false;
-    dom.presenceButton.style.removeProperty('display');
-    dom.presenceButton.removeAttribute('aria-hidden');
-    dom.presenceButton.removeAttribute('tabindex');
-  } else {
-    dom.presenceButton.hidden = true;
-    dom.presenceButton.style.display = 'none';
-    dom.presenceButton.setAttribute('aria-hidden', 'true');
-    dom.presenceButton.setAttribute('tabindex', '-1');
+
+  if (dom.heroPresence) {
+    if (presenceEnabled) {
+      dom.heroPresence.hidden = false;
+      dom.heroPresence.style.removeProperty('display');
+      dom.heroPresence.removeAttribute('aria-hidden');
+      renderHero();
+    } else {
+      dom.heroPresence.textContent = '';
+      dom.heroPresence.hidden = true;
+      dom.heroPresence.style.display = 'none';
+      dom.heroPresence.setAttribute('aria-hidden', 'true');
+    }
   }
 };
 const HERO_AVATAR_OVERTIME_THRESHOLD_MINUTES = 9 * 60;
@@ -1209,9 +1231,16 @@ const renderHero = () => {
   })();
 
   dom.heroDuration.textContent = duration;
-  dom.heroPresence.textContent = `Presence check in ${formatCountdown(
-    state.session.status === 'clocked_out' ? null : state.session.nextPresenceCheck
-  )}`;
+  if (presenceEnabled) {
+    dom.heroPresence.textContent = `Presence check in ${formatCountdown(
+      state.session.status === 'clocked_out' ? null : state.session.nextPresenceCheck
+    )}`;
+    dom.heroPresence.hidden = false;
+    dom.heroPresence.style.removeProperty('display');
+    dom.heroPresence.removeAttribute('aria-hidden');
+  } else {
+    dom.heroPresence.textContent = '';
+  }
 };
 
 const renderSnapshot = () => {
@@ -1794,15 +1823,15 @@ const hydrateFromServer = async () => {
       window.attendance.getSettings()
     ]);
 
+    presenceEnabled = Boolean(bootstrap.presenceEnabled ?? true);
+    applyPresenceVisibility();
+    registerPresenceListeners();
+
     const email = settings.workEmail;
     if (!email) {
       showToast('Add your work email in Settings to load live data.', 'warning');
       return;
     }
-
-    presenceEnabled = Boolean(bootstrap.presenceEnabled ?? true);
-    applyPresenceVisibility();
-    registerPresenceListeners();
 
     const baseUrl = settings.serverBaseUrl || bootstrap.baseUrl;
     appContext = {
@@ -1825,15 +1854,12 @@ const hydrateFromServer = async () => {
 
 const initialize = () => {
   updateTimesheetFromToday();
+  applyPresenceVisibility();
   render();
 
   dom.clockToggle.addEventListener('click', handleClockToggle);
   dom.breakToggle.addEventListener('click', handleBreakToggle);
   dom.lunchToggle.addEventListener('click', handleLunchToggle);
-  if (dom.presenceButton) {
-    dom.presenceButton.addEventListener('click', handlePresence);
-  }
-  applyPresenceVisibility();
   dom.requestForm.addEventListener('submit', handleRequestSubmit);
   dom.timesheetView.addEventListener('change', handleTimesheetChange);
   dom.downloadButton.addEventListener('click', handleDownload);

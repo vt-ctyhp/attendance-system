@@ -14,7 +14,13 @@ const fixturePath = (relative: string) => {
 
 const template = readFileSync(fixturePath('index.html'), 'utf-8');
 
-const installAttendanceStub = () => {
+interface AttendanceStubOverrides {
+  presenceEnabled?: boolean;
+  workEmail?: string | null;
+}
+
+const installAttendanceStub = (overrides: AttendanceStubOverrides = {}) => {
+  const { presenceEnabled = true, workEmail = null } = overrides;
   const confirmHandlers: Array<(promptId: string) => void> = [];
   const dismissHandlers: Array<(promptId: string) => void> = [];
 
@@ -34,9 +40,9 @@ const installAttendanceStub = () => {
       baseUrl: 'http://localhost:4000',
       deviceId: 'device-1',
       platform: 'test',
-      presenceEnabled: true
+      presenceEnabled
     }),
-    getSettings: vi.fn().mockResolvedValue({ serverBaseUrl: '', workEmail: null }),
+    getSettings: vi.fn().mockResolvedValue({ serverBaseUrl: '', workEmail }),
     getSystemStatus: vi.fn().mockResolvedValue({ idleSeconds: 0, foregroundApp: null })
   };
 
@@ -74,7 +80,6 @@ describe('attendance renderer presence behaviour', () => {
     document.documentElement.innerHTML = template;
     ensureCrypto();
     fetchMock = installFetchStub();
-    attendanceStub = installAttendanceStub().attendance;
   });
 
   afterEach(() => {
@@ -85,8 +90,17 @@ describe('attendance renderer presence behaviour', () => {
     delete (window as typeof window & { attendancePresence?: unknown }).attendancePresence;
   });
 
-  it('keeps the presence button hidden but available for scripting', async () => {
+  it('hides presence UI and listeners when the feature flag is disabled', async () => {
+    attendanceStub = installAttendanceStub({ presenceEnabled: false }).attendance;
+
     await import('./index');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const heroPresence = document.getElementById('hero-presence') as HTMLSpanElement | null;
+    expect(heroPresence).not.toBeNull();
+    expect(heroPresence?.hidden).toBe(true);
+    expect(heroPresence?.textContent?.trim()).toBe('');
 
     const presenceButton = document.getElementById('presence-button') as HTMLButtonElement | null;
     expect(presenceButton).not.toBeNull();
@@ -94,19 +108,34 @@ describe('attendance renderer presence behaviour', () => {
     expect(presenceButton?.style.display).toBe('none');
     expect(presenceButton?.getAttribute('aria-hidden')).toBe('true');
     expect(presenceButton?.getAttribute('tabindex')).toBe('-1');
+
+    expect(attendanceStub.onPresenceWindowConfirm).not.toHaveBeenCalled();
+    expect(attendanceStub.onPresenceWindowDismiss).not.toHaveBeenCalled();
   });
 
-  it('registers presence listeners without rendering the UI', async () => {
+  it('shows presence affordances and listeners when the feature flag is enabled', async () => {
+    attendanceStub = installAttendanceStub({ presenceEnabled: true }).attendance;
+
     await import('./index');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const heroPresence = document.getElementById('hero-presence') as HTMLSpanElement | null;
+    expect(heroPresence).not.toBeNull();
+    expect(heroPresence?.hidden).toBe(false);
+    expect(heroPresence?.textContent?.trim().length).toBeGreaterThan(0);
+
+    const presenceButton = document.getElementById('presence-button') as HTMLButtonElement | null;
+    expect(presenceButton).not.toBeNull();
+    expect(presenceButton?.hidden).toBe(false);
+    expect(presenceButton?.getAttribute('aria-hidden')).toBeNull();
 
     expect(attendanceStub.onPresenceWindowConfirm).toHaveBeenCalledTimes(1);
     expect(attendanceStub.onPresenceWindowDismiss).toHaveBeenCalledTimes(1);
-
-    const presenceButton = document.getElementById('presence-button') as HTMLButtonElement | null;
-    expect(presenceButton?.hidden).toBe(true);
   });
 
   it('renders a Tardy (m) column with sample data', async () => {
+    attendanceStub = installAttendanceStub({ presenceEnabled: false }).attendance;
     await import('./index');
 
     const headers = Array.from(document.querySelectorAll('th')).map((node) => node.textContent?.trim());
