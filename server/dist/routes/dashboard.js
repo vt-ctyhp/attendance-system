@@ -21,7 +21,6 @@ const payroll_1 = require("../services/payroll/payroll");
 const attendance_1 = require("../services/payroll/attendance");
 const bonuses_1 = require("../services/payroll/bonuses");
 const timeRequestPolicy_1 = require("../services/timeRequestPolicy");
-const logger_1 = require("../logger");
 const DASHBOARD_TIME_ZONE = process.env.DASHBOARD_TIME_ZONE ?? 'America/Los_Angeles';
 const ISO_DATE_TIME = "yyyy-MM-dd'T'HH:mm:ssXXX";
 const ISO_DATE = 'yyyy-MM-dd';
@@ -797,27 +796,6 @@ const collectAttendanceSummary = async (userId, periodStart, periodEnd) => {
     summary.totals.makeUpHours = Math.round(summary.totals.makeUpHours * 100) / 100;
     return summary;
 };
-const DEMO_PAYROLL_USERS = [
-    {
-        email: 'payroll.alice@example.com',
-        name: 'Alice Payroll',
-        base: 2900,
-        monthlyBonus: 200,
-        quarterlyBonus: 600,
-        kpiEligible: true,
-        defaultKpiBonus: 750
-    },
-    {
-        email: 'payroll.bob@example.com',
-        name: 'Bob Payroll',
-        base: 2600,
-        monthlyBonus: 150,
-        quarterlyBonus: 450,
-        kpiEligible: false,
-        defaultKpiBonus: null
-    }
-];
-let demoPayrollPasswordHash = null;
 const toMonthKey = (monthKey) => {
     if (/^\d{4}-\d{2}$/.test(monthKey)) {
         return monthKey;
@@ -829,129 +807,6 @@ const computeMonthRange = (monthKey) => {
     const rangeStart = monthDate;
     const rangeEnd = zonedEndOfMonth(monthDate);
     return { rangeStart, rangeEnd };
-};
-const buildDemoSchedule = () => ({
-    '0': { enabled: false, start: '09:00', end: '17:00', expectedHours: 8 },
-    '1': { enabled: true, start: '09:00', end: '17:00', expectedHours: 8 },
-    '2': { enabled: true, start: '09:00', end: '17:00', expectedHours: 8 },
-    '3': { enabled: true, start: '09:00', end: '17:00', expectedHours: 8 },
-    '4': { enabled: true, start: '09:00', end: '17:00', expectedHours: 8 },
-    '5': { enabled: true, start: '09:00', end: '17:00', expectedHours: 6 },
-    '6': { enabled: false, start: '09:00', end: '13:00', expectedHours: 4 }
-});
-const ensurePayrollDemoData = async (monthKey, payDate, actorId) => {
-    const normalizedMonthKey = toMonthKey(monthKey);
-    const { rangeStart, rangeEnd } = computeMonthRange(normalizedMonthKey);
-    if (!demoPayrollPasswordHash) {
-        demoPayrollPasswordHash = await (0, auth_1.hashPassword)('DemoPayroll!1');
-    }
-    const demoUsers = new Map();
-    for (const userDef of DEMO_PAYROLL_USERS) {
-        const user = await prisma_1.prisma.user.upsert({
-            where: { email: userDef.email },
-            update: { name: userDef.name, role: 'employee', active: true },
-            create: {
-                email: userDef.email,
-                name: userDef.name,
-                role: 'employee',
-                passwordHash: demoPayrollPasswordHash
-            }
-        });
-        demoUsers.set(userDef.email, user.id);
-        const schedule = buildDemoSchedule();
-        await (0, config_1.upsertEmployeeConfig)({
-            userId: user.id,
-            effectiveOn: rangeStart,
-            baseSemiMonthlySalary: userDef.base,
-            monthlyAttendanceBonus: userDef.monthlyBonus,
-            quarterlyAttendanceBonus: userDef.quarterlyBonus,
-            kpiEligible: userDef.kpiEligible,
-            defaultKpiBonus: userDef.defaultKpiBonus,
-            schedule,
-            accrualEnabled: true,
-            accrualMethod: 'standard',
-            ptoBalanceHours: 40,
-            nonPtoBalanceHours: 16
-        }, actorId ?? undefined);
-        const isPerfect = userDef.kpiEligible;
-        const workedHours = isPerfect ? 160 : 152;
-        const tardyMinutes = isPerfect ? 0 : 45;
-        const matchedMakeUpHours = isPerfect ? 0 : 2;
-        const reasons = isPerfect ? [] : ['Tardy arrivals recorded'];
-        await prisma_1.prisma.attendanceMonthFact.upsert({
-            where: { userId_monthKey: { userId: user.id, monthKey: normalizedMonthKey } },
-            update: {
-                rangeStart,
-                rangeEnd,
-                assignedHours: 160,
-                workedHours,
-                ptoHours: isPerfect ? 0 : 8,
-                nonPtoAbsenceHours: 0,
-                tardyMinutes,
-                matchedMakeUpHours,
-                isPerfect,
-                reasons,
-                snapshot: {
-                    monthKey: normalizedMonthKey,
-                    seeded: true
-                }
-            },
-            create: {
-                userId: user.id,
-                monthKey: normalizedMonthKey,
-                rangeStart,
-                rangeEnd,
-                assignedHours: 160,
-                workedHours,
-                ptoHours: isPerfect ? 0 : 8,
-                nonPtoAbsenceHours: 0,
-                tardyMinutes,
-                matchedMakeUpHours,
-                isPerfect,
-                reasons,
-                snapshot: {
-                    monthKey: normalizedMonthKey,
-                    seeded: true
-                }
-            }
-        });
-    }
-    const holidayAnchor = (0, date_fns_1.addDays)(rangeStart, 20);
-    await prisma_1.prisma.holiday.upsert({
-        where: { observedOn: holidayAnchor },
-        update: { name: 'Founders Day' },
-        create: { name: 'Founders Day', observedOn: holidayAnchor, createdById: actorId ?? undefined }
-    });
-    await (0, bonuses_1.recalcMonthlyBonuses)(normalizedMonthKey, actorId ?? undefined);
-    const payDateZoned = zoned(payDate);
-    const endOfMonthZoned = (0, date_fns_1.endOfMonth)(payDateZoned);
-    const isFifteenth = payDateZoned.getDate() === 15;
-    const isEndOfMonth = payDateZoned.getDate() === endOfMonthZoned.getDate();
-    const targetZoned = isFifteenth || isEndOfMonth
-        ? payDateZoned
-        : (() => {
-            const copy = new Date(payDateZoned);
-            if (payDateZoned.getDate() < 15) {
-                copy.setDate(15);
-            }
-            else {
-                copy.setTime(endOfMonthZoned.getTime());
-            }
-            return copy;
-        })();
-    targetZoned.setHours(0, 0, 0, 0);
-    const samplePayDateUtc = (0, date_fns_tz_1.zonedTimeToUtc)(targetZoned, DASHBOARD_TIME_ZONE);
-    logger_1.logger.info({
-        scope: 'payroll-demo-seed',
-        monthKey: normalizedMonthKey,
-        requestedPayDate: payDate.toISOString(),
-        chosenPayDate: samplePayDateUtc.toISOString()
-    }, 'Ensuring payroll demo data');
-    const existingPeriod = await prisma_1.prisma.payrollPeriod.findFirst({ where: { payDate: samplePayDateUtc } });
-    if (!existingPeriod) {
-        await (0, payroll_1.recalcPayrollForPayDate)(samplePayDateUtc, actorId ?? undefined);
-    }
-    return demoUsers;
 };
 const formatTimesheetStatus = (status) => status ? `${status.charAt(0).toUpperCase()}${status.slice(1)}` : status;
 const timesheetViewLabel = (view) => {
@@ -4590,8 +4445,6 @@ exports.dashboardRouter.get('/payroll', async (req, res) => {
     const employeeIdCandidate = employeePrefRaw && /^\d+$/.test(employeePrefRaw)
         ? Number.parseInt(employeePrefRaw, 10)
         : undefined;
-    const actorId = req?.user?.id ?? null;
-    await ensurePayrollDemoData(selectedFactsMonth, bonusDateValue, actorId);
     const baseDataPromise = Promise.all([
         prisma_1.prisma.payrollPeriod.findMany({
             orderBy: { payDate: 'desc' },
@@ -5907,11 +5760,6 @@ exports.dashboardRouter.get('/payroll/holidays', async (req, res) => {
     const error = toOptionalString(req.query.error);
     const now = new Date();
     const windowEnd = (0, date_fns_1.addMonths)(now, 12);
-    const defaultMonthParam = (0, date_fns_tz_1.formatInTimeZone)(zonedStartOfMonth(now), DASHBOARD_TIME_ZONE, 'yyyy-MM');
-    const wizardDefaultPayDate = computeNextPayrollPayDate();
-    const parsedWizardPayDate = parseDateInput(wizardDefaultPayDate) ?? zonedStartOfDay(now);
-    const actorId = req?.user?.id ?? null;
-    await ensurePayrollDemoData(defaultMonthParam, parsedWizardPayDate, actorId);
     const holidays = await (0, config_1.listHolidays)(now, windowEnd);
     const nextHoliday = holidays[0];
     const upcomingCount = holidays.length;
@@ -6138,14 +5986,7 @@ exports.dashboardRouter.get('/payroll/summary/:payDate', async (req, res) => {
         res.status(404).type('html').send('<!doctype html><html><body>Payroll period not found.</body></html>');
         return;
     }
-    const actorId = req?.user?.id ?? null;
     const { payDate: normalizedPayDate, periodStart, periodEnd } = computePayPeriodWindow(parsedPayDate);
-    const startMonthKey = (0, date_fns_tz_1.formatInTimeZone)(periodStart, DASHBOARD_TIME_ZONE, 'yyyy-MM');
-    const endMonthKey = (0, date_fns_tz_1.formatInTimeZone)(periodEnd, DASHBOARD_TIME_ZONE, 'yyyy-MM');
-    await ensurePayrollDemoData(startMonthKey, normalizedPayDate, actorId);
-    if (endMonthKey !== startMonthKey) {
-        await ensurePayrollDemoData(endMonthKey, normalizedPayDate, actorId);
-    }
     const period = await (0, payroll_1.getPayrollPeriod)(normalizedPayDate);
     if (!period) {
         const payDateLabel = formatFullDate(normalizedPayDate);
@@ -6550,14 +6391,7 @@ exports.dashboardRouter.get(['/payroll/period/:payDate', '/payroll/period/:payDa
         res.status(404).type('html').send('<!doctype html><html><body>Payroll period not found.</body></html>');
         return;
     }
-    const actorId = req?.user?.id ?? null;
     const { payDate: normalizedPayDate, periodStart, periodEnd } = computePayPeriodWindow(parsedPayDate);
-    const startMonthKey = (0, date_fns_tz_1.formatInTimeZone)(periodStart, DASHBOARD_TIME_ZONE, 'yyyy-MM');
-    const endMonthKey = (0, date_fns_tz_1.formatInTimeZone)(periodEnd, DASHBOARD_TIME_ZONE, 'yyyy-MM');
-    await ensurePayrollDemoData(startMonthKey, normalizedPayDate, actorId);
-    if (endMonthKey !== startMonthKey) {
-        await ensurePayrollDemoData(endMonthKey, normalizedPayDate, actorId);
-    }
     const period = await (0, payroll_1.getPayrollPeriod)(normalizedPayDate);
     const periods = await prisma_1.prisma.payrollPeriod.findMany({
         orderBy: { payDate: 'desc' },
@@ -6644,12 +6478,6 @@ exports.dashboardRouter.get(['/payroll/period/:payDate', '/payroll/period/:payDa
     };
     const previousPayDate = computePreviousPayDate(normalizedPayDate);
     const previousWindow = computePayPeriodWindow(previousPayDate);
-    const previousStartKey = (0, date_fns_tz_1.formatInTimeZone)(previousWindow.periodStart, DASHBOARD_TIME_ZONE, 'yyyy-MM');
-    const previousEndKey = (0, date_fns_tz_1.formatInTimeZone)(previousWindow.periodEnd, DASHBOARD_TIME_ZONE, 'yyyy-MM');
-    await ensurePayrollDemoData(previousStartKey, previousWindow.payDate, actorId);
-    if (previousEndKey !== previousStartKey) {
-        await ensurePayrollDemoData(previousEndKey, previousWindow.payDate, actorId);
-    }
     const previousSummary = selectedEmployeeId
         ? await collectAttendanceSummary(selectedEmployeeId, previousWindow.periodStart, previousWindow.periodEnd)
         : null;
