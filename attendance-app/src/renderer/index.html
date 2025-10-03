@@ -44,18 +44,20 @@
       }
 
       .hero {
+        --hero-pad: clamp(1.75rem, 4vw, 2.75rem);
         background: var(--card);
         border-radius: 24px;
-        padding: clamp(1.75rem, 4vw, 2.75rem);
+        padding: var(--hero-pad);
         display: grid;
         grid-template-columns: minmax(0, 1fr) clamp(7rem, 24vw, 11rem);
         grid-template-rows: auto auto;
         column-gap: clamp(1.5rem, 3vw, 2.5rem);
-        row-gap: clamp(1rem, 2vw, 1.5rem);
-        align-items: stretch;
+        row-gap: clamp(0.75rem, 2vw, 1.25rem);
+        align-items: start;
+        align-content: start;
         box-shadow: var(--shadow);
-        position: relative;
         overflow: hidden;
+        position: relative;
       }
 
       .hero__identity {
@@ -65,34 +67,38 @@
         flex-direction: column;
         gap: clamp(0.75rem, 2vw, 1.35rem);
         align-self: start;
+        position: relative;
+        z-index: 1;
       }
 
       .hero__status {
         grid-column: 1;
         grid-row: 2;
         display: grid;
-        gap: 0.35rem;
+        gap: 0.25rem;
         justify-items: flex-start;
         text-align: left;
-        align-self: start;
+        align-self: end;
+        margin: 0;
+        position: relative;
+        z-index: 1;
       }
 
       .hero__avatar {
-        grid-column: 2;
-        grid-row: 1 / span 2;
-        justify-self: end;
-        align-self: end;
+        position: absolute;
+        inset-inline-end: 0;
+        inset-block-end: clamp(0rem, calc(var(--hero-pad) * 0.15), 0.75rem);
+        transform: translate(3%, 6%);
         display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
         align-items: flex-end;
-        justify-content: center;
         width: clamp(11rem, 40vw, 17rem);
         min-width: clamp(8rem, 24vw, 12rem);
-        height: 100%;
-        min-height: min(100%, clamp(8rem, 24vw, 12rem));
-        max-height: clamp(13rem, 44vw, 20rem);
         opacity: 0;
         transition: opacity 0.25s ease;
         pointer-events: none;
+        z-index: 0;
       }
 
       .hero__avatar--visible {
@@ -102,7 +108,7 @@
       .hero__avatar img {
         width: 100%;
         height: auto;
-        max-height: 100%;
+        max-height: 90%;
         display: block;
       }
 
@@ -506,11 +512,6 @@
       }
 
       @media (max-width: 380px) {
-        .hero {
-          grid-template-columns: 1fr;
-          grid-template-rows: auto auto auto;
-        }
-
         .hero__status {
           grid-column: 1;
           grid-row: 2;
@@ -519,15 +520,16 @@
         }
 
         .hero__avatar {
+          position: static;
+          transform: none;
           grid-column: 1;
           grid-row: 3;
           justify-self: center;
           margin-top: 0.75rem;
           width: clamp(10rem, 76vw, 14rem);
           min-width: clamp(8rem, 60vw, 12rem);
-          min-height: clamp(8rem, 60vw, 12rem);
           max-width: clamp(11rem, 84vw, 16rem);
-          max-height: clamp(12rem, 84vw, 18rem);
+          align-items: center;
         }
 
         .hero__actions {
@@ -553,7 +555,7 @@
           <div>
             <div class="hero__eyebrow">Attendance System</div>
             <h1 class="hero__title" id="hero-title">Welcome back</h1>
-            <p class="hero__subtitle">
+            <p class="hero__subtitle" id="hero-subtitle">
               Monitor your workday, log pauses, respond to presence checks, and keep requests moving without
               leaving this page.
             </p>

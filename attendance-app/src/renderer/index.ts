@@ -972,9 +972,32 @@ let state: AttendanceState = {
 const SHOW_PRESENCE = false;
 const HERO_AVATAR_OVERTIME_THRESHOLD_MINUTES = 9 * 60;
 
+const MOTIVATION_PHRASES = [
+  "Let’s have a fantastic day!",
+  'Today is going to be even better than tomorrow.',
+  'Small steps every day lead to big success.',
+  'Your focus today builds your future.',
+  'Progress, not perfection.',
+  'Choose positivity and the rest will follow.',
+  'Make today count — it’s a fresh start.',
+  'Consistency beats intensity.',
+  'A little progress each day adds up to big results.',
+  'Your hard work today is tomorrow’s reward.'
+] as const;
+
+const HERO_SUBTITLE_FALLBACK = MOTIVATION_PHRASES[0];
+
+const getDailyMotivation = (date: Date = new Date()): string => {
+  const millisInDay = 86_400_000;
+  const daysSinceEpoch = Math.floor(date.getTime() / millisInDay);
+  const index = ((daysSinceEpoch % MOTIVATION_PHRASES.length) + MOTIVATION_PHRASES.length) % MOTIVATION_PHRASES.length;
+  return MOTIVATION_PHRASES[index] ?? HERO_SUBTITLE_FALLBACK;
+};
+
 const dom = {
   heroAvatar: document.getElementById('hero-avatar') as HTMLDivElement | null,
   heroTitle: document.getElementById('hero-title')!,
+  heroSubtitle: document.getElementById('hero-subtitle')!,
   heroStatus: document.getElementById('hero-status')!,
   heroDuration: document.getElementById('hero-duration')!,
   heroPresence: document.getElementById('hero-presence')!,
@@ -1074,6 +1097,15 @@ const initializeHeroAvatar = () => {
 };
 
 initializeHeroAvatar();
+
+const initializeHeroSubtitle = () => {
+  if (!dom.heroSubtitle) {
+    return;
+  }
+  dom.heroSubtitle.textContent = getDailyMotivation();
+};
+
+initializeHeroSubtitle();
 
 if (!SHOW_PRESENCE && dom.presenceButton) {
   dom.presenceButton.hidden = true;
