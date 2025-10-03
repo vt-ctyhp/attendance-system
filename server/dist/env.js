@@ -66,7 +66,7 @@ const envSchema = zod_1.z.object({
         return hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59;
     }, 'SQLITE_BACKUP_TIME must be in HH:MM 24-hour format')
         .default('02:30'),
-    START_SESSION_BY_EMAIL_ENABLED: booleanFromEnv.default(false),
+    START_SESSION_BY_EMAIL_ENABLED: booleanFromEnv.default(true),
     START_SESSION_BY_EMAIL_ALLOWED_IPS: zod_1.z.string().optional(),
     START_SESSION_BY_EMAIL_CLIENT_HEADER: zod_1.z.string().optional(),
     START_SESSION_BY_EMAIL_CLIENT_SECRET: zod_1.z.string().optional()
