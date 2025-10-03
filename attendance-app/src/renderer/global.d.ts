@@ -3,6 +3,7 @@ export interface BootstrapData {
   deviceId: string;
   platform: string;
   presenceUiMode?: 'overlay' | 'popup' | 'both';
+  presenceEnabled?: boolean;
 }
 
 export interface SystemStatus {

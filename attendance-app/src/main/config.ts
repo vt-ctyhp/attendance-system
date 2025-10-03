@@ -73,6 +73,28 @@ const resolveDefaultServerBaseUrl = () => getDefaultServerBaseUrls()[0];
 
 const DEFAULT_SERVER_BASE_URL = resolveDefaultServerBaseUrl();
 
+const normalizeBooleanString = (value: string | undefined) => {
+  if (!value) {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) {
+    return true;
+  }
+  if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) {
+    return false;
+  }
+  return undefined;
+};
+
+export const parseBooleanFlag = (value: string | undefined, fallback: boolean): boolean => {
+  const parsed = normalizeBooleanString(value);
+  return typeof parsed === 'boolean' ? parsed : fallback;
+};
+
+export const isPresenceFeatureEnabled = (): boolean =>
+  parseBooleanFlag(process.env.PRESENCE_PROMPTS_ENABLED, false);
+
 
 const getFetch = (): SimpleFetch | null => {
   const candidate = (globalThis as unknown as { fetch?: SimpleFetch }).fetch;

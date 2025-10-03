@@ -430,6 +430,10 @@ const registerPresenceListeners = () => {
     }
   });
 
+  if (!presenceEnabled) {
+    return;
+  }
+
   if (window.attendance?.onPresenceWindowConfirm) {
     const unsubscribe = window.attendance.onPresenceWindowConfirm(async (promptId) => {
       activePromptId = promptId;
@@ -969,7 +973,23 @@ let state: AttendanceState = {
   }
 };
 
-const SHOW_PRESENCE = false;
+let presenceEnabled = true;
+const applyPresenceVisibility = () => {
+  if (!dom.presenceButton) {
+    return;
+  }
+  if (presenceEnabled) {
+    dom.presenceButton.hidden = false;
+    dom.presenceButton.style.removeProperty('display');
+    dom.presenceButton.removeAttribute('aria-hidden');
+    dom.presenceButton.removeAttribute('tabindex');
+  } else {
+    dom.presenceButton.hidden = true;
+    dom.presenceButton.style.display = 'none';
+    dom.presenceButton.setAttribute('aria-hidden', 'true');
+    dom.presenceButton.setAttribute('tabindex', '-1');
+  }
+};
 const HERO_AVATAR_OVERTIME_THRESHOLD_MINUTES = 9 * 60;
 
 const MOTIVATION_PHRASES = [
@@ -1107,12 +1127,6 @@ const initializeHeroSubtitle = () => {
 
 initializeHeroSubtitle();
 
-if (!SHOW_PRESENCE && dom.presenceButton) {
-  dom.presenceButton.hidden = true;
-  dom.presenceButton.style.display = 'none';
-  dom.presenceButton.setAttribute('aria-hidden', 'true');
-  dom.presenceButton.setAttribute('tabindex', '-1');
-}
 
 dom.timesheetView.value = state.timesheet.view;
 
@@ -1528,6 +1542,9 @@ const handleLunchToggle = async () => {
 };
 
 const handlePresence = async () => {
+  if (!presenceEnabled) {
+    return;
+  }
   if (state.session.status === 'clocked_out') {
     showToast('Start a session before confirming presence.', 'warning');
     return;
@@ -1783,6 +1800,10 @@ const hydrateFromServer = async () => {
       return;
     }
 
+    presenceEnabled = Boolean(bootstrap.presenceEnabled ?? true);
+    applyPresenceVisibility();
+    registerPresenceListeners();
+
     const baseUrl = settings.serverBaseUrl || bootstrap.baseUrl;
     appContext = {
       baseUrl,
@@ -1809,9 +1830,10 @@ const initialize = () => {
   dom.clockToggle.addEventListener('click', handleClockToggle);
   dom.breakToggle.addEventListener('click', handleBreakToggle);
   dom.lunchToggle.addEventListener('click', handleLunchToggle);
-  if (SHOW_PRESENCE && dom.presenceButton && !dom.presenceButton.hidden) {
+  if (dom.presenceButton) {
     dom.presenceButton.addEventListener('click', handlePresence);
   }
+  applyPresenceVisibility();
   dom.requestForm.addEventListener('submit', handleRequestSubmit);
   dom.timesheetView.addEventListener('change', handleTimesheetChange);
   dom.downloadButton.addEventListener('click', handleDownload);

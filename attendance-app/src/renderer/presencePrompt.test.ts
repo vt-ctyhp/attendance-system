@@ -30,7 +30,12 @@ const installAttendanceStub = () => {
     openPresencePrompt: vi.fn(),
     closePresencePrompt: vi.fn(),
     logAction: vi.fn(),
-    getBootstrap: vi.fn().mockResolvedValue({ baseUrl: 'http://localhost:4000', deviceId: 'device-1', platform: 'test' }),
+    getBootstrap: vi.fn().mockResolvedValue({
+      baseUrl: 'http://localhost:4000',
+      deviceId: 'device-1',
+      platform: 'test',
+      presenceEnabled: true
+    }),
     getSettings: vi.fn().mockResolvedValue({ serverBaseUrl: '', workEmail: null }),
     getSystemStatus: vi.fn().mockResolvedValue({ idleSeconds: 0, foregroundApp: null })
   };

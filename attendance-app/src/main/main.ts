@@ -21,7 +21,8 @@ import {
   saveQueue,
   getDefaultServerBaseUrl,
   normalizeServerBaseUrl,
-  resolvePreferredServerBaseUrl
+  resolvePreferredServerBaseUrl,
+  isPresenceFeatureEnabled
 } from './config';
 import { autoUpdater } from 'electron-updater';
 import type { UpdateDownloadedEvent, UpdateInfo } from 'electron-updater';
@@ -60,6 +61,12 @@ const normalizePresenceUiMode = (value?: string | null): PresenceUiMode => {
 let presenceUiMode: PresenceUiMode = normalizePresenceUiMode(process.env.PRESENCE_UI);
 let presenceWindow: BrowserWindow | null = null;
 let activePresencePrompt: PresencePromptPayload | null = null;
+
+let presenceFeatureEnabled = isPresenceFeatureEnabled();
+
+const refreshPresenceFeatureEnabled = () => {
+  presenceFeatureEnabled = isPresenceFeatureEnabled();
+};
 
 let updateCheckActive = false;
 let updateRequestSource: 'manual' | null = null;
@@ -294,7 +301,8 @@ function defaultSecondInstanceHandler() {
   });
 }
 
-const shouldOpenPresenceWindow = () => presenceUiMode === 'popup' || presenceUiMode === 'both';
+const shouldOpenPresenceWindow = () =>
+  presenceFeatureEnabled && (presenceUiMode === 'popup' || presenceUiMode === 'both');
 
 const closePresenceWindow = (promptId?: string, options?: { suppressDismiss?: boolean }) => {
   if (!presenceWindow || presenceWindow.isDestroyed()) {
@@ -453,6 +461,7 @@ const bootstrapConfiguration = async () => {
   const config = await getConfig();
   deviceId = config.deviceId;
   workEmail = config.workEmail ?? null;
+  refreshPresenceFeatureEnabled();
 
   const envOverride = process.env.SERVER_BASE_URL;
   if (envOverride) {
@@ -557,12 +566,14 @@ const handleIpc = () => {
     if (!deviceId) {
       await bootstrapConfiguration();
     }
+    refreshPresenceFeatureEnabled();
 
     return {
       baseUrl,
       deviceId,
       platform: process.platform,
-      presenceUiMode
+      presenceUiMode,
+      presenceEnabled: presenceFeatureEnabled
     };
   });
 
@@ -628,6 +639,9 @@ const handleIpc = () => {
   });
 
   ipcMain.on('attendance:presence-open', (_event, prompt: PresencePromptPayload) => {
+    if (!presenceFeatureEnabled) {
+      return;
+    }
     if (!shouldOpenPresenceWindow()) {
       return;
     }
@@ -635,10 +649,16 @@ const handleIpc = () => {
   });
 
   ipcMain.on('attendance:presence-close', (_event, promptId: string) => {
+    if (!presenceFeatureEnabled) {
+      return;
+    }
     closePresenceWindow(promptId, { suppressDismiss: true });
   });
 
   ipcMain.on('attendance:presence-window-confirm', (_event, promptId: string) => {
+    if (!presenceFeatureEnabled) {
+      return;
+    }
     if (mainWindow) {
       mainWindow.webContents.send('attendance:presence-window-confirm', promptId);
     }
@@ -646,10 +666,16 @@ const handleIpc = () => {
   });
 
   ipcMain.on('attendance:presence-window-dismiss', (_event, promptId: string) => {
+    if (!presenceFeatureEnabled) {
+      return;
+    }
     closePresenceWindow(promptId);
   });
 
   ipcMain.on('attendance:presence-window-ready', (event) => {
+    if (!presenceFeatureEnabled) {
+      return;
+    }
     if (presenceWindow && event.sender === presenceWindow.webContents && activePresencePrompt) {
       event.sender.send('attendance:presence-window-data', activePresencePrompt);
     }
@@ -670,6 +696,7 @@ app.whenReady().then(async () => {
   await initializeLogging();
   logger.info('Application starting');
   loadEnvironment();
+  refreshPresenceFeatureEnabled();
   await bootstrapConfiguration();
   logger.info('Resolved server base URL', { baseUrl });
   cachedQueue = await loadQueue();
