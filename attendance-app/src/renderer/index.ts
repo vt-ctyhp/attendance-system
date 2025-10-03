@@ -60,9 +60,7 @@ interface ScheduleEntry {
   label: string;
   start: string;
   end: string;
-  location: string;
   status: 'upcoming' | 'in_progress' | 'completed';
-  note?: string;
 }
 
 interface ActivityItem {
@@ -895,9 +893,7 @@ let state: AttendanceState = {
         label: 'Today',
         start: '09:00',
         end: '17:30',
-        location: 'Retail Floor',
-        status: 'in_progress',
-        note: 'Coverage with Marcus during lunch rush.'
+        status: 'in_progress'
       },
       {
         id: 'shift-tomorrow',
@@ -905,9 +901,7 @@ let state: AttendanceState = {
         label: 'Tomorrow',
         start: '11:00',
         end: '19:30',
-        location: 'Outlet – Union Square',
-        status: 'upcoming',
-        note: 'Swap approved for evening coverage.'
+        status: 'upcoming'
       },
       {
         id: 'shift-weekend',
@@ -915,7 +909,6 @@ let state: AttendanceState = {
         label: formatDayLabel(addDays(now, 3)),
         start: '10:00',
         end: '16:00',
-        location: 'Pop-up Kiosk',
         status: 'upcoming'
       },
       {
@@ -924,7 +917,6 @@ let state: AttendanceState = {
         label: 'Yesterday',
         start: '09:30',
         end: '17:00',
-        location: 'Retail Floor',
         status: 'completed'
       }
     ]
@@ -1244,7 +1236,7 @@ const renderHero = () => {
 };
 
 const renderSnapshot = () => {
-  dom.snapshotLabel.textContent = `${state.today.label} • ${state.user.location}`;
+  dom.snapshotLabel.textContent = state.today.label;
   dom.makeupProgress.textContent = `${state.makeUpCap.used} / ${state.makeUpCap.cap} make-up hours used`;
   dom.makeupProgress.title = `${Math.max(state.makeUpCap.cap - state.makeUpCap.used, 0)} hours remaining this month`;
 
@@ -1356,13 +1348,11 @@ const renderSchedule = () => {
       const timeLabel = `${entry.start} – ${entry.end}`;
       const statusClass =
         entry.status === 'completed' ? 'pill pill--approved' : entry.status === 'in_progress' ? 'pill pill--pending' : 'pill';
-      const noteRow = entry.note ? `<div class="schedule__meta">${escapeHtml(entry.note)}</div>` : '';
       return `
         <li class="schedule__item">
           <div>
             <strong>${escapeHtml(entry.label)}</strong>
-            <div class="schedule__meta">${escapeHtml(timeLabel)} • ${escapeHtml(entry.location)}</div>
-            ${noteRow}
+            <div class="schedule__meta">${escapeHtml(timeLabel)}</div>
           </div>
           <span class="${statusClass}">${escapeHtml(entry.status.replace('_', ' '))}</span>
         </li>

@@ -165,16 +165,13 @@ const buildSchedule = (sessionStatus) => {
                 ? 'completed'
                 : 'in_progress'
             : 'upcoming';
-        const note = index === 2 ? 'Inventory prep and visual refresh.' : undefined;
         return {
             id: `shift-${isoDate(date)}`,
             date: isoDate(date),
             label,
             start: index === 0 ? '09:00' : '11:00',
             end: index === 0 ? '17:30' : '19:00',
-            location: index % 2 === 0 ? 'Flagship Store' : 'Pop-up Kiosk',
-            status,
-            note
+            status
         };
     });
     return { defaults, upcoming };
