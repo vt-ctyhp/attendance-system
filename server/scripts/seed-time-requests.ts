@@ -42,7 +42,7 @@ const seed = async () => {
       },
       {
         userId: firstUser.id,
-        type: 'non_pto',
+        type: 'uto',
         status: 'denied',
         startDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
         endDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000 + 8 * 60 * 60 * 1000),

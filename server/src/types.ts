@@ -26,7 +26,7 @@ export const isPresenceStatus = (value: string): value is PresenceStatus =>
 export const isEventType = (value: string): value is EventType =>
   (EVENT_TYPES as readonly string[]).includes(value);
 
-export const TIME_REQUEST_TYPES = ['pto', 'non_pto', 'make_up'] as const;
+export const TIME_REQUEST_TYPES = ['pto', 'uto', 'make_up'] as const;
 export type TimeRequestType = (typeof TIME_REQUEST_TYPES)[number];
 
 export const TIME_REQUEST_STATUSES = ['pending', 'approved', 'denied'] as const;

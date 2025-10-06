@@ -61,7 +61,7 @@ const employeeConfigSchema = z.object({
   accrualEnabled: z.boolean(),
   accrualMethod: z.string().max(100).optional().nullable(),
   ptoBalanceHours: z.number().finite(),
-  nonPtoBalanceHours: z.number().finite()
+  utoBalanceHours: z.number().finite()
 });
 
 payrollRouter.get(
@@ -91,7 +91,7 @@ payrollRouter.post(
         accrualEnabled: input.accrualEnabled,
         accrualMethod: input.accrualMethod,
         ptoBalanceHours: input.ptoBalanceHours,
-        nonPtoBalanceHours: input.nonPtoBalanceHours
+        utoBalanceHours: input.utoBalanceHours
       },
       req.user?.id
     );

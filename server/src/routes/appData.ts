@@ -221,14 +221,36 @@ const buildSchedule = (sessionStatus: ReturnType<typeof resolveSessionStatus>) =
   return { defaults, upcoming };
 };
 
-const mapRequestType = (type: string): 'make_up' | 'time_off' | 'edit' => {
+const mapRequestType = (type: string): 'make_up' | 'pto' | 'uto' | 'edit' => {
   if (type === 'make_up') {
     return 'make_up';
+  }
+  if (type === 'pto') {
+    return 'pto';
+  }
+  if (type === 'uto') {
+    return 'uto';
   }
   if (type === 'timesheet_edit') {
     return 'edit';
   }
-  return 'time_off';
+  return 'pto';
+};
+
+const requestTypeLabel = (type: 'make_up' | 'pto' | 'uto' | 'edit') => {
+  switch (type) {
+    case 'make_up':
+      return 'Make-up Hours';
+    case 'pto':
+      return 'PTO';
+    case 'uto':
+      return 'UTO';
+    case 'edit':
+      return 'Timesheet Edit';
+    default:
+      return 'Unknown Request';
+  }
+};
 };
 
 const toRequestItem = (request: {
@@ -286,7 +308,7 @@ const requestToActivity = (request: {
   startDate: Date;
   endDate: Date;
 }) => {
-  const typeLabel = mapRequestType(request.type).replace('_', ' ');
+  const typeLabel = requestTypeLabel(mapRequestType(request.type));
   return {
     id: `request-${request.id}`,
     timestamp: request.updatedAt.toISOString(),
@@ -449,6 +471,15 @@ export const getAppOverview = asyncHandler(async (req, res) => {
       makeUpCap: {
         used: Math.round(usedHours * 100) / 100,
         cap
+      },
+      makeUpCap: {
+        used: Math.round(usedHours * 100) / 100,
+        cap
+      },
+      balances: {
+        pto: roundToQuarterHour(balance?.ptoHours ?? 0),
+        uto: roundToQuarterHour(balance?.utoHours ?? 0),
+        makeUp: roundToQuarterHour(balance?.makeUpHours ?? 0)
       },
       meta: {
         generatedAt: new Date().toISOString(),

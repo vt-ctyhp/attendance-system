@@ -24,7 +24,7 @@ export type EmployeeCompInput = {
   accrualEnabled: boolean;
   accrualMethod?: string | null;
   ptoBalanceHours: number;
-  nonPtoBalanceHours: number;
+  utoBalanceHours: number;
 };
 
 export type EmployeeCompSnapshot = EmployeeCompInput & {
@@ -71,7 +71,7 @@ const toSnapshot = (
   accrualEnabled: config.accrualEnabled,
   accrualMethod: config.accrualMethod,
   ptoBalanceHours: Number(config.ptoBalanceHours),
-  nonPtoBalanceHours: Number(config.nonPtoBalanceHours),
+  utoBalanceHours: Number(config.utoBalanceHours),
   createdAt: config.createdAt,
   updatedAt: config.updatedAt
 });
@@ -116,7 +116,7 @@ export const upsertEmployeeConfig = async (input: EmployeeCompInput, actorId?: n
     accrualEnabled: input.accrualEnabled,
     accrualMethod: input.accrualMethod ?? null,
     ptoBalanceHours: new Decimal(input.ptoBalanceHours),
-    nonPtoBalanceHours: new Decimal(input.nonPtoBalanceHours)
+    utoBalanceHours: new Decimal(input.utoBalanceHours)
   };
 
   await prisma.employeeCompConfig.upsert({

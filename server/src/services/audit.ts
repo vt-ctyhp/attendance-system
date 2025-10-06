@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '../prisma';
 import { logger } from '../logger';
 
@@ -24,20 +25,30 @@ export type AuthEvent =
       deviceId?: string;
     };
 
+const createAuditLog = async (data: Parameters<typeof prisma.authAuditLog.create>[0]['data']) => {
+  try {
+    await prisma.authAuditLog.create({ data });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2003') {
+      await prisma.authAuditLog.create({ data: { ...data, userId: null } });
+      return;
+    }
+    throw error;
+  }
+};
+
 export const recordAuthEvent = async (input: AuthEvent) => {
   switch (input.event) {
     case 'email_session_attempt':
-      await prisma.authAuditLog.create({
-        data: {
-          email: input.email,
-          userId: input.userId ?? null,
-          event: input.event,
-          success: input.success,
-          reason: input.reason,
-          ipAddress: input.ipAddress,
-          userAgent: input.userAgent,
-          deviceId: input.deviceId
-        }
+      await createAuditLog({
+        email: input.email,
+        userId: input.userId ?? null,
+        event: input.event,
+        success: input.success,
+        reason: input.reason,
+        ipAddress: input.ipAddress,
+        userAgent: input.userAgent,
+        deviceId: input.deviceId
       });
       logger.info(
         {
@@ -54,17 +65,15 @@ export const recordAuthEvent = async (input: AuthEvent) => {
       );
       break;
     case 'email_session_token_issued':
-      await prisma.authAuditLog.create({
-        data: {
-          email: input.email,
-          userId: input.userId,
-          event: input.event,
-          success: true,
-          reason: 'issued',
-          ipAddress: input.ipAddress,
-          userAgent: input.userAgent,
-          deviceId: input.deviceId
-        }
+      await createAuditLog({
+        email: input.email,
+        userId: input.userId,
+        event: input.event,
+        success: true,
+        reason: 'issued',
+        ipAddress: input.ipAddress,
+        userAgent: input.userAgent,
+        deviceId: input.deviceId
       });
       logger.info(
         {

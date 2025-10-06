@@ -43,7 +43,7 @@ type RequestPlan = {
   reason?: string;
 };
 
-type NonPtoPlan = RequestPlan & {
+type UtoPlan = RequestPlan & {
   hours: number;
 };
 
@@ -65,7 +65,7 @@ type EmployeeSeedPlan = {
   deviceId: string;
   lateStarts: LateStartPlan[];
   ptoDays: RequestPlan[];
-  nonPtoRequests: NonPtoPlan[];
+  utoRequests: UtoPlan[];
   makeUpSessions: MakeUpPlan[];
 };
 
@@ -121,7 +121,7 @@ const EMPLOYEES: EmployeeSeedPlan[] = [
       { day: 24, minutesLate: 18 }
     ],
     ptoDays: [{ day: 12, hours: DEFAULT_SHIFT_WORK_HOURS, reason: 'PTO - long weekend getaway' }],
-    nonPtoRequests: [],
+    utoRequests: [],
     makeUpSessions: []
   },
   {
@@ -140,8 +140,8 @@ const EMPLOYEES: EmployeeSeedPlan[] = [
       { day: 21, minutesLate: 6 }
     ],
     ptoDays: [{ day: 3, hours: DEFAULT_SHIFT_WORK_HOURS, reason: 'PTO - family travel' }],
-    nonPtoRequests: [
-      { day: 18, hours: 4, reason: 'Non-PTO block for appointments' }
+    utoRequests: [
+      { day: 18, hours: 4, reason: 'UTO block for appointments' }
     ],
     makeUpSessions: [
       { day: 20, hours: 4.5, startHour: 11, reason: 'Make-up shift for appointments' }
@@ -163,8 +163,8 @@ const EMPLOYEES: EmployeeSeedPlan[] = [
       { day: 15, minutesLate: 9 }
     ],
     ptoDays: [{ day: 26, hours: DEFAULT_SHIFT_WORK_HOURS, reason: 'PTO - travel day' }],
-    nonPtoRequests: [
-      { day: 9, hours: 3.5, reason: 'Non-PTO afternoon outage' }
+    utoRequests: [
+      { day: 9, hours: 3.5, reason: 'UTO afternoon outage' }
     ],
     makeUpSessions: [
       { day: 27, hours: 3.5, startHour: 14, reason: 'Make-up evening block' }
@@ -228,7 +228,7 @@ const normalizedHours = (hours: number) => Math.round(hours * 100) / 100;
 
 const createTimeRequest = async (
   userId: number,
-  type: 'pto' | 'non_pto' | 'make_up',
+  type: 'pto' | 'uto' | 'make_up',
   startDate: Date,
   hours: number,
   reason: string,
@@ -368,7 +368,7 @@ const seedEmployeeTimesheets = async (
 
   const lateMap = new Map<number, number>(plan.lateStarts.map((item) => [item.day, item.minutesLate]));
   const ptoMap = new Map<number, RequestPlan>(plan.ptoDays.map((item) => [item.day, item]));
-  const nonPtoMap = new Map<number, NonPtoPlan>(plan.nonPtoRequests.map((item) => [item.day, item]));
+  const utoMap = new Map<number, UtoPlan>(plan.utoRequests.map((item) => [item.day, item]));
 
   for (const day of days) {
     const zoned = utcToZonedTime(day, PAYROLL_TIME_ZONE);
@@ -397,20 +397,20 @@ const seedEmployeeTimesheets = async (
       continue;
     }
 
-    const nonPto = nonPtoMap.get(dayOfMonth);
-    if (nonPto) {
+    const uto = utoMap.get(dayOfMonth);
+    if (uto) {
       const start = buildDateTime(
         monthKey,
         dayOfMonth,
-        nonPto.startHour ?? 10,
-        nonPto.startMinute ?? 0
+        uto.startHour ?? 10,
+        uto.startMinute ?? 0
       );
       await createTimeRequest(
         userId,
-        'non_pto',
+        'uto',
         start,
-        nonPto.hours,
-        nonPto.reason ?? 'Non-PTO absence',
+        uto.hours,
+        uto.reason ?? 'UTO absence',
         actorId
       );
       continue;
@@ -513,7 +513,7 @@ async function seed() {
         accrualEnabled: true,
         accrualMethod: 'standard',
         ptoBalanceHours: 40,
-        nonPtoBalanceHours: 12
+        utoBalanceHours: 12
       },
       update: {
         baseSemiMonthlySalary: employee.baseSemiMonthlySalary,
@@ -525,7 +525,7 @@ async function seed() {
         accrualEnabled: true,
         accrualMethod: 'standard',
         ptoBalanceHours: 40,
-        nonPtoBalanceHours: 12
+        utoBalanceHours: 12
       }
     });
 
