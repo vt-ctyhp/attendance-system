@@ -4,13 +4,6 @@ import { prisma } from '../src/prisma';
 import { getAppOverview } from '../src/routes/appData';
 import { callHandler } from './utils';
 
-const startOfToday = () => {
-  const now = new Date();
-  const clone = new Date(now.getTime());
-  clone.setHours(0, 0, 0, 0);
-  return clone;
-};
-
 describe('GET /api/app/overview', () => {
   it('returns an overview payload for the requested employee', async () => {
     const user = await prisma.user.create({
@@ -23,9 +16,11 @@ describe('GET /api/app/overview', () => {
       }
     });
 
-    const today = startOfToday();
-    const sessionStart = setMinutes(setHours(new Date(today), 9), 0);
-    const sessionEnd = addMinutes(sessionStart, 8 * 60);
+    const midnight = new Date();
+    midnight.setHours(0, 0, 0, 0);
+    const reference = setMinutes(setHours(midnight, 10), 0);
+    const sessionStart = addMinutes(reference, -120);
+    const sessionEnd = addMinutes(sessionStart, 90);
 
     const session = await prisma.session.create({
       data: {
@@ -33,28 +28,27 @@ describe('GET /api/app/overview', () => {
         deviceId: 'integration-device-1',
         startedAt: sessionStart,
         endedAt: sessionEnd,
-        status: 'completed'
+        status: 'ended'
       }
     });
 
-    await prisma.minuteStat.createMany({
-      data: Array.from({ length: 60 }).map((_, index) => ({
-        sessionId: session.id,
-        minuteStart: addMinutes(sessionStart, index),
-        active: true,
-        idle: index % 15 === 0,
-        keysCount: 40,
-        mouseCount: 20
-      }))
-    });
+    const minuteStats = Array.from({ length: 45 }).map((_, index) => ({
+      sessionId: session.id,
+      minuteStart: addMinutes(sessionStart, index),
+      active: true,
+      idle: index >= 10 && index < 15,
+      keysCount: 35,
+      mouseCount: 12
+    }));
+    await prisma.minuteStat.createMany({ data: minuteStats });
 
     await prisma.sessionPause.create({
       data: {
         sessionId: session.id,
         type: 'break',
         sequence: 1,
-        startedAt: addMinutes(sessionStart, 120),
-        endedAt: addMinutes(sessionStart, 135),
+        startedAt: addMinutes(sessionStart, 30),
+        endedAt: addMinutes(sessionStart, 45),
         durationMinutes: 15
       }
     });
@@ -62,7 +56,7 @@ describe('GET /api/app/overview', () => {
     await prisma.event.create({
       data: {
         sessionId: session.id,
-        ts: addMinutes(sessionStart, 210),
+        ts: addMinutes(sessionStart, 200),
         type: 'presence_miss',
         payload: '{}'
       }
@@ -74,7 +68,7 @@ describe('GET /api/app/overview', () => {
         type: 'make_up',
         status: 'approved',
         startDate: sessionStart,
-        endDate: addMinutes(sessionStart, 180),
+        endDate: addMinutes(sessionStart, 120),
         hours: 3,
         reason: 'Coverage for shipment arrival'
       }

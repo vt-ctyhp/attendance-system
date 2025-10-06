@@ -9,6 +9,16 @@ describe('Session lifecycle', () => {
   it('starts a session, records heartbeat stats, and ends session', async () => {
     vi.spyOn(Math, 'random').mockReturnValue(0);
 
+    await prisma.user.create({
+      data: {
+        email: 'smoke@test.local',
+        name: 'Session Lifecycle',
+        role: 'employee',
+        passwordHash: 'hash',
+        active: true
+      }
+    });
+
     const sessionStart = await callHandler<{ sessionId: string; userId: number }>(startSession, {
       body: {
         email: 'smoke@test.local',

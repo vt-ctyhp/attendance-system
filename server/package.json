@@ -16,7 +16,7 @@
     "seed:sample": "ts-node scripts/seedSampleData.ts",
     "seed:payroll-demo": "ts-node scripts/seedPayrollDemoMonth.ts",
     "lint": "eslint .",
-    "test": "vitest run --dir tests --reporter verbose",
+    "test": "node scripts/run-tests.cjs",
     "test:makeup-cap": "node scripts/testMakeupCap.mjs",
     "test:watch": "vitest"
   },
@@ -44,6 +44,7 @@
     "@types/node-schedule": "^2.1.8",
     "@types/pino": "7.0.5",
     "@types/pino-http": "6.1.0",
+    "@types/pg": "8.10.2",
     "@typescript-eslint/eslint-plugin": "7.13.0",
     "@typescript-eslint/parser": "7.13.0",
     "eslint": "8.57.0",
@@ -51,6 +52,7 @@
     "nodemon": "3.1.4",
     "pg": "^8.11.5",
     "prisma": "5.17.0",
+    "supertest": "6.3.4",
     "ts-node": "10.9.2",
     "typescript": "5.4.5",
     "vitest": "1.6.0"

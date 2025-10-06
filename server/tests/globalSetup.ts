@@ -1,55 +1,28 @@
 import { execSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 import { config as loadEnv } from 'dotenv';
 import { Client } from 'pg';
 
-const ensureDatabase = async (connectionString: string) => {
-  const url = new URL(connectionString);
-  const databaseName = url.pathname.replace(/^\//, '');
+const buildAdminUrl = (databaseUrl: string) => {
+  const url = new URL(databaseUrl);
+  url.pathname = '/postgres';
+  return url.toString();
+};
 
-  if (!databaseName) {
-    throw new Error('DATABASE_URL must include a database name');
-  }
-
-  const connect = async (target: string) => {
-    const client = new Client({ connectionString: target });
-    try {
-      await client.connect();
-    } finally {
-      await client.end().catch(() => {});
-    }
-  };
-
+const dropDatabaseIfExists = async (client: Client, dbName: string) => {
   try {
-    await connect(connectionString);
-    return;
+    await client.query(`DROP DATABASE IF EXISTS "${dbName}" WITH (FORCE)`);
   } catch (error) {
-    const pgError = error as { code?: string };
-    const missingDatabase = pgError.code === '3D000';
-
-    if (!missingDatabase) {
-      throw error;
-    }
+    await client.query('SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1', [dbName]);
+    await client.query(`DROP DATABASE IF EXISTS "${dbName}"`);
   }
+};
 
-  const adminUrl = new URL(connectionString);
-  adminUrl.pathname = '/postgres';
-
-  const adminClient = new Client({ connectionString: adminUrl.toString() });
-
-  try {
-    await adminClient.connect();
-    const quotedName = databaseName.replace(/"/g, '""');
-    await adminClient.query(`CREATE DATABASE "${quotedName}"`);
-  } catch (creationError) {
-    throw new Error(`Failed to create database "${databaseName}": ${(creationError as Error).message}`);
-  } finally {
-    await adminClient.end().catch(() => {});
-  }
-
-  await connect(connectionString);
+const createDatabase = async (client: Client, dbName: string) => {
+  await client.query(`CREATE DATABASE "${dbName}"`);
 };
 
 export default async function globalSetup() {
@@ -66,27 +39,35 @@ export default async function globalSetup() {
   process.env.ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? 'admin@test.local';
   process.env.ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? 'TestPassword123!';
   process.env.BASE_URL = process.env.BASE_URL ?? `http://127.0.0.1:${process.env.PORT}`;
-  process.env.USE_POSTGRES = process.env.USE_POSTGRES ?? '1';
+  process.env.USE_POSTGRES = '1';
 
-  const databaseUrl = process.env.DATABASE_URL ?? '';
-  const shadowUrl = process.env.SHADOW_DATABASE_URL;
+  const templateUrl =
+    process.env.TEST_DATABASE_TEMPLATE_URL ??
+    process.env.DATABASE_TEMPLATE_URL ??
+    process.env.DATABASE_URL ??
+    'postgresql://attendance:attendance@127.0.0.1:5433/attendance';
 
-  if (!databaseUrl.toLowerCase().startsWith('postgres')) {
-    throw new Error('Tests require DATABASE_URL to start with postgres:// or postgresql://');
+  const dbName = `attendance_test_${randomUUID().replace(/-/g, '')}`;
+  const databaseUrl = new URL(templateUrl);
+  databaseUrl.pathname = `/${dbName}`;
+
+  const adminUrl = buildAdminUrl(templateUrl);
+  const adminClient = new Client({ connectionString: adminUrl });
+  await adminClient.connect();
+  try {
+    await dropDatabaseIfExists(adminClient, dbName);
+    await createDatabase(adminClient, dbName);
+  } finally {
+    await adminClient.end();
   }
 
-  await ensureDatabase(databaseUrl);
-  if (shadowUrl && shadowUrl.toLowerCase().startsWith('postgres')) {
-    try {
-      await ensureDatabase(shadowUrl);
-    } catch (error) {
-      console.warn(`Skipping shadow database initialization: ${(error as Error).message}`);
-    }
-  }
+  process.env.DATABASE_URL = databaseUrl.toString();
+  process.env.TEST_DATABASE_NAME = dbName;
+  process.env.TEST_DATABASE_ADMIN_URL = adminUrl;
 
-  execSync('npx prisma db push --force-reset --skip-generate', {
+  execSync('node scripts/ensure-migrations.cjs', {
     cwd: root,
-    env: { ...process.env, DATABASE_URL: databaseUrl },
+    env: { ...process.env },
     stdio: 'inherit'
   });
 

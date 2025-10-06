@@ -27,32 +27,29 @@ const resetFeatureFlags = async () => {
 
 const resetDatabase = async () => {
   const client = await getPrisma();
-  const tables = [
-    '"AttendanceMonthFact"',
-    '"BalanceLedger"',
-    '"BonusCandidate"',
-    '"PayrollAuditLog"',
-    '"PayrollLine"',
-    '"PayrollPeriod"',
-    '"PresencePrompt"',
-    '"SessionPause"',
-    '"MinuteStat"',
-    '"Event"',
-    '"TimeRequest"',
-    '"TimesheetEditRequest"',
-    '"EmployeeCompConfig"',
-    '"AccrualRule"',
-    '"Config"',
-    '"RefreshToken"',
-    '"PtoBalance"',
-    '"Holiday"',
-    '"AuthAuditLog"',
-    '"Session"',
-    '"User"'
-  ];
-
-  await client.$executeRawUnsafe(`TRUNCATE TABLE ${tables.join(', ')} RESTART IDENTITY CASCADE`);
-  await resetFeatureFlags();
+  await client.$transaction([
+    client.presencePrompt.deleteMany(),
+    client.event.deleteMany(),
+    client.minuteStat.deleteMany(),
+    client.sessionPause.deleteMany(),
+    client.timeRequest.deleteMany(),
+    client.refreshToken.deleteMany(),
+    client.authAuditLog.deleteMany(),
+    client.payrollAuditLog.deleteMany(),
+    client.payrollLine.deleteMany(),
+    client.payrollPeriod.deleteMany(),
+    client.bonusCandidate.deleteMany(),
+    client.attendanceMonthFact.deleteMany(),
+    client.employeeCompConfig.deleteMany(),
+    client.balanceLedger.deleteMany(),
+    client.ptoBalance.deleteMany(),
+    client.timesheetEditRequest.deleteMany(),
+    client.holiday.deleteMany(),
+    client.config.deleteMany(),
+    client.session.deleteMany(),
+    client.user.deleteMany()
+  ]);
+  await resetFeatureFlags();  await resetFeatureFlags();
 };
 
 beforeEach(async () => {

@@ -34,10 +34,10 @@ describe('Time requests', () => {
       data: {
         userId: employee.id,
         basePtoHours: 40,
-        baseNonPtoHours: 20,
+        baseUtoHours: 20,
         baseMakeUpHours: 0,
         ptoHours: 40,
-        nonPtoHours: 20,
+        utoHours: 20,
         makeUpHours: 0
       }
     });
@@ -72,31 +72,31 @@ describe('Time requests', () => {
     expect(ledgerAfterPto[0].createdById).toBe(admin.id);
     expect(ledgerAfterPto[0].reason).toContain('approved');
 
-    const nonPtoCreate = await callHandler<{ request: { id: string } }>(createTimeRequest, {
+    const utoCreate = await callHandler<{ request: { id: string } }>(createTimeRequest, {
       body: {
-        type: 'non_pto',
+        type: 'uto',
         startDate: '2024-06-02T09:00:00.000Z',
         hours: 2,
         reason: 'Errand'
       },
       user: employee
     });
-    expect(nonPtoCreate.status).toBe(201);
-    const nonPtoId = nonPtoCreate.data!.request.id;
-    const nonPtoEndDate = (nonPtoCreate.data!.request as { endDate: string | Date }).endDate;
-    expect(new Date(nonPtoEndDate).toISOString()).toBe('2024-06-02T09:00:00.000Z');
+    expect(utoCreate.status).toBe(201);
+    const utoId = utoCreate.data!.request.id;
+    const utoEndDate = (utoCreate.data!.request as { endDate: string | Date }).endDate;
+    expect(new Date(utoEndDate).toISOString()).toBe('2024-06-02T09:00:00.000Z');
 
-    const storedNonPto = await prisma.timeRequest.findUniqueOrThrow({ where: { id: nonPtoId } });
-    expect(storedNonPto.endDate.toISOString()).toBe('2024-06-02T09:00:00.000Z');
+    const storedUto = await prisma.timeRequest.findUniqueOrThrow({ where: { id: utoId } });
+    expect(storedUto.endDate.toISOString()).toBe('2024-06-02T09:00:00.000Z');
 
-    const nonPtoApprove = await callHandler<{
-      updatedBalance: { nonPtoHours: number };
+    const utoApprove = await callHandler<{
+      updatedBalance: { utoHours: number };
     }>(approveTimeRequest, {
-      params: { id: nonPtoId },
+      params: { id: utoId },
       user: admin
     });
-    expect(nonPtoApprove.status).toBe(200);
-    expect(nonPtoApprove.data!.updatedBalance.nonPtoHours).toBe(18);
+    expect(utoApprove.status).toBe(200);
+    expect(utoApprove.data!.updatedBalance.utoHours).toBe(18);
 
     const makeUpCreate = await callHandler<{ request: { id: string } }>(createTimeRequest, {
       body: {
@@ -161,7 +161,7 @@ describe('Time requests', () => {
     ).rejects.toHaveProperty('statusCode', 400);
 
     const balanceResponse = await callHandler<{
-      balance: { ptoHours: number; nonPtoHours: number; makeUpHours: number };
+      balance: { ptoHours: number; utoHours: number; makeUpHours: number };
       ledger: Array<{ deltaHours: number; reason: string }>;
     }>(getUserBalance, {
       params: { userId: String(employee.id) },
@@ -170,7 +170,7 @@ describe('Time requests', () => {
     });
     expect(balanceResponse.status).toBe(200);
     expect(balanceResponse.data!.balance.ptoHours).toBe(40);
-    expect(balanceResponse.data!.balance.nonPtoHours).toBe(18);
+    expect(balanceResponse.data!.balance.utoHours).toBe(18);
     expect(balanceResponse.data!.balance.makeUpHours).toBe(3);
     expect(balanceResponse.data!.ledger).toHaveLength(2);
     expect(balanceResponse.data!.ledger[0].deltaHours).toBe(8);
@@ -205,10 +205,10 @@ it('enforces make-up monthly cap', async () => {
       data: {
         userId: employee.id,
         basePtoHours: 40,
-        baseNonPtoHours: 20,
+        baseUtoHours: 20,
         baseMakeUpHours: 0,
         ptoHours: 40,
-        nonPtoHours: 20,
+        utoHours: 20,
         makeUpHours: 0
       }
     });
