@@ -3,7 +3,7 @@ import { resolveHeroAvatarPaths, type HeroAvatarStatus } from './avatarResolver'
 const MINUTE = 60_000;
 
 type SessionStatus = 'clocked_out' | 'working' | 'break' | 'lunch';
-type RequestType = 'make_up' | 'time_off' | 'edit';
+type RequestType = 'make_up' | 'pto' | 'uto' | 'edit';
 type RequestStatus = 'pending' | 'approved' | 'denied';
 type TimesheetView = 'weekly' | 'pay_period' | 'monthly';
 
@@ -116,6 +116,11 @@ interface AttendanceState {
     used: number;
     cap: number;
   };
+  balances: {
+    pto: number;
+    uto: number;
+    makeUp: number;
+  };
 }
 
 interface OverviewTimesheetDay {
@@ -179,6 +184,7 @@ interface OverviewResponse {
   };
   activity: ActivityItem[];
   makeUpCap: { used: number; cap: number };
+  balances: { pto: number; uto: number; makeUp: number };
   meta?: { generatedAt: string; referenceDate: string };
 }
 
@@ -273,6 +279,21 @@ const formatDurationMinutes = (minutes: number) => {
 const formatHours = (hours: number) => {
   const rounded = Math.round(hours * 100) / 100;
   return Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(2);
+};
+
+const getMakeUpRemaining = () => Math.max(state.makeUpCap.cap - state.makeUpCap.used, 0);
+
+const getAvailableHoursForRequest = (type: RequestType): number | null => {
+  switch (type) {
+    case 'pto':
+      return state.balances.pto;
+    case 'uto':
+      return state.balances.uto;
+    case 'make_up':
+      return getMakeUpRemaining();
+    default:
+      return null;
+  }
 };
 
 const minutesBetween = (start: Date | null, end: Date = new Date()) => {
@@ -487,8 +508,10 @@ const requestLabel = (type: RequestType) => {
   switch (type) {
     case 'make_up':
       return 'Make-up hours';
-    case 'time_off':
-      return 'Time off';
+    case 'pto':
+      return 'PTO';
+    case 'uto':
+      return 'UTO';
     case 'edit':
       return 'Timesheet edit';
     default:
@@ -852,7 +875,7 @@ let state: AttendanceState = {
   requests: [
     {
       id: 'req-pto-001',
-      type: 'time_off',
+      type: 'pto',
       status: 'approved',
       startDate: addDays(now, -3).toISOString(),
       endDate: addDays(now, -2).toISOString(),
@@ -871,7 +894,17 @@ let state: AttendanceState = {
       submittedAt: addDays(now, -1).toISOString()
     },
     {
-      id: 'req-edit-003',
+      id: 'req-uto-003',
+      type: 'uto',
+      status: 'pending',
+      startDate: addDays(now, 5).toISOString(),
+      endDate: addDays(now, 5).toISOString(),
+      hours: 2,
+      reason: 'School pick-up window.',
+      submittedAt: addDays(now, -2).toISOString()
+    },
+    {
+      id: 'req-edit-004',
       type: 'edit',
       status: 'denied',
       startDate: addDays(now, -7).toISOString(),
@@ -962,6 +995,11 @@ let state: AttendanceState = {
   makeUpCap: {
     used: 6,
     cap: 20
+  },
+  balances: {
+    pto: 32,
+    uto: 10,
+    makeUp: 4
   }
 };
 
@@ -1322,8 +1360,20 @@ const renderRequests = () => {
     });
 
   dom.requestList.innerHTML = items.join('') || '<li class="form-hint">No requests submitted yet.</li>';
-  const remaining = Math.max(state.makeUpCap.cap - state.makeUpCap.used, 0);
-  dom.requestHint.textContent = `${state.makeUpCap.used} of ${state.makeUpCap.cap} make-up hours used this month • ${remaining} remaining.`;
+  updateRequestHint();
+};
+
+const updateRequestHint = () => {
+  const selectedType = dom.requestType.value as RequestType;
+  const selectedLabel = requestLabel(selectedType);
+  const available = getAvailableHoursForRequest(selectedType);
+  const selectedMessage =
+    available === null
+      ? `${selectedLabel} request`
+      : `${selectedLabel}: ${formatHours(Math.max(available, 0))}h available`;
+  const makeUpRemaining = getMakeUpRemaining();
+  const summary = `PTO ${formatHours(state.balances.pto)}h • UTO ${formatHours(state.balances.uto)}h • Make-up remaining ${formatHours(makeUpRemaining)}h (cap ${formatHours(state.makeUpCap.cap)}h)`;
+  dom.requestHint.textContent = `${selectedMessage} • ${summary}`;
 };
 
 const renderSchedule = () => {
@@ -1651,6 +1701,10 @@ const handleRequestSubmit = async (event: SubmitEvent) => {
   state.requests.unshift(request);
   if (type === 'make_up') {
     state.makeUpCap.used = Math.min(state.makeUpCap.cap, Math.round((state.makeUpCap.used + hours) * 100) / 100);
+  } else if (type === 'pto') {
+    state.balances.pto = Math.max(0, Math.round((state.balances.pto - hours) * 100) / 100);
+  } else if (type === 'uto') {
+    state.balances.uto = Math.max(0, Math.round((state.balances.uto - hours) * 100) / 100);
   }
 
   dom.requestForm.reset();
@@ -1781,7 +1835,10 @@ const applyOverview = (overview: OverviewResponse) => {
       upcoming: overview.schedule.upcoming.slice()
     },
     activity: overview.activity.slice(),
-    makeUpCap: { ...overview.makeUpCap }
+    makeUpCap: { ...overview.makeUpCap },
+    balances: overview.balances
+      ? { ...overview.balances }
+      : { ...state.balances }
   };
 
   state.today.tardyMinutes = state.today.tardyMinutes ?? (state.today.presenceMisses ?? 0);
@@ -1850,6 +1907,7 @@ const initialize = () => {
   dom.clockToggle.addEventListener('click', handleClockToggle);
   dom.breakToggle.addEventListener('click', handleBreakToggle);
   dom.lunchToggle.addEventListener('click', handleLunchToggle);
+  dom.requestType.addEventListener('change', updateRequestHint);
   dom.requestForm.addEventListener('submit', handleRequestSubmit);
   dom.timesheetView.addEventListener('change', handleTimesheetChange);
   dom.downloadButton.addEventListener('click', handleDownload);
@@ -1859,6 +1917,7 @@ const initialize = () => {
   window.setInterval(renderHero, 30_000);
   window.addEventListener('focus', renderHero);
 
+  updateRequestHint();
   void hydrateFromServer();
 };
 
