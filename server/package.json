@@ -9,6 +9,7 @@
     "db:migrate": "prisma migrate deploy",
     "db:push": "prisma db push",
     "db:status": "prisma migrate status",
+    "db:ensure": "node scripts/ensure-migrations.cjs",
     "prisma:migrate": "prisma migrate dev",
     "prisma:generate": "prisma generate",
     "prisma:deploy": "prisma migrate deploy",
