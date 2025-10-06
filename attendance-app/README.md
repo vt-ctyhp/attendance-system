@@ -31,7 +31,7 @@ Open the **Settings** button in the main window to view or change the server URL
 
 ## Requests
 
-- Click **Requests** to submit a PTO / Non-PTO / Make-Up request with date (or date range), hours, and a reason.
+- Click **Requests** to submit a PTO / UTO / Make-Up request with date (or date range), hours, and a reason.
 - Requests include the logged-in email and the device ID in the payload (`POST /api/time-requests`).
 - The **My Requests** list shows pending/approved/denied statuses via `GET /api/time-requests/my`; use **Refresh** to pull the latest state.
 - When offline, new requests are queued locally and automatically retried once connectivity returns.
