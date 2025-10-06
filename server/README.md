@@ -19,6 +19,12 @@
 Vitest runs sequentially, truncates the Postgres schema between tests, and now includes a health check that
 performs a write/read round-trip.
 
+## Migrations & Seeds
+
+- Apply the current schema with `npm run ensure:migrations`. This wraps `prisma migrate deploy` and regenerates the client.
+- Seed demo shift assignments for dashboards with `npm run seed:shifts`. The script is safe to re-run and skips automatically when `NODE_ENV`/`APP_ENV` is production (unless you pass `--allow-prod`).
+- For lightweight post-deploy smoke checks, run `npm run postdeploy:schedule -- schedule-user@example.com https://env-base-url` to verify that seeded accounts still have upcoming shifts.
+
 ## Deployment
 
 - Copy `deploy/env.prod.example` to `deploy/env.prod` and keep the `DATABASE_URL` pointing at the Postgres service (`postgresql://attendance:attendance@postgres:5432/attendance?schema=public`).

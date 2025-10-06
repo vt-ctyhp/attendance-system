@@ -38,6 +38,7 @@ const resetDatabase = async () => {
     '"SessionPause"',
     '"MinuteStat"',
     '"Event"',
+    '"ShiftAssignment"',
     '"TimeRequest"',
     '"TimesheetEditRequest"',
     '"EmployeeCompConfig"',

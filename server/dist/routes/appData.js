@@ -11,6 +11,7 @@ const errors_1 = require("../errors");
 const validation_1 = require("../utils/validation");
 const timesheets_1 = require("../services/timesheets");
 const timeRequestPolicy_1 = require("../services/timeRequestPolicy");
+const schedule_1 = require("../services/schedule");
 const overviewQuerySchema = zod_1.z.object({
     email: zod_1.z
         .string()
@@ -150,31 +151,6 @@ const resolveSessionStatus = (session) => {
         lastClockedInAt: session.startedAt,
         lastClockedOutAt: session.endedAt ?? null
     };
-};
-const buildSchedule = (sessionStatus) => {
-    const now = new Date();
-    const defaults = [
-        { label: 'Mon – Fri', start: '09:00', end: '17:30' },
-        { label: 'Sat', start: '10:00', end: '16:00' }
-    ];
-    const upcoming = Array.from({ length: 4 }).map((_, index) => {
-        const date = (0, date_fns_1.addDays)(now, index);
-        const label = index === 0 ? 'Today' : index === 1 ? 'Tomorrow' : dayLabel(date);
-        const status = index === 0
-            ? sessionStatus.status === 'clocked_out'
-                ? 'completed'
-                : 'in_progress'
-            : 'upcoming';
-        return {
-            id: `shift-${isoDate(date)}`,
-            date: isoDate(date),
-            label,
-            start: index === 0 ? '09:00' : '11:00',
-            end: index === 0 ? '17:30' : '19:00',
-            status
-        };
-    });
-    return { defaults, upcoming };
 };
 const mapRequestType = (type) => {
     if (type === 'make_up') {
@@ -330,6 +306,11 @@ exports.getAppOverview = (0, asyncHandler_1.asyncHandler)(async (req, res) => {
         (0, timeRequestPolicy_1.getApprovedMakeupHoursThisMonth)(prisma_1.prisma, user.id)
     ]);
     const idleActivities = buildIdleActivities(minuteStats, pauses, now);
+    const schedule = await (0, schedule_1.getUserSchedule)({
+        userId: user.id,
+        sessionStatus,
+        reference: now
+    });
     const activity = [
         ...events.map(eventToActivity),
         ...requests.map(requestToActivity),
@@ -360,7 +341,7 @@ exports.getAppOverview = (0, asyncHandler_1.asyncHandler)(async (req, res) => {
             }
         },
         requests: requestItems,
-        schedule: buildSchedule(sessionStatus),
+        schedule,
         activity,
         makeUpCap: {
             used: Math.round(usedHours * 100) / 100,

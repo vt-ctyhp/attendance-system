@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { addDays, addMinutes, differenceInMinutes } from 'date-fns';
+import { addMinutes, differenceInMinutes } from 'date-fns';
 import { formatInTimeZone } from 'date-fns-tz';
 import { z } from 'zod';
 import type { Prisma } from '@prisma/client';
@@ -17,6 +17,7 @@ import {
   getApprovedMakeupHoursThisMonth,
   getMakeupCapHoursPerMonth
 } from '../services/timeRequestPolicy';
+import { getUserSchedule } from '../services/schedule';
 
 const overviewQuerySchema = z.object({
   email: z
@@ -191,34 +192,6 @@ const resolveSessionStatus = (session: Prisma.SessionGetPayload<{ include: { pau
     lastClockedInAt: session.startedAt,
     lastClockedOutAt: session.endedAt ?? null
   };
-};
-
-const buildSchedule = (sessionStatus: ReturnType<typeof resolveSessionStatus>) => {
-  const now = new Date();
-  const defaults = [
-    { label: 'Mon – Fri', start: '09:00', end: '17:30' },
-    { label: 'Sat', start: '10:00', end: '16:00' }
-  ];
-
-  const upcoming = Array.from({ length: 4 }).map((_, index) => {
-    const date = addDays(now, index);
-    const label = index === 0 ? 'Today' : index === 1 ? 'Tomorrow' : dayLabel(date);
-    const status = index === 0
-      ? sessionStatus.status === 'clocked_out'
-        ? 'completed'
-        : 'in_progress'
-      : 'upcoming';
-    return {
-      id: `shift-${isoDate(date)}`,
-      date: isoDate(date),
-      label,
-      start: index === 0 ? '09:00' : '11:00',
-      end: index === 0 ? '17:30' : '19:00',
-      status
-    };
-  });
-
-  return { defaults, upcoming };
 };
 
 const mapRequestType = (type: string): 'make_up' | 'time_off' | 'edit' => {
@@ -413,6 +386,12 @@ export const getAppOverview = asyncHandler(async (req, res) => {
 
     const idleActivities = buildIdleActivities(minuteStats, pauses, now);
 
+    const schedule = await getUserSchedule({
+      userId: user.id,
+      sessionStatus,
+      reference: now
+    });
+
     const activity = [
       ...events.map(eventToActivity),
       ...requests.map(requestToActivity),
@@ -444,7 +423,7 @@ export const getAppOverview = asyncHandler(async (req, res) => {
         }
       },
       requests: requestItems,
-      schedule: buildSchedule(sessionStatus),
+      schedule,
       activity,
       makeUpCap: {
         used: Math.round(usedHours * 100) / 100,
