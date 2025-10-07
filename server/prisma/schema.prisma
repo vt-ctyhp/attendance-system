@@ -154,7 +154,7 @@ model AttendanceMonthFact {
   assignedHours          Decimal  @db.Decimal(10, 2)
   workedHours            Decimal  @db.Decimal(10, 2)
   ptoHours               Decimal  @db.Decimal(10, 2)
-  utoAbsenceHours     Decimal  @db.Decimal(10, 2)
+  utoAbsenceHours     Decimal  @default(0) @db.Decimal(10, 2)
   tardyMinutes           Int
   matchedMakeUpHours     Decimal  @db.Decimal(10, 2)
   isPerfect              Boolean
