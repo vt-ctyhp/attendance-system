@@ -2,12 +2,13 @@ import { addDays, endOfDay, startOfDay, startOfMonth, endOfMonth, setDate, start
 import { formatInTimeZone, utcToZonedTime, zonedTimeToUtc } from 'date-fns-tz';
 import { prisma } from '../prisma';
 import type { TimesheetView } from '../types';
+import { PAYROLL_TIME_ZONE } from './payroll/constants';
+import { getMonthKeyForDate } from './payroll/attendance';
 
 const ISO_DATE = 'yyyy-MM-dd';
 const ISO_LONG = "yyyy-MM-dd'T'HH:mm:ssXXX";
 const DATE_LABEL = 'MMM d, yyyy';
-const DEFAULT_TIME_ZONE =
-  process.env.TIMESHEET_TIME_ZONE ?? process.env.DASHBOARD_TIME_ZONE ?? 'America/Los_Angeles';
+const DEFAULT_TIME_ZONE = PAYROLL_TIME_ZONE;
 const WEEK_START = (() => {
   const raw = process.env.TIMESHEET_WEEK_START;
   if (!raw) return 1;
@@ -29,6 +30,7 @@ export type TimesheetDaySummary = {
   idleMinutes: number;
   breaks: number;
   lunches: number;
+  tardyMinutes: number;
   presenceMisses: number;
   editRequests: TimesheetEditRequestSummary[];
 };
@@ -40,6 +42,7 @@ export type TimesheetTotals = {
   idleHours: number;
   breaks: number;
   lunches: number;
+  tardyMinutes: number;
   presenceMisses: number;
 };
 
@@ -140,6 +143,7 @@ const buildEmptyDay = (date: Date): TimesheetDayAccumulator => ({
   idleMinutes: 0,
   breaks: 0,
   lunches: 0,
+  tardyMinutes: 0,
   presenceMisses: 0,
   editRequests: []
 });
@@ -147,6 +151,7 @@ const buildEmptyDay = (date: Date): TimesheetDayAccumulator => ({
 export const getUserTimesheet = async (userId: number, view: TimesheetView, reference: Date): Promise<TimesheetSummary> => {
   const { start, end, label } = resolveRange(view, reference);
   const dayMap = new Map<string, TimesheetDayAccumulator>();
+  const dayMonthKeys = new Map<string, string>();
 
   const startZoned = toZoned(start);
   const endZoned = toZoned(end);
@@ -154,6 +159,8 @@ export const getUserTimesheet = async (userId: number, view: TimesheetView, refe
   while (cursor <= endZoned) {
     const key = formatDate(cursor, ISO_DATE);
     dayMap.set(key, buildEmptyDay(cursor));
+    const monthKey = getMonthKeyForDate(timesheetDayStart(cursor));
+    dayMonthKeys.set(key, monthKey);
     cursor = addDays(cursor, 1);
   }
 
@@ -261,6 +268,29 @@ export const getUserTimesheet = async (userId: number, view: TimesheetView, refe
 
   const days = Array.from(dayMap.values()).sort((a, b) => a.date.localeCompare(b.date));
 
+  const monthKeys = Array.from(new Set(dayMonthKeys.values())) as string[];
+  if (monthKeys.length) {
+    const facts = await prisma.attendanceMonthFact.findMany({
+      where: { userId, monthKey: { in: monthKeys } }
+    });
+    const tardyByDate = new Map<string, number>();
+    for (const fact of facts) {
+      const snapshot = fact.snapshot as { days?: Array<{ date?: string; tardyMinutes?: unknown }> } | null;
+      if (!snapshot || !Array.isArray(snapshot.days)) continue;
+      for (const day of snapshot.days) {
+        if (!day || typeof day.date !== 'string') continue;
+        const tardyValue = Number(day.tardyMinutes ?? 0);
+        tardyByDate.set(day.date, Number.isFinite(tardyValue) ? tardyValue : 0);
+      }
+    }
+    for (const day of days) {
+      const tardy = tardyByDate.get(day.date);
+      if (typeof tardy === 'number') {
+        day.tardyMinutes = tardy;
+      }
+    }
+  }
+
   const totals = days.reduce<TimesheetTotals>(
     (acc, day) => ({
       activeMinutes: acc.activeMinutes + day.activeMinutes,
@@ -269,9 +299,19 @@ export const getUserTimesheet = async (userId: number, view: TimesheetView, refe
       idleHours: 0,
       breaks: acc.breaks + day.breaks,
       lunches: acc.lunches + day.lunches,
+      tardyMinutes: acc.tardyMinutes + day.tardyMinutes,
       presenceMisses: acc.presenceMisses + day.presenceMisses
     }),
-    { activeMinutes: 0, activeHours: 0, idleMinutes: 0, idleHours: 0, breaks: 0, lunches: 0, presenceMisses: 0 }
+    {
+      activeMinutes: 0,
+      activeHours: 0,
+      idleMinutes: 0,
+      idleHours: 0,
+      breaks: 0,
+      lunches: 0,
+      tardyMinutes: 0,
+      presenceMisses: 0
+    }
   );
 
   totals.activeHours = minutesToHours(totals.activeMinutes);

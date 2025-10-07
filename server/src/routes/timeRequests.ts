@@ -16,6 +16,8 @@ import {
   remainingHoursWithinCap
 } from '../services/timeRequestPolicy';
 import { recordLedgerEntry } from '../services/balances';
+import { triggerAttendanceRecalcForUserRange } from '../services/payroll/attendanceTrigger';
+import { logger } from '../logger';
 
 const timeRequestTypeEnum = z.enum(TIME_REQUEST_TYPES);
 const timeRequestStatusEnum = z.enum(TIME_REQUEST_STATUSES);
@@ -299,6 +301,19 @@ export const approveTimeRequest: (req: AuthenticatedRequest, res: Response) => P
 
     return { updatedRequest, updatedBalance };
   });
+
+  if (result.updatedRequest.type === 'pto') {
+    try {
+      await triggerAttendanceRecalcForUserRange(
+        result.updatedRequest.userId,
+        result.updatedRequest.startDate,
+        result.updatedRequest.endDate,
+        { actorId: req.user!.id }
+      );
+    } catch (error) {
+      logger.error({ error, requestId: id }, 'time_request.attendance_recalc_failed');
+    }
+  }
 
   return res.json(result);
 };

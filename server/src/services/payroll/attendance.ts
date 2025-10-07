@@ -14,6 +14,7 @@ import {
 import { prisma } from '../../prisma';
 import type { AttendanceMonthFact } from '@prisma/client';
 import {
+  MONTH_KEY_FORMAT,
   DATE_KEY_FORMAT,
   MAX_MAKEUP_HOURS_PER_MONTH,
   MAX_TARDY_MINUTES_FOR_BONUS,
@@ -58,6 +59,16 @@ const parseMonthKey = (monthKey: string) => {
   const rangeStart = zonedTimeToUtc(startOfDay(startZoned), PAYROLL_TIME_ZONE);
   const rangeEnd = zonedTimeToUtc(endOfDay(endOfMonth(startZoned)), PAYROLL_TIME_ZONE);
   return { rangeStart, rangeEnd };
+};
+
+export const getMonthKeyForDate = (date: Date) =>
+  formatInTimeZone(date, PAYROLL_TIME_ZONE, MONTH_KEY_FORMAT);
+
+export const getPayrollDayBounds = (date: Date) => {
+  const zoned = utcToZonedTime(date, PAYROLL_TIME_ZONE);
+  const dayStart = zonedTimeToUtc(startOfDay(zoned), PAYROLL_TIME_ZONE);
+  const dayEnd = zonedTimeToUtc(endOfDay(zoned), PAYROLL_TIME_ZONE);
+  return { start: dayStart, end: dayEnd };
 };
 
 const buildDayKey = (date: Date) => formatInTimeZone(date, PAYROLL_TIME_ZONE, DATE_KEY_FORMAT);
@@ -205,15 +216,22 @@ const mapRequestsByUser = (requests: TimeRequest[]) => {
 
 export const recalcMonthlyAttendanceFacts = async (
   monthKey: string,
-  actorId?: number
+  actorId?: number,
+  userIds?: number[]
 ) => {
   const { rangeStart, rangeEnd } = parseMonthKey(monthKey);
-  const users = await prisma.user.findMany({ where: { active: true } });
-  const userIds = users.map((user) => user.id);
+  const where: { active: true; id?: { in: number[] } } | { active: true } = userIds && userIds.length
+    ? { active: true, id: { in: userIds } }
+    : { active: true };
+  const users = await prisma.user.findMany({ where });
+  if (!users.length) {
+    return [] as AttendanceMonthFact[];
+  }
+  const targetUserIds = users.map((user) => user.id);
   const [firstStarts, workedMinutesMap, requests, holidays] = await Promise.all([
-    collectFirstStarts(userIds, rangeStart, rangeEnd),
-    collectWorkedMinutes(userIds, rangeStart, rangeEnd),
-    collectApprovedRequests(userIds, rangeStart, rangeEnd),
+    collectFirstStarts(targetUserIds, rangeStart, rangeEnd),
+    collectWorkedMinutes(targetUserIds, rangeStart, rangeEnd),
+    collectApprovedRequests(targetUserIds, rangeStart, rangeEnd),
     collectHolidays(rangeStart, rangeEnd)
   ]);
 
@@ -295,6 +313,11 @@ export const recalcMonthlyAttendanceFacts = async (
           detail.tardyMinutes = tardy;
           tardyMinutes += tardy;
         }
+      }
+
+      if (detail.tardyMinutes > 0 && (detail.ptoHours > 0 || detail.holiday)) {
+        tardyMinutes -= detail.tardyMinutes;
+        detail.tardyMinutes = 0;
       }
 
       const deficit = Math.max(
@@ -437,4 +460,13 @@ export const listAttendanceFactsForMonth = async (monthKey: string) => {
     orderBy: { userId: 'asc' }
   });
   return { rangeStart, rangeEnd, facts };
+};
+
+export const isAttendanceMonthLocked = async (monthKey: string) => {
+  const periodKeys = [`${monthKey}-A`, `${monthKey}-B`];
+  const periods = await prisma.payrollPeriod.findMany({
+    where: { periodKey: { in: periodKeys } },
+    select: { periodKey: true, status: true }
+  });
+  return periods.some((period) => period.status === 'paid');
 };

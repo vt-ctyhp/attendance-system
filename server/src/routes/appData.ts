@@ -136,6 +136,7 @@ const toTimesheetPeriod = async (userId: number, view: 'weekly' | 'pay_period' |
       idleHours: roundHours(day.idleMinutes),
       breaks: day.breaks,
       lunches: day.lunches,
+      tardyMinutes: day.tardyMinutes,
       presenceMisses: day.presenceMisses
     })),
     totals: {
@@ -143,6 +144,7 @@ const toTimesheetPeriod = async (userId: number, view: 'weekly' | 'pay_period' |
       idleHours: Math.round(summary.totals.idleHours * 100) / 100,
       breaks: summary.totals.breaks,
       lunches: summary.totals.lunches,
+      tardyMinutes: summary.totals.tardyMinutes,
       presenceMisses: summary.totals.presenceMisses
     }
   };
@@ -379,7 +381,8 @@ export const getAppOverview = asyncHandler(async (req, res) => {
     lunchMinutes,
     breaksCount: pauses.filter((pause) => pause.type === 'break').length,
     lunchCount: pauses.filter((pause) => pause.type === 'lunch').length,
-    presenceMisses
+    presenceMisses,
+    tardyMinutes: 0
   };
 
   const [weekly, payPeriod, monthly] = await Promise.all([
@@ -387,6 +390,11 @@ export const getAppOverview = asyncHandler(async (req, res) => {
     toTimesheetPeriod(user.id, 'pay_period', now),
     toTimesheetPeriod(user.id, 'monthly', now)
   ]);
+
+  const todayEntry = weekly.days.find((day) => day.date === todaySnapshot.date);
+  if (todayEntry) {
+    todaySnapshot.tardyMinutes = todayEntry.tardyMinutes;
+  }
 
   const requests = await prisma.timeRequest.findMany({
     where: { userId: user.id },

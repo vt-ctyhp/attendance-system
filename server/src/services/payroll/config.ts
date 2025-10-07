@@ -5,6 +5,8 @@ import { Prisma, type EmployeeCompConfig } from '@prisma/client';
 import { prisma } from '../../prisma';
 import { HttpError } from '../../errors';
 import { PAYROLL_TIME_ZONE, DATE_KEY_FORMAT } from './constants';
+import { collectMonthKeysFromEffectiveDate, triggerAttendanceRecalcForMonths } from './attendanceTrigger';
+import { getMonthKeyForDate } from './attendance';
 
 const WEEKDAY_KEYS = ['0', '1', '2', '3', '4', '5', '6'] as const;
 const DEFAULT_START = '09:00';
@@ -195,7 +197,23 @@ export const getEffectiveConfigForDate = async (
 };
 
 export const upsertEmployeeConfig = async (input: EmployeeCompInput, actorId?: number) => {
+  const priorConfig = await prisma.employeeCompConfig.findFirst({
+    where: { userId: input.userId, effectiveOn: { lte: input.effectiveOn } },
+    orderBy: { effectiveOn: 'desc' }
+  });
+
   const schedule = ensureSchedule(input.schedule);
+  const serializedSchedule = serializeSchedule(schedule);
+
+  let scheduleChanged = true;
+  if (priorConfig) {
+    try {
+      scheduleChanged = JSON.stringify(priorConfig.schedule) !== JSON.stringify(serializedSchedule);
+    } catch (error) {
+      scheduleChanged = true;
+    }
+  }
+
   const data: Prisma.EmployeeCompConfigUncheckedCreateInput = {
     userId: input.userId,
     effectiveOn: input.effectiveOn,
@@ -207,7 +225,7 @@ export const upsertEmployeeConfig = async (input: EmployeeCompInput, actorId?: n
       input.defaultKpiBonus !== undefined && input.defaultKpiBonus !== null
         ? new Decimal(input.defaultKpiBonus)
         : null,
-    schedule: serializeSchedule(schedule),
+    schedule: serializedSchedule,
     accrualEnabled: input.accrualEnabled,
     accrualMethod: input.accrualMethod ?? null,
     ptoBalanceHours: new Decimal(input.ptoBalanceHours),
@@ -223,6 +241,14 @@ export const upsertEmployeeConfig = async (input: EmployeeCompInput, actorId?: n
       });
     }
     throw error;
+  }
+
+  if (scheduleChanged) {
+    const monthKeys = collectMonthKeysFromEffectiveDate(input.effectiveOn);
+    await triggerAttendanceRecalcForMonths(monthKeys, {
+      userIds: [input.userId],
+      actorId
+    });
   }
 
   if (actorId) {
@@ -278,6 +304,8 @@ export const createHoliday = async (name: string, observedOn: Date, actorId?: nu
       }
     });
   }
+  const monthKey = getMonthKeyForDate(observedOn);
+  await triggerAttendanceRecalcForMonths([monthKey], { actorId });
   return holiday;
 };
 
@@ -293,6 +321,10 @@ export const deleteHoliday = async (observedOn: Date, actorId?: number) => {
         details: {}
       }
     });
+  }
+  if (deleted.count > 0) {
+    const monthKey = getMonthKeyForDate(observedOn);
+    await triggerAttendanceRecalcForMonths([monthKey], { actorId });
   }
   return deleted.count > 0;
 };

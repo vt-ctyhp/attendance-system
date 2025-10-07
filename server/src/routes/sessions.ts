@@ -13,6 +13,8 @@ import { issueEmployeeTokens, rotateEmployeeTokens } from '../services/tokenServ
 import { recordAuthEvent } from '../services/audit';
 import { incrementMetric } from '../services/metrics';
 import { logger } from '../logger';
+import { getPayrollDayBounds } from '../services/payroll/attendance';
+import { triggerAttendanceRecalcForUser } from '../services/payroll/attendanceTrigger';
 
 const startSchema = z.object({
   email: z.string().email(),
@@ -226,6 +228,19 @@ export const startSession: RequestHandler = async (req, res) => {
     });
   }
 
+  const now = new Date();
+  const { start: payrollDayStart, end: payrollDayEnd } = getPayrollDayBounds(now);
+  const sessionsToday = await prisma.session.count({
+    where: {
+      userId: user.id,
+      startedAt: {
+        gte: payrollDayStart,
+        lte: payrollDayEnd
+      }
+    }
+  });
+  const shouldRecalcAttendance = sessionsToday === 0;
+
   const session = await prisma.session.create({
     data: {
       userId: user.id,
@@ -250,6 +265,17 @@ export const startSession: RequestHandler = async (req, res) => {
   });
 
   logger.debug({ reqId, userId: user.id, sessionId: session.id, deviceId }, 'session.start.created');
+
+  if (shouldRecalcAttendance) {
+    try {
+      await triggerAttendanceRecalcForUser(user.id, session.startedAt, {
+        awaitCompletion: true,
+        reason: 'session_start'
+      });
+    } catch (error) {
+      logger.error({ error, userId: user.id, sessionId: session.id }, 'session.start.attendance_recalc_failed');
+    }
+  }
 
   return res.status(201).json({
     sessionId: session.id,
