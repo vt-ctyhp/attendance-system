@@ -1,7 +1,7 @@
 import { prisma } from '../src/prisma';
 import { hashPassword } from '../src/auth';
 import { addMinutes, eachDayOfInterval } from 'date-fns';
-import { ensureSchedule } from '../src/services/payroll/config';
+import { ensureSchedule, serializeSchedule } from '../src/services/payroll/config';
 import { PAYROLL_TIME_ZONE } from '../src/services/payroll/constants';
 import { recalcMonthlyBonuses } from '../src/services/payroll/bonuses';
 import { recalcPayrollForPayDate } from '../src/services/payroll/payroll';
@@ -358,7 +358,7 @@ const clearExistingPayrollMonthData = async (
 const seedEmployeeTimesheets = async (
   userId: number,
   plan: EmployeeSeedPlan,
-  schedule: Record<string, ReturnType<typeof ensureSchedule>[string]>,
+  schedule: ReturnType<typeof ensureSchedule>,
   monthKey: string,
   rangeStart: Date,
   rangeEnd: Date,
@@ -377,7 +377,7 @@ const seedEmployeeTimesheets = async (
       continue;
     }
     const weekdayKey = String(zoned.getDay());
-    const scheduleEntry = schedule[weekdayKey];
+    const scheduleEntry = schedule.days[weekdayKey];
 
     const pto = ptoMap.get(dayOfMonth);
     if (pto && scheduleEntry?.enabled) {
@@ -499,6 +499,7 @@ async function seed() {
     await clearExistingPayrollMonthData(user.id, rangeStart, rangeEnd);
 
     const schedule = makeSchedule(employee.scheduleType);
+    const serializedSchedule = serializeSchedule(schedule);
     await prisma.employeeCompConfig.upsert({
       where: { userId_effectiveOn: { userId: user.id, effectiveOn: rangeStart } },
       create: {
@@ -509,7 +510,7 @@ async function seed() {
         quarterlyAttendanceBonus: employee.quarterlyAttendanceBonus,
         kpiEligible: employee.kpiEligible,
         defaultKpiBonus: employee.defaultKpiBonus,
-        schedule,
+        schedule: serializedSchedule,
         accrualEnabled: true,
         accrualMethod: 'standard',
         ptoBalanceHours: 40,
@@ -521,7 +522,7 @@ async function seed() {
         quarterlyAttendanceBonus: employee.quarterlyAttendanceBonus,
         kpiEligible: employee.kpiEligible,
         defaultKpiBonus: employee.defaultKpiBonus,
-        schedule,
+        schedule: serializedSchedule,
         accrualEnabled: true,
         accrualMethod: 'standard',
         ptoBalanceHours: 40,

@@ -52,9 +52,11 @@ import {
   listHolidays,
   upsertEmployeeConfig,
   type WeekdaySchedule,
-  type EmployeeCompSnapshot
+  type EmployeeCompSnapshot,
+  type EmployeeSchedule
 } from '../services/payroll/config';
 import {
+  PAYROLL_TIME_ZONE,
   BONUS_TYPE_KPI,
   BONUS_TYPE_MONTHLY,
   BONUS_TYPE_QUARTERLY
@@ -646,17 +648,17 @@ const formatDayList = (days: number[]) => {
   return ranges.map(([start, end]) => formatDayRange(start, end)).join(', ');
 };
 
-const summarizeSchedule = (schedule: Record<string, WeekdaySchedule>) => {
+const summarizeSchedule = (schedule: unknown) => {
   const normalized = ensureSchedule(schedule);
   const groups = new Map<
     string,
-    { start: string; end: string; hours: number; days: number[] }
+    { start: string; end: string; hours: number; breakMinutes: number; days: number[] }
   >();
-  for (const [dayKey, entry] of Object.entries(normalized)) {
+  for (const [dayKey, entry] of Object.entries(normalized.days)) {
     const day = Number.parseInt(dayKey, 10);
     if (!Number.isFinite(day)) continue;
     if (!entry.enabled) continue;
-    const groupKey = `${entry.start}-${entry.end}-${entry.expectedHours}`;
+    const groupKey = `${entry.start}-${entry.end}-${entry.expectedHours}-${entry.breakMinutes}`;
     const existing = groups.get(groupKey);
     if (existing) {
       existing.days.push(day);
@@ -665,6 +667,7 @@ const summarizeSchedule = (schedule: Record<string, WeekdaySchedule>) => {
         start: entry.start,
         end: entry.end,
         hours: entry.expectedHours,
+        breakMinutes: entry.breakMinutes,
         days: [day]
       });
     }
@@ -677,9 +680,10 @@ const summarizeSchedule = (schedule: Record<string, WeekdaySchedule>) => {
     const hoursLabel = Number.isInteger(group.hours)
       ? `${group.hours}`
       : group.hours.toFixed(2);
-    lines.push(`${formatDayList(group.days)} · ${group.start} – ${group.end} · ${hoursLabel}h`);
+    const breakLabel = group.breakMinutes ? ` · Break ${group.breakMinutes}m` : '';
+    lines.push(`${formatDayList(group.days)} · ${group.start} – ${group.end} · ${hoursLabel}h${breakLabel}`);
   }
-  return lines.join('<br />');
+  return `${lines.join('<br />')}<div class="meta">Timezone: ${escapeHtml(normalized.timeZone)}</div>`;
 };
 
 const computeNextPayrollPayDate = () => {
@@ -5454,21 +5458,23 @@ dashboardRouter.get('/payroll', async (req, res) => {
 
   const scheduleTemplate = (() => {
     const baseSchedule = selectedConfig ? ensureSchedule(selectedConfig.schedule) : ensureSchedule({});
-    let enabledDays = Object.entries(baseSchedule)
+    let enabledDays = Object.entries(baseSchedule.days)
       .filter(([, entry]) => entry.enabled)
       .map(([day]) => day);
     if (!selectedConfig && enabledDays.length === 0) {
       enabledDays = ['1', '2', '3', '4', '5'];
     }
     const templateReference = enabledDays.includes('1')
-      ? baseSchedule['1']
+      ? baseSchedule.days['1']
       : enabledDays.length
-        ? baseSchedule[enabledDays[0] as keyof typeof baseSchedule]
-        : baseSchedule['1'];
+        ? baseSchedule.days[enabledDays[0] as keyof typeof baseSchedule.days]
+        : baseSchedule.days['1'];
     return {
       start: templateReference.start,
       end: templateReference.end,
       hours: templateReference.expectedHours,
+      breakMinutes: templateReference.breakMinutes,
+      timeZone: baseSchedule.timeZone,
       enabledDays
     };
   })();
@@ -5498,6 +5504,8 @@ dashboardRouter.get('/payroll', async (req, res) => {
         .map((config) => {
           const employee = employeeLookup.get(config.userId);
           const scheduleSummary = summarizeSchedule(config.schedule);
+          const profileUrl = `/dashboard/employees/${config.userId}`;
+          const nameLabel = escapeHtml(employee?.name ?? `User ${config.userId}`);
           const kpiLabel = config.kpiEligible
             ? `Eligible${config.defaultKpiBonus ? ` (${formatCurrency(config.defaultKpiBonus)})` : ''}`
             : 'Not eligible';
@@ -5507,7 +5515,7 @@ dashboardRouter.get('/payroll', async (req, res) => {
           return `
             <tr>
               <td>
-                ${escapeHtml(employee?.name ?? `User ${config.userId}`)}
+                <a href="${profileUrl}">${nameLabel}</a>
                 <div class="meta">${escapeHtml(employee?.email ?? '')}</div>
               </td>
               <td>${escapeHtml(formatFullDate(config.effectiveOn))}</td>
@@ -5854,7 +5862,7 @@ dashboardRouter.get('/payroll', async (req, res) => {
                 </div>
               </div>
               <div class="card__body">
-                <form data-async="true" data-kind="compensation" data-success-message="Compensation saved." class="compensation-form">
+                <form data-async="true" data-kind="compensation" data-success-message="Compensation saved." class="compensation-form" data-default-timezone="${escapeHtml(scheduleTemplate.timeZone)}">
                   <div class="compensation-form__columns">
                     <div class="compensation-form__column">
                       <section class="compensation-group">
@@ -6201,10 +6209,12 @@ dashboardRouter.get('/payroll', async (req, res) => {
                   enabled: input.checked,
                   start: startValue,
                   end: endValue,
+                  breakMinutes: 0,
                   expectedHours: Number.isFinite(hoursValue) ? Math.max(0, hoursValue) : 8
                 };
               });
-              return schedule;
+              const timeZone = form.getAttribute('data-default-timezone') || '${PAYROLL_TIME_ZONE}';
+              return { timeZone, days: schedule, version: 2 };
             };
 
             const asyncForms = document.querySelectorAll('form[data-async="true"]');
@@ -8021,6 +8031,501 @@ dashboardRouter.get(['/payroll/period/:payDate', '/payroll/period/:payDate/emplo
             }
           })();
         </script>
+      </body>
+    </html>
+  `;
+
+  res.type('html').send(html);
+});
+
+dashboardRouter.get('/employees/:employeeId', async (req, res) => {
+  const employeeIdParam = Number.parseInt(req.params.employeeId ?? '', 10);
+  if (!Number.isFinite(employeeIdParam) || employeeIdParam <= 0) {
+    throw HttpError.notFound('Employee not found');
+  }
+
+  const employee = await prisma.user.findUnique({ where: { id: employeeIdParam } });
+  if (!employee || employee.role !== 'employee') {
+    throw HttpError.notFound('Employee not found');
+  }
+
+  const configs = await listEmployeeConfigs(employee.id);
+  const latestConfig = configs[0] ?? null;
+  const scheduleSnapshot = latestConfig ? ensureSchedule(latestConfig.schedule) : ensureSchedule({});
+  const defaultEffectiveDate = formatIsoDate(zonedStartOfDay(new Date()));
+
+  const toNumberInput = (value: number | null | undefined) =>
+    value !== null && value !== undefined && Number.isFinite(value) ? String(value) : '';
+
+  const compensationHistoryRows = configs.length
+    ? configs
+        .map((config) => {
+          const kpiLabel = config.kpiEligible
+            ? `Eligible${config.defaultKpiBonus ? ` (${formatCurrency(config.defaultKpiBonus)})` : ''}`
+            : 'Not eligible';
+          const accrualLabel = config.accrualEnabled
+            ? `Enabled${config.accrualMethod ? ` – ${escapeHtml(config.accrualMethod)}` : ''}`
+            : 'Disabled';
+          return `
+            <tr>
+              <td>${escapeHtml(formatFullDate(config.effectiveOn))}</td>
+              <td>${formatCurrency(config.baseSemiMonthlySalary)}</td>
+              <td>${formatCurrency(config.monthlyAttendanceBonus)}</td>
+              <td>${formatCurrency(config.quarterlyAttendanceBonus)}</td>
+              <td>${escapeHtml(kpiLabel)}</td>
+              <td>${escapeHtml(accrualLabel)}</td>
+            </tr>
+          `;
+        })
+        .join('\n')
+    : '<tr><td colspan="6" class="empty">No compensation versions recorded yet.</td></tr>';
+
+  const scheduleHistoryRows = configs.length
+    ? configs
+        .map((config) => {
+          const summary = summarizeSchedule(config.schedule);
+          return `
+            <tr>
+              <td>${escapeHtml(formatFullDate(config.effectiveOn))}</td>
+              <td>${summary}</td>
+            </tr>
+          `;
+        })
+        .join('\n')
+    : '<tr><td colspan="2" class="empty">No schedule versions recorded yet.</td></tr>';
+
+  const dayKeys = ['0', '1', '2', '3', '4', '5', '6'] as const;
+  const scheduleDayRows = dayKeys
+    .map((dayKey) => {
+      const entry = scheduleSnapshot.days[dayKey];
+      const startValue = escapeHtml(entry.start);
+      const endValue = escapeHtml(entry.end);
+      const breakValue = toNumberInput(entry.breakMinutes);
+      const checked = entry.enabled ? ' checked' : '';
+      return `
+        <tr data-day-row="${dayKey}">
+          <th scope="row">${escapeHtml(weekdayLabels[Number(dayKey)])}</th>
+          <td><input type="checkbox" name="day-enabled" data-day="${dayKey}"${checked} /></td>
+          <td><input type="time" name="day-start" data-day="${dayKey}" value="${startValue}" required /></td>
+          <td><input type="time" name="day-end" data-day="${dayKey}" value="${endValue}" required /></td>
+          <td><input type="number" name="day-break" data-day="${dayKey}" value="${breakValue}" min="0" step="5" /></td>
+        </tr>
+      `;
+    })
+    .join('\n');
+
+  const latestEffectiveInput = latestConfig ? formatIsoDate(latestConfig.effectiveOn) : defaultEffectiveDate;
+  const profilePayload = {
+    user: {
+      id: employee.id,
+      name: employee.name,
+      email: employee.email,
+      role: employee.role,
+      active: employee.active
+    },
+    latestConfig: latestConfig
+      ? {
+          effectiveOn: latestEffectiveInput,
+          baseSemiMonthlySalary: latestConfig.baseSemiMonthlySalary,
+          monthlyAttendanceBonus: latestConfig.monthlyAttendanceBonus,
+          quarterlyAttendanceBonus: latestConfig.quarterlyAttendanceBonus,
+          kpiEligible: latestConfig.kpiEligible,
+          defaultKpiBonus: latestConfig.defaultKpiBonus,
+          accrualEnabled: latestConfig.accrualEnabled,
+          accrualMethod: latestConfig.accrualMethod,
+          ptoBalanceHours: latestConfig.ptoBalanceHours,
+          utoBalanceHours: latestConfig.utoBalanceHours,
+          schedule: scheduleSnapshot
+        }
+      : null
+  };
+
+  const profileJson = JSON.stringify(profilePayload).replace(/</g, '\\u003c');
+  const statusChip = employee.active
+    ? '<span class="status-chip status-chip--approved">Active</span>'
+    : '<span class="status-chip status-chip--warn">Inactive</span>';
+  const employeeTitle = `${escapeHtml(employee.name)} – Employee Profile`;
+  const compensationBaseValue = toNumberInput(latestConfig?.baseSemiMonthlySalary);
+  const compensationMonthlyValue = toNumberInput(latestConfig?.monthlyAttendanceBonus);
+  const compensationQuarterlyValue = toNumberInput(latestConfig?.quarterlyAttendanceBonus);
+  const compensationKpiChecked = latestConfig?.kpiEligible ? ' checked' : '';
+  const compensationKpiValue = toNumberInput(latestConfig?.defaultKpiBonus ?? null);
+  const scheduleTimeZoneValue = escapeHtml(scheduleSnapshot.timeZone);
+
+  const html = `
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <title>${employeeTitle}</title>
+        <style>${baseStyles}</style>
+        <style>
+          body.dashboard--employee-profile .profile-grid { display: grid; gap: 1.5rem; }
+          body.dashboard--employee-profile .profile-summary { display: flex; flex-wrap: wrap; gap: 0.75rem; font-size: 0.95rem; color: #475569; }
+          body.dashboard--employee-profile .profile-summary strong { color: #0f172a; }
+          body.dashboard--employee-profile .profile-summary span { display: inline-flex; align-items: center; gap: 0.35rem; }
+          body.dashboard--employee-profile .profile-form { display: grid; gap: 1.25rem; }
+          body.dashboard--employee-profile .profile-form__grid { display: grid; gap: 0.9rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+          body.dashboard--employee-profile .profile-form label { display: grid; gap: 0.35rem; font-size: 0.95rem; color: #0f172a; }
+          body.dashboard--employee-profile .profile-form label span { font-weight: 600; }
+          body.dashboard--employee-profile .profile-form__footer { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; justify-content: flex-end; }
+          body.dashboard--employee-profile .profile-form__footer .form-error { flex: 1; margin: 0; min-height: 1rem; color: #dc2626; font-size: 0.9rem; }
+          body.dashboard--employee-profile .profile-schedule-table { width: 100%; border-collapse: collapse; }
+          body.dashboard--employee-profile .profile-schedule-table th,
+          body.dashboard--employee-profile .profile-schedule-table td { padding: 0.5rem 0.75rem; border-bottom: 1px solid rgba(148,163,184,0.18); text-align: left; }
+          body.dashboard--employee-profile .profile-schedule-table td:nth-child(2) { text-align: center; }
+          body.dashboard--employee-profile .profile-schedule-table input[type='time'] { width: 100%; }
+          body.dashboard--employee-profile .profile-schedule-table input[type='number'] { width: 100%; }
+        </style>
+      </head>
+      <body class="dashboard dashboard--employee-profile">
+        ${renderNav('payroll')}
+        <main class="page-shell">
+          <header class="page-header">
+            <div class="page-header__content">
+              <p class="page-header__eyebrow">Employee</p>
+              <h1 class="page-header__title">${escapeHtml(employee.name)}</h1>
+              <div class="profile-summary">
+                <span><strong>Email:</strong> ${escapeHtml(employee.email)}</span>
+                <span><strong>Status:</strong> ${statusChip}</span>
+              </div>
+            </div>
+            <div class="page-header__meta">
+              <a class="button button-secondary" href="/dashboard/payroll">Back to Payroll</a>
+            </div>
+          </header>
+
+          <section class="card">
+            <div class="card__header">
+              <div>
+                <h2 class="card__title">New Compensation Version</h2>
+                <p class="card__subtitle">Create a new compensation record with an effective date. Prior versions remain archived.</p>
+              </div>
+            </div>
+            <div class="card__body">
+              <form class="profile-form" data-profile-form="compensation">
+                <div class="profile-form__grid">
+                  <label>
+                    <span>Effective On</span>
+                    <input type="date" name="effectiveOn" value="${latestEffectiveInput}" required />
+                  </label>
+                  <label>
+                    <span>Semi-Monthly Base</span>
+                    <input type="number" name="baseSemiMonthlySalary" min="0" step="0.01" value="${compensationBaseValue}" required />
+                  </label>
+                  <label>
+                    <span>Monthly Attendance Bonus</span>
+                    <input type="number" name="monthlyAttendanceBonus" min="0" step="0.01" value="${compensationMonthlyValue}" required />
+                  </label>
+                  <label>
+                    <span>Quarterly Attendance Bonus</span>
+                    <input type="number" name="quarterlyAttendanceBonus" min="0" step="0.01" value="${compensationQuarterlyValue}" required />
+                  </label>
+                  <label class="checkbox-field">
+                    <input type="checkbox" name="kpiEligible"${compensationKpiChecked} />
+                    <span>KPI Eligible</span>
+                  </label>
+                  <label>
+                    <span>Default KPI Bonus</span>
+                    <input type="number" name="defaultKpiBonus" min="0" step="0.01" value="${compensationKpiValue}" />
+                  </label>
+                </div>
+                <div class="profile-form__footer">
+                  <p class="form-error" data-error></p>
+                  <button type="submit" class="button primary">Save Compensation Version</button>
+                </div>
+              </form>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="card__header">
+              <div>
+                <h2 class="card__title">New Schedule Version</h2>
+                <p class="card__subtitle">Update the weekly schedule pattern with a new effective date.</p>
+              </div>
+            </div>
+            <div class="card__body">
+              <form class="profile-form" data-profile-form="schedule" data-default-timezone="${scheduleTimeZoneValue}">
+                <div class="profile-form__grid">
+                  <label>
+                    <span>Effective On</span>
+                    <input type="date" name="effectiveOn" value="${defaultEffectiveDate}" required />
+                  </label>
+                  <label>
+                    <span>Timezone</span>
+                    <input type="text" name="scheduleTimeZone" value="${scheduleTimeZoneValue}" required />
+                  </label>
+                </div>
+                <div class="table-scroll">
+                  <table class="profile-schedule-table">
+                    <thead>
+                      <tr>
+                        <th>Day</th>
+                        <th>Enabled</th>
+                        <th>Start</th>
+                        <th>End</th>
+                        <th>Unpaid Break (min)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${scheduleDayRows}
+                    </tbody>
+                  </table>
+                </div>
+                <div class="profile-form__footer">
+                  <p class="form-error" data-error></p>
+                  <button type="submit" class="button primary">Save Schedule Version</button>
+                </div>
+              </form>
+            </div>
+          </section>
+
+          <div class="cards-grid">
+            <section class="card card--table">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Compensation History</h2>
+                  <p class="card__subtitle">Most recent versions first.</p>
+                </div>
+              </div>
+              <div class="card__body">
+                <div class="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Effective On</th>
+                        <th>Base</th>
+                        <th>Monthly Bonus</th>
+                        <th>Quarterly Bonus</th>
+                        <th>KPI</th>
+                        <th>Accrual</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${compensationHistoryRows}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+
+            <section class="card card--table">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Schedule History</h2>
+                  <p class="card__subtitle">Summaries include the configured timezone.</p>
+                </div>
+              </div>
+              <div class="card__body">
+                <div class="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Effective On</th>
+                        <th>Schedule</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${scheduleHistoryRows}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <script id="employee-profile-data" type="application/json">${profileJson}</script>
+          <script>
+            (() => {
+              const dataElement = document.getElementById('employee-profile-data');
+              if (!dataElement) return;
+              let profile;
+              try {
+                profile = JSON.parse(dataElement.textContent || '{}');
+              } catch (error) {
+                console.error('Unable to parse profile data', error);
+                return;
+              }
+
+              const DEFAULT_TIME_ZONE = '${PAYROLL_TIME_ZONE}';
+              const DAY_KEYS = ['0', '1', '2', '3', '4', '5', '6'];
+
+              const buildEmptySchedule = () => {
+                const days = {};
+                DAY_KEYS.forEach((day) => {
+                  days[day] = {
+                    enabled: false,
+                    start: '09:00',
+                    end: '17:00',
+                    breakMinutes: 0,
+                    expectedHours: 8
+                  };
+                });
+                return { version: 2, timeZone: DEFAULT_TIME_ZONE, days };
+              };
+
+              const latest = profile.latestConfig;
+              const cloneSchedule = (schedule) => JSON.parse(JSON.stringify(schedule));
+              const latestSchedule = latest?.schedule ? cloneSchedule(latest.schedule) : buildEmptySchedule();
+
+              const computeExpectedHours = (start, end, breakMinutes) => {
+                const parse = (value) => {
+                  const parts = value.split(':');
+                  if (parts.length !== 2) return null;
+                  const hours = Number.parseInt(parts[0], 10);
+                  const minutes = Number.parseInt(parts[1], 10);
+                  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+                  return hours * 60 + minutes;
+                };
+                const startTotal = parse(start);
+                const endTotal = parse(end);
+                if (startTotal === null || endTotal === null) return 0;
+                const span = Math.max(0, endTotal - startTotal);
+                const net = Math.max(0, span - Math.max(0, breakMinutes));
+                return Math.round((net / 60) * 100) / 100;
+              };
+
+              const buildBasePayload = () => ({
+                userId: profile.user.id,
+                baseSemiMonthlySalary: Number(latest?.baseSemiMonthlySalary ?? 0),
+                monthlyAttendanceBonus: Number(latest?.monthlyAttendanceBonus ?? 0),
+                quarterlyAttendanceBonus: Number(latest?.quarterlyAttendanceBonus ?? 0),
+                kpiEligible: Boolean(latest?.kpiEligible ?? false),
+                defaultKpiBonus: latest?.defaultKpiBonus ?? null,
+                schedule: latest?.schedule ? cloneSchedule(latest.schedule) : buildEmptySchedule(),
+                accrualEnabled: Boolean(latest?.accrualEnabled ?? false),
+                accrualMethod: latest?.accrualMethod ?? null,
+                ptoBalanceHours: Number(latest?.ptoBalanceHours ?? 0),
+                utoBalanceHours: Number(latest?.utoBalanceHours ?? 0)
+              });
+
+              const toFiniteNumber = (value, fallback = 0) => {
+                const parsed = Number.parseFloat(value ?? '');
+                return Number.isFinite(parsed) ? parsed : fallback;
+              };
+
+              const formatNumberForInput = (value) => {
+                if (value === null || value === undefined) {
+                  return '';
+                }
+                const parsed = Number(value);
+                return Number.isFinite(parsed) ? String(parsed) : '';
+              };
+
+              const forms = document.querySelectorAll('[data-profile-form]');
+              forms.forEach((form) => {
+                form.addEventListener('submit', async (event) => {
+                  event.preventDefault();
+                  const kind = form.getAttribute('data-profile-form');
+                  const submitter = event.submitter instanceof HTMLButtonElement ? event.submitter : null;
+                  const errorEl = form.querySelector('[data-error]');
+                  if (errorEl) errorEl.textContent = '';
+                  if (submitter) submitter.disabled = true;
+
+                  try {
+                    const payload = buildBasePayload();
+                    const effectiveInput = form.querySelector('input[name="effectiveOn"]');
+                    if (!(effectiveInput instanceof HTMLInputElement) || !effectiveInput.value) {
+                      throw new Error('Effective date is required.');
+                    }
+                    payload.effectiveOn = effectiveInput.value;
+
+                    if (kind === 'compensation') {
+                      const baseInput = form.querySelector('input[name="baseSemiMonthlySalary"]');
+                      const monthlyInput = form.querySelector('input[name="monthlyAttendanceBonus"]');
+                      const quarterlyInput = form.querySelector('input[name="quarterlyAttendanceBonus"]');
+                      const kpiCheckbox = form.querySelector('input[name="kpiEligible"]');
+                      const kpiBonusInput = form.querySelector('input[name="defaultKpiBonus"]');
+
+                      payload.baseSemiMonthlySalary = toFiniteNumber(baseInput?.value, 0);
+                      payload.monthlyAttendanceBonus = toFiniteNumber(monthlyInput?.value, 0);
+                      payload.quarterlyAttendanceBonus = toFiniteNumber(quarterlyInput?.value, 0);
+                      payload.kpiEligible = kpiCheckbox instanceof HTMLInputElement ? kpiCheckbox.checked : false;
+                      if (payload.kpiEligible) {
+                        payload.defaultKpiBonus = toFiniteNumber(kpiBonusInput?.value, 0);
+                      } else {
+                        payload.defaultKpiBonus = null;
+                      }
+                    } else if (kind === 'schedule') {
+                      const timeZoneInput = form.querySelector('input[name="scheduleTimeZone"]');
+                      const timeZone = timeZoneInput instanceof HTMLInputElement && timeZoneInput.value.trim()
+                        ? timeZoneInput.value.trim()
+                        : latestSchedule.timeZone || DEFAULT_TIME_ZONE;
+
+                      const days = {};
+                      DAY_KEYS.forEach((day) => {
+                        const enabledInput = form.querySelector("input[name='day-enabled'][data-day='" + day + "']");
+                        const startInput = form.querySelector("input[name='day-start'][data-day='" + day + "']");
+                        const endInput = form.querySelector("input[name='day-end'][data-day='" + day + "']");
+                        const breakInput = form.querySelector("input[name='day-break'][data-day='" + day + "']");
+
+                        const enabled = enabledInput instanceof HTMLInputElement ? enabledInput.checked : false;
+                        const start = startInput instanceof HTMLInputElement && startInput.value ? startInput.value : '09:00';
+                        const end = endInput instanceof HTMLInputElement && endInput.value ? endInput.value : '17:00';
+                        const breakMinutes = Number.parseInt(breakInput?.value ?? '0', 10);
+
+                        days[day] = {
+                          enabled,
+                          start,
+                          end,
+                          breakMinutes: Number.isFinite(breakMinutes) ? Math.max(0, breakMinutes) : 0,
+                          expectedHours: computeExpectedHours(start, end, Number.isFinite(breakMinutes) ? Math.max(0, breakMinutes) : 0)
+                        };
+                      });
+
+                      payload.schedule = { version: 2, timeZone, days };
+                    }
+
+                    const response = await fetch('/api/payroll/config', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(payload),
+                      credentials: 'same-origin'
+                    });
+
+                    if (!response.ok) {
+                      let message = 'Unable to save changes.';
+                      try {
+                        const data = await response.json();
+                        if (data && typeof data.error === 'string') message = data.error;
+                        else if (data && typeof data.message === 'string') message = data.message;
+                      } catch (err) {}
+                      throw new Error(message);
+                    }
+
+                    window.location.reload();
+                  } catch (error) {
+                    if (errorEl) {
+                      errorEl.textContent = error instanceof Error ? error.message : 'Unable to save changes.';
+                    }
+                    if (submitter) submitter.disabled = false;
+                  }
+                });
+              });
+
+              const compensationForm = document.querySelector('[data-profile-form="compensation"]');
+              if (compensationForm) {
+                const kpiCheckbox = compensationForm.querySelector('input[name="kpiEligible"]');
+                const kpiInput = compensationForm.querySelector('input[name="defaultKpiBonus"]');
+                const syncKpi = () => {
+                  if (!(kpiInput instanceof HTMLInputElement)) return;
+                  const enabled = kpiCheckbox instanceof HTMLInputElement ? kpiCheckbox.checked : false;
+                  kpiInput.disabled = !enabled;
+                  if (!enabled) {
+                    kpiInput.value = '';
+                  } else if (!kpiInput.value && latest) {
+                    kpiInput.value = formatNumberForInput(latest.defaultKpiBonus ?? 0);
+                  }
+                };
+                syncKpi();
+                if (kpiCheckbox instanceof HTMLInputElement) {
+                  kpiCheckbox.addEventListener('change', syncKpi);
+                }
+              }
+            })();
+          </script>
+        </main>
       </body>
     </html>
   `;

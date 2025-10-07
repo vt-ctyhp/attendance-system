@@ -1,16 +1,132 @@
 import { addDays, isAfter } from 'date-fns';
 import { zonedTimeToUtc, formatInTimeZone } from 'date-fns-tz';
 import { Decimal } from '@prisma/client/runtime/library';
-import type { Prisma, EmployeeCompConfig } from '@prisma/client';
+import { Prisma, type EmployeeCompConfig } from '@prisma/client';
 import { prisma } from '../../prisma';
 import { PAYROLL_TIME_ZONE, DATE_KEY_FORMAT } from './constants';
+
+const WEEKDAY_KEYS = ['0', '1', '2', '3', '4', '5', '6'] as const;
+const DEFAULT_START = '09:00';
+const DEFAULT_END = '17:00';
+const DEFAULT_BREAK_MINUTES = 0;
+const DEFAULT_EXPECTED_HOURS = 8;
+
+type UnknownRecord = Record<string, unknown>;
+
+const isPlainObject = (value: unknown): value is UnknownRecord =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const clampMinutes = (value: unknown) => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.max(0, Math.round(value));
+  }
+  if (typeof value === 'string') {
+    const parsed = Number.parseFloat(value);
+    if (Number.isFinite(parsed)) {
+      return Math.max(0, Math.round(parsed));
+    }
+  }
+  return DEFAULT_BREAK_MINUTES;
+};
+
+const sanitizeTime = (value: unknown) => {
+  if (typeof value !== 'string') {
+    return DEFAULT_START;
+  }
+  const trimmed = value.trim();
+  if (/^\d{2}:\d{2}$/.test(trimmed)) {
+    return trimmed;
+  }
+  return DEFAULT_START;
+};
+
+const computeExpectedHours = (start: string, end: string, breakMinutes: number, fallback?: unknown) => {
+  if (typeof fallback === 'number' && Number.isFinite(fallback)) {
+    return Number(fallback);
+  }
+  const [startHours, startMinutes] = start.split(':').map((part) => Number.parseInt(part, 10));
+  const [endHours, endMinutes] = end.split(':').map((part) => Number.parseInt(part, 10));
+  if ([startHours, startMinutes, endHours, endMinutes].some((value) => !Number.isFinite(value))) {
+    return DEFAULT_EXPECTED_HOURS;
+  }
+  const startTotal = startHours * 60 + startMinutes;
+  const endTotal = endHours * 60 + endMinutes;
+  const rawMinutes = endTotal - startTotal;
+  if (rawMinutes <= 0) {
+    return DEFAULT_EXPECTED_HOURS;
+  }
+  const netMinutes = Math.max(0, rawMinutes - breakMinutes);
+  return Math.round((netMinutes / 60) * 100) / 100;
+};
 
 export type WeekdaySchedule = {
   enabled: boolean;
   start: string;
   end: string;
+  breakMinutes: number;
   expectedHours: number;
 };
+
+export type EmployeeSchedule = {
+  version: 2;
+  timeZone: string;
+  days: Record<string, WeekdaySchedule>;
+};
+
+const DEFAULT_SCHEDULE: EmployeeSchedule = {
+  version: 2,
+  timeZone: PAYROLL_TIME_ZONE,
+  days: WEEKDAY_KEYS.reduce<Record<string, WeekdaySchedule>>((acc, key) => {
+    acc[key] = {
+      enabled: false,
+      start: DEFAULT_START,
+      end: DEFAULT_END,
+      breakMinutes: DEFAULT_BREAK_MINUTES,
+      expectedHours: DEFAULT_EXPECTED_HOURS
+    };
+    return acc;
+  }, {})
+};
+
+const normalizeDay = (value: unknown): WeekdaySchedule => {
+  const raw = isPlainObject(value) ? (value as UnknownRecord) : {};
+  const enabled = Boolean(raw.enabled);
+  const start = sanitizeTime(raw.start ?? DEFAULT_START);
+  const end = sanitizeTime(raw.end ?? DEFAULT_END);
+  const breakMinutes = clampMinutes(raw.breakMinutes ?? raw.unpaidBreakMinutes);
+  const expectedHours = computeExpectedHours(start, end, breakMinutes, raw.expectedHours);
+  return { enabled, start, end, breakMinutes, expectedHours };
+};
+
+export const ensureSchedule = (schedule: unknown): EmployeeSchedule => {
+  if (!isPlainObject(schedule)) {
+    return { ...DEFAULT_SCHEDULE, days: { ...DEFAULT_SCHEDULE.days } };
+  }
+
+  const source = schedule as UnknownRecord;
+  const timeZoneCandidate = typeof source.timeZone === 'string' && source.timeZone.trim().length
+    ? source.timeZone.trim()
+    : PAYROLL_TIME_ZONE;
+
+  const daysSource = isPlainObject(source.days) ? (source.days as UnknownRecord) : source;
+
+  const days: Record<string, WeekdaySchedule> = {};
+  for (const key of WEEKDAY_KEYS) {
+    days[key] = normalizeDay(daysSource[key]);
+  }
+
+  return {
+    version: 2,
+    timeZone: timeZoneCandidate,
+    days
+  };
+};
+
+export const serializeSchedule = (schedule: EmployeeSchedule) => ({
+  version: 2,
+  timeZone: schedule.timeZone,
+  days: schedule.days
+});
 
 export type EmployeeCompInput = {
   userId: number;
@@ -20,7 +136,7 @@ export type EmployeeCompInput = {
   quarterlyAttendanceBonus: number;
   kpiEligible: boolean;
   defaultKpiBonus?: number | null;
-  schedule: Record<string, WeekdaySchedule>;
+  schedule: EmployeeSchedule;
   accrualEnabled: boolean;
   accrualMethod?: string | null;
   ptoBalanceHours: number;
@@ -31,28 +147,6 @@ export type EmployeeCompSnapshot = EmployeeCompInput & {
   id: number;
   createdAt: Date;
   updatedAt: Date;
-};
-
-const WEEKDAY_KEYS = ['0', '1', '2', '3', '4', '5', '6'] as const;
-
-export const ensureSchedule = (
-  schedule: Record<string, WeekdaySchedule>
-): Record<string, WeekdaySchedule> => {
-  const result: Record<string, WeekdaySchedule> = {};
-  for (const key of WEEKDAY_KEYS) {
-    const raw = schedule[key];
-    if (!raw) {
-      result[key] = { enabled: false, start: '09:00', end: '17:00', expectedHours: 8 };
-      continue;
-    }
-    result[key] = {
-      enabled: Boolean(raw.enabled),
-      start: raw.start ?? '09:00',
-      end: raw.end ?? '17:00',
-      expectedHours: Number.isFinite(raw.expectedHours) ? Number(raw.expectedHours) : 8
-    };
-  }
-  return result;
 };
 
 const toSnapshot = (
@@ -67,7 +161,7 @@ const toSnapshot = (
   kpiEligible: config.kpiEligible,
   defaultKpiBonus:
     config.defaultKpiBonus !== null ? Number(config.defaultKpiBonus) : null,
-  schedule: ensureSchedule(config.schedule as Record<string, WeekdaySchedule>),
+  schedule: ensureSchedule(config.schedule),
   accrualEnabled: config.accrualEnabled,
   accrualMethod: config.accrualMethod,
   ptoBalanceHours: Number(config.ptoBalanceHours),
@@ -112,18 +206,23 @@ export const upsertEmployeeConfig = async (input: EmployeeCompInput, actorId?: n
       input.defaultKpiBonus !== undefined && input.defaultKpiBonus !== null
         ? new Decimal(input.defaultKpiBonus)
         : null,
-    schedule,
+    schedule: serializeSchedule(schedule),
     accrualEnabled: input.accrualEnabled,
     accrualMethod: input.accrualMethod ?? null,
     ptoBalanceHours: new Decimal(input.ptoBalanceHours),
     utoBalanceHours: new Decimal(input.utoBalanceHours)
   };
 
-  await prisma.employeeCompConfig.upsert({
-    where: { userId_effectiveOn: { userId: input.userId, effectiveOn: input.effectiveOn } },
-    create: data,
-    update: data
-  });
+  try {
+    await prisma.employeeCompConfig.create({ data });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      const conflict = new Error('Configuration already exists for this effective date.');
+      conflict.name = 'EmployeeConfigConflictError';
+      throw conflict;
+    }
+    throw error;
+  }
 
   if (actorId) {
     await prisma.payrollAuditLog.create({

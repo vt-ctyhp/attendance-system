@@ -9,7 +9,8 @@ import {
   upsertEmployeeConfig,
   createHoliday,
   listHolidays,
-  deleteHoliday
+  deleteHoliday,
+  ensureSchedule
 } from '../services/payroll/config';
 import {
   listAttendanceFactsForMonth,
@@ -31,12 +32,20 @@ payrollRouter.use(authenticate, requireRole(['admin']));
 
 const scheduleDaySchema = z.object({
   enabled: z.boolean().optional().default(false),
-  start: z.string().default('09:00'),
-  end: z.string().default('17:00'),
-  expectedHours: z.number().finite().nonnegative().default(8)
+  start: z.string().optional().default('09:00'),
+  end: z.string().optional().default('17:00'),
+  expectedHours: z.number().finite().nonnegative().optional(),
+  breakMinutes: z.number().finite().nonnegative().optional(),
+  unpaidBreakMinutes: z.number().finite().nonnegative().optional()
 });
 
-const scheduleSchema = z.record(scheduleDaySchema).default({});
+const scheduleSchema = z
+  .object({
+    timeZone: z.string().min(1),
+    days: z.record(scheduleDaySchema)
+  })
+  .or(z.record(scheduleDaySchema))
+  .default({});
 
 const datePreprocess = z.preprocess((value) => {
   if (value instanceof Date) return value;
@@ -87,7 +96,7 @@ payrollRouter.post(
         quarterlyAttendanceBonus: input.quarterlyAttendanceBonus,
         kpiEligible: input.kpiEligible,
         defaultKpiBonus: input.defaultKpiBonus,
-        schedule: input.schedule,
+        schedule: ensureSchedule(input.schedule),
         accrualEnabled: input.accrualEnabled,
         accrualMethod: input.accrualMethod,
         ptoBalanceHours: input.ptoBalanceHours,

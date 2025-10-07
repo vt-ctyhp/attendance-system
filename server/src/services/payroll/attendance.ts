@@ -101,9 +101,9 @@ const sumDayHours = (requests: TimeRequest[], start: Date, end: Date) => {
 
 const buildScheduleLookup = (config: EmployeeCompSnapshot | null, weekday: number) => {
   if (!config) return null;
-  const normalized = ensureSchedule(config.schedule as Record<string, WeekdaySchedule>);
-  const key = String(weekday) as keyof typeof normalized;
-  return normalized[key] ?? null;
+  const normalized = ensureSchedule(config.schedule);
+  const key = String(weekday) as keyof typeof normalized.days;
+  return normalized.days[key] ?? null;
 };
 
 const computeTardyMinutes = (scheduledStart: string, actualStart: Date) => {
