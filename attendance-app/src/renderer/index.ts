@@ -1403,12 +1403,16 @@ const resolveHeroAvatarStatus = (): HeroAvatarStatus => {
   }
 
   if (state.session.status === 'working') {
-    if (state.today.presenceMisses > 0) {
+    if (presenceEnabled && state.today.presenceMisses > 0) {
       return 'PresenceMissed';
     }
 
     const nextPresence = state.session.nextPresenceCheck;
-    if (nextPresence && nextPresence.getTime() <= Date.now()) {
+    if (
+      presenceEnabled &&
+      nextPresence &&
+      nextPresence.getTime() <= Date.now()
+    ) {
       return 'PresenceDue';
     }
 
@@ -2135,7 +2139,7 @@ const hydrateFromServer = async ({ silent = false }: { silent?: boolean } = {}) 
       window.attendance.getSettings()
     ]);
 
-    presenceEnabled = Boolean(bootstrap.presenceEnabled ?? true);
+    presenceEnabled = bootstrap.presenceEnabled === true;
     applyPresenceVisibility();
     registerPresenceListeners();
 
