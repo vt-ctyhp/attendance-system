@@ -3,6 +3,7 @@ import { zonedTimeToUtc, formatInTimeZone } from 'date-fns-tz';
 import { Decimal } from '@prisma/client/runtime/library';
 import { Prisma, type EmployeeCompConfig } from '@prisma/client';
 import { prisma } from '../../prisma';
+import { HttpError } from '../../errors';
 import { PAYROLL_TIME_ZONE, DATE_KEY_FORMAT } from './constants';
 
 const WEEKDAY_KEYS = ['0', '1', '2', '3', '4', '5', '6'] as const;
@@ -217,9 +218,9 @@ export const upsertEmployeeConfig = async (input: EmployeeCompInput, actorId?: n
     await prisma.employeeCompConfig.create({ data });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-      const conflict = new Error('Configuration already exists for this effective date.');
-      conflict.name = 'EmployeeConfigConflictError';
-      throw conflict;
+      throw HttpError.conflict('Configuration already exists for this effective date.', {
+        field: 'effectiveOn'
+      });
     }
     throw error;
   }
