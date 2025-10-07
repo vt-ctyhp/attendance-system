@@ -1,30 +1,107 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.resolveActiveConfigForRange = exports.getAllConfigsThrough = exports.deleteHoliday = exports.createHoliday = exports.listHolidays = exports.deleteFutureConfigs = exports.upsertEmployeeConfig = exports.getEffectiveConfigForDate = exports.listEmployeeConfigs = exports.ensureSchedule = void 0;
+exports.resolveActiveConfigForRange = exports.getAllConfigsThrough = exports.deleteHoliday = exports.createHoliday = exports.listHolidays = exports.deleteFutureConfigs = exports.upsertEmployeeConfig = exports.getEffectiveConfigForDate = exports.listEmployeeConfigs = exports.serializeSchedule = exports.ensureSchedule = void 0;
 const date_fns_1 = require("date-fns");
 const date_fns_tz_1 = require("date-fns-tz");
 const library_1 = require("@prisma/client/runtime/library");
+const client_1 = require("@prisma/client");
 const prisma_1 = require("../../prisma");
 const constants_1 = require("./constants");
 const WEEKDAY_KEYS = ['0', '1', '2', '3', '4', '5', '6'];
-const ensureSchedule = (schedule) => {
-    const result = {};
-    for (const key of WEEKDAY_KEYS) {
-        const raw = schedule[key];
-        if (!raw) {
-            result[key] = { enabled: false, start: '09:00', end: '17:00', expectedHours: 8 };
-            continue;
-        }
-        result[key] = {
-            enabled: Boolean(raw.enabled),
-            start: raw.start ?? '09:00',
-            end: raw.end ?? '17:00',
-            expectedHours: Number.isFinite(raw.expectedHours) ? Number(raw.expectedHours) : 8
-        };
+const DEFAULT_START = '09:00';
+const DEFAULT_END = '17:00';
+const DEFAULT_BREAK_MINUTES = 0;
+const DEFAULT_EXPECTED_HOURS = 8;
+const isPlainObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
+const clampMinutes = (value) => {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return Math.max(0, Math.round(value));
     }
-    return result;
+    if (typeof value === 'string') {
+        const parsed = Number.parseFloat(value);
+        if (Number.isFinite(parsed)) {
+            return Math.max(0, Math.round(parsed));
+        }
+    }
+    return DEFAULT_BREAK_MINUTES;
+};
+const sanitizeTime = (value) => {
+    if (typeof value !== 'string') {
+        return DEFAULT_START;
+    }
+    const trimmed = value.trim();
+    if (/^\d{2}:\d{2}$/.test(trimmed)) {
+        return trimmed;
+    }
+    return DEFAULT_START;
+};
+const computeExpectedHours = (start, end, breakMinutes, fallback) => {
+    if (typeof fallback === 'number' && Number.isFinite(fallback)) {
+        return Number(fallback);
+    }
+    const [startHours, startMinutes] = start.split(':').map((part) => Number.parseInt(part, 10));
+    const [endHours, endMinutes] = end.split(':').map((part) => Number.parseInt(part, 10));
+    if ([startHours, startMinutes, endHours, endMinutes].some((value) => !Number.isFinite(value))) {
+        return DEFAULT_EXPECTED_HOURS;
+    }
+    const startTotal = startHours * 60 + startMinutes;
+    const endTotal = endHours * 60 + endMinutes;
+    const rawMinutes = endTotal - startTotal;
+    if (rawMinutes <= 0) {
+        return DEFAULT_EXPECTED_HOURS;
+    }
+    const netMinutes = Math.max(0, rawMinutes - breakMinutes);
+    return Math.round((netMinutes / 60) * 100) / 100;
+};
+const DEFAULT_SCHEDULE = {
+    version: 2,
+    timeZone: constants_1.PAYROLL_TIME_ZONE,
+    days: WEEKDAY_KEYS.reduce((acc, key) => {
+        acc[key] = {
+            enabled: false,
+            start: DEFAULT_START,
+            end: DEFAULT_END,
+            breakMinutes: DEFAULT_BREAK_MINUTES,
+            expectedHours: DEFAULT_EXPECTED_HOURS
+        };
+        return acc;
+    }, {})
+};
+const normalizeDay = (value) => {
+    const raw = isPlainObject(value) ? value : {};
+    const enabled = Boolean(raw.enabled);
+    const start = sanitizeTime(raw.start ?? DEFAULT_START);
+    const end = sanitizeTime(raw.end ?? DEFAULT_END);
+    const breakMinutes = clampMinutes(raw.breakMinutes ?? raw.unpaidBreakMinutes);
+    const expectedHours = computeExpectedHours(start, end, breakMinutes, raw.expectedHours);
+    return { enabled, start, end, breakMinutes, expectedHours };
+};
+const ensureSchedule = (schedule) => {
+    if (!isPlainObject(schedule)) {
+        return { ...DEFAULT_SCHEDULE, days: { ...DEFAULT_SCHEDULE.days } };
+    }
+    const source = schedule;
+    const timeZoneCandidate = typeof source.timeZone === 'string' && source.timeZone.trim().length
+        ? source.timeZone.trim()
+        : constants_1.PAYROLL_TIME_ZONE;
+    const daysSource = isPlainObject(source.days) ? source.days : source;
+    const days = {};
+    for (const key of WEEKDAY_KEYS) {
+        days[key] = normalizeDay(daysSource[key]);
+    }
+    return {
+        version: 2,
+        timeZone: timeZoneCandidate,
+        days
+    };
 };
 exports.ensureSchedule = ensureSchedule;
+const serializeSchedule = (schedule) => ({
+    version: 2,
+    timeZone: schedule.timeZone,
+    days: schedule.days
+});
+exports.serializeSchedule = serializeSchedule;
 const toSnapshot = (config) => ({
     id: config.id,
     userId: config.userId,
@@ -75,17 +152,23 @@ const upsertEmployeeConfig = async (input, actorId) => {
         defaultKpiBonus: input.defaultKpiBonus !== undefined && input.defaultKpiBonus !== null
             ? new library_1.Decimal(input.defaultKpiBonus)
             : null,
-        schedule,
+        schedule: (0, exports.serializeSchedule)(schedule),
         accrualEnabled: input.accrualEnabled,
         accrualMethod: input.accrualMethod ?? null,
         ptoBalanceHours: new library_1.Decimal(input.ptoBalanceHours),
         utoBalanceHours: new library_1.Decimal(input.utoBalanceHours)
     };
-    await prisma_1.prisma.employeeCompConfig.upsert({
-        where: { userId_effectiveOn: { userId: input.userId, effectiveOn: input.effectiveOn } },
-        create: data,
-        update: data
-    });
+    try {
+        await prisma_1.prisma.employeeCompConfig.create({ data });
+    }
+    catch (error) {
+        if (error instanceof client_1.Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+            const conflict = new Error('Configuration already exists for this effective date.');
+            conflict.name = 'EmployeeConfigConflictError';
+            throw conflict;
+        }
+        throw error;
+    }
     if (actorId) {
         await prisma_1.prisma.payrollAuditLog.create({
             data: {

@@ -53,7 +53,7 @@ const buildScheduleLookup = (config, weekday) => {
         return null;
     const normalized = (0, config_1.ensureSchedule)(config.schedule);
     const key = String(weekday);
-    return normalized[key] ?? null;
+    return normalized.days[key] ?? null;
 };
 const computeTardyMinutes = (scheduledStart, actualStart) => {
     const [hours, minutes] = scheduledStart.split(':').map((value) => Number.parseInt(value, 10));

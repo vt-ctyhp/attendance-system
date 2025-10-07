@@ -14,14 +14,33 @@ const payroll_1 = require("../services/payroll/payroll");
 const constants_1 = require("../services/payroll/constants");
 const payrollRouter = (0, express_1.Router)();
 exports.payrollRouter = payrollRouter;
-payrollRouter.use(auth_1.authenticate, (0, auth_1.requireRole)(['admin']));
+const allowAnonDashboard = process.env.DASHBOARD_ALLOW_ANON === 'true';
+if (!allowAnonDashboard) {
+    payrollRouter.use(auth_1.authenticate);
+}
+const allowRoles = (roles) => {
+    if (allowAnonDashboard) {
+        return (_req, _res, next) => next();
+    }
+    return (0, auth_1.requireRole)(roles);
+};
+const requireAdmin = allowRoles(['admin']);
+const requireAdminOrManager = allowRoles(['admin', 'manager']);
 const scheduleDaySchema = zod_1.z.object({
     enabled: zod_1.z.boolean().optional().default(false),
-    start: zod_1.z.string().default('09:00'),
-    end: zod_1.z.string().default('17:00'),
-    expectedHours: zod_1.z.number().finite().nonnegative().default(8)
+    start: zod_1.z.string().optional().default('09:00'),
+    end: zod_1.z.string().optional().default('17:00'),
+    expectedHours: zod_1.z.number().finite().nonnegative().optional(),
+    breakMinutes: zod_1.z.number().finite().nonnegative().optional(),
+    unpaidBreakMinutes: zod_1.z.number().finite().nonnegative().optional()
 });
-const scheduleSchema = zod_1.z.record(scheduleDaySchema).default({});
+const scheduleSchema = zod_1.z
+    .object({
+    timeZone: zod_1.z.string().min(1),
+    days: zod_1.z.record(scheduleDaySchema)
+})
+    .or(zod_1.z.record(scheduleDaySchema))
+    .default({});
 const datePreprocess = zod_1.z.preprocess((value) => {
     if (value instanceof Date)
         return value;
@@ -47,13 +66,13 @@ const employeeConfigSchema = zod_1.z.object({
     ptoBalanceHours: zod_1.z.number().finite(),
     utoBalanceHours: zod_1.z.number().finite()
 });
-payrollRouter.get('/config', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+payrollRouter.get('/config', requireAdminOrManager, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     const querySchema = zod_1.z.object({ userId: zod_1.z.coerce.number().int().positive().optional() });
     const { userId } = (0, validation_1.parseWithSchema)(querySchema, req.query, 'Invalid query');
     const configs = await (0, config_1.listEmployeeConfigs)(userId);
     res.json({ configs });
 }));
-payrollRouter.post('/config', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+payrollRouter.post('/config', requireAdminOrManager, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     const input = (0, validation_1.parseWithSchema)(employeeConfigSchema, req.body, 'Invalid configuration payload');
     await (0, config_1.upsertEmployeeConfig)({
         userId: input.userId,
@@ -63,7 +82,7 @@ payrollRouter.post('/config', (0, asyncHandler_1.asyncHandler)(async (req, res) 
         quarterlyAttendanceBonus: input.quarterlyAttendanceBonus,
         kpiEligible: input.kpiEligible,
         defaultKpiBonus: input.defaultKpiBonus,
-        schedule: input.schedule,
+        schedule: (0, config_1.ensureSchedule)(input.schedule),
         accrualEnabled: input.accrualEnabled,
         accrualMethod: input.accrualMethod,
         ptoBalanceHours: input.ptoBalanceHours,
@@ -75,7 +94,7 @@ const holidayQuerySchema = zod_1.z.object({
     from: datePreprocess.optional(),
     to: datePreprocess.optional()
 });
-payrollRouter.get('/holidays', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+payrollRouter.get('/holidays', requireAdmin, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     const { from, to } = (0, validation_1.parseWithSchema)(holidayQuerySchema, req.query, 'Invalid query');
     const now = new Date();
     const start = from ?? now;
@@ -87,12 +106,12 @@ const holidayBodySchema = zod_1.z.object({
     name: zod_1.z.string().min(1).max(200),
     observedOn: datePreprocess
 });
-payrollRouter.post('/holidays', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+payrollRouter.post('/holidays', requireAdmin, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     const { name, observedOn } = (0, validation_1.parseWithSchema)(holidayBodySchema, req.body, 'Invalid holiday payload');
     const holiday = await (0, config_1.createHoliday)(name, observedOn, req.user?.id);
     res.status(201).json({ holiday });
 }));
-payrollRouter.delete('/holidays/:date', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+payrollRouter.delete('/holidays/:date', requireAdmin, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     const paramsSchema = zod_1.z.object({ date: zod_1.z.string().min(1) });
     const { date } = (0, validation_1.parseWithSchema)(paramsSchema, req.params, 'Invalid holiday identifier');
     const parsed = new Date(date);
@@ -103,13 +122,13 @@ payrollRouter.delete('/holidays/:date', (0, asyncHandler_1.asyncHandler)(async (
     res.json({ removed });
 }));
 const monthParamSchema = zod_1.z.object({ month: zod_1.z.string().regex(/^\d{4}-\d{2}$/) });
-payrollRouter.post('/attendance/:month/recalc', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+payrollRouter.post('/attendance/:month/recalc', requireAdmin, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     const { month } = (0, validation_1.parseWithSchema)(monthParamSchema, req.params, 'Invalid month');
     const facts = await (0, attendance_1.recalcMonthlyAttendanceFacts)(month, req.user?.id);
     await (0, bonuses_1.recalcMonthlyBonuses)(month, req.user?.id ?? undefined);
     res.status(202).json({ month, count: facts.length });
 }));
-payrollRouter.get('/attendance/:month', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+payrollRouter.get('/attendance/:month', requireAdmin, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     const { month } = (0, validation_1.parseWithSchema)(monthParamSchema, req.params, 'Invalid month');
     const data = await (0, attendance_1.listAttendanceFactsForMonth)(month);
     res.json(data);
@@ -125,13 +144,13 @@ const parsePayDate = (value) => {
     }
     return parsed;
 };
-payrollRouter.post('/payruns/:payDate/recalc', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+payrollRouter.post('/payruns/:payDate/recalc', requireAdmin, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     const { payDate: payDateRaw } = (0, validation_1.parseWithSchema)(dateParamSchema, req.params, 'Invalid pay date');
     const payDate = parsePayDate(payDateRaw);
     const period = await (0, payroll_1.recalcPayrollForPayDate)(payDate, req.user?.id);
     res.status(202).json({ period });
 }));
-payrollRouter.get('/payruns/:payDate', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+payrollRouter.get('/payruns/:payDate', requireAdmin, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     const { payDate: payDateRaw } = (0, validation_1.parseWithSchema)(dateParamSchema, req.params, 'Invalid pay date');
     const payDate = parsePayDate(payDateRaw);
     const period = await (0, payroll_1.getPayrollPeriod)(payDate);

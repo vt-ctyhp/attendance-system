@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type NextFunction, type Response } from 'express';
 import { z } from 'zod';
 import { zonedTimeToUtc } from 'date-fns-tz';
 import { authenticate, requireRole, type AuthenticatedRequest } from '../auth';
@@ -28,7 +28,21 @@ import { PAYROLL_TIME_ZONE } from '../services/payroll/constants';
 
 const payrollRouter = Router();
 
-payrollRouter.use(authenticate, requireRole(['admin']));
+const allowAnonDashboard = process.env.DASHBOARD_ALLOW_ANON === 'true';
+
+if (!allowAnonDashboard) {
+  payrollRouter.use(authenticate);
+}
+
+const allowRoles = (roles: Array<'admin' | 'manager'>) => {
+  if (allowAnonDashboard) {
+    return (_req: AuthenticatedRequest, _res: Response, next: NextFunction) => next();
+  }
+  return requireRole(roles);
+};
+
+const requireAdmin = allowRoles(['admin']);
+const requireAdminOrManager = allowRoles(['admin', 'manager']);
 
 const scheduleDaySchema = z.object({
   enabled: z.boolean().optional().default(false),
@@ -75,6 +89,7 @@ const employeeConfigSchema = z.object({
 
 payrollRouter.get(
   '/config',
+  requireAdminOrManager,
   asyncHandler(async (req, res) => {
     const querySchema = z.object({ userId: z.coerce.number().int().positive().optional() });
     const { userId } = parseWithSchema(querySchema, req.query, 'Invalid query');
@@ -85,6 +100,7 @@ payrollRouter.get(
 
 payrollRouter.post(
   '/config',
+  requireAdminOrManager,
   asyncHandler(async (req: AuthenticatedRequest, res) => {
     const input = parseWithSchema(employeeConfigSchema, req.body, 'Invalid configuration payload');
     await upsertEmployeeConfig(
@@ -115,6 +131,7 @@ const holidayQuerySchema = z.object({
 
 payrollRouter.get(
   '/holidays',
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const { from, to } = parseWithSchema(holidayQuerySchema, req.query, 'Invalid query');
     const now = new Date();
@@ -132,6 +149,7 @@ const holidayBodySchema = z.object({
 
 payrollRouter.post(
   '/holidays',
+  requireAdmin,
   asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { name, observedOn } = parseWithSchema(holidayBodySchema, req.body, 'Invalid holiday payload');
     const holiday = await createHoliday(name, observedOn, req.user?.id);
@@ -141,6 +159,7 @@ payrollRouter.post(
 
 payrollRouter.delete(
   '/holidays/:date',
+  requireAdmin,
   asyncHandler(async (req: AuthenticatedRequest, res) => {
     const paramsSchema = z.object({ date: z.string().min(1) });
     const { date } = parseWithSchema(paramsSchema, req.params, 'Invalid holiday identifier');
@@ -157,6 +176,7 @@ const monthParamSchema = z.object({ month: z.string().regex(/^\d{4}-\d{2}$/) });
 
 payrollRouter.post(
   '/attendance/:month/recalc',
+  requireAdmin,
   asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { month } = parseWithSchema(monthParamSchema, req.params, 'Invalid month');
     const facts = await recalcMonthlyAttendanceFacts(month, req.user?.id);
@@ -167,6 +187,7 @@ payrollRouter.post(
 
 payrollRouter.get(
   '/attendance/:month',
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const { month } = parseWithSchema(monthParamSchema, req.params, 'Invalid month');
     const data = await listAttendanceFactsForMonth(month);
@@ -189,6 +210,7 @@ const parsePayDate = (value: string) => {
 
 payrollRouter.post(
   '/payruns/:payDate/recalc',
+  requireAdmin,
   asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { payDate: payDateRaw } = parseWithSchema(dateParamSchema, req.params, 'Invalid pay date');
     const payDate = parsePayDate(payDateRaw);
@@ -199,6 +221,7 @@ payrollRouter.post(
 
 payrollRouter.get(
   '/payruns/:payDate',
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const { payDate: payDateRaw } = parseWithSchema(dateParamSchema, req.params, 'Invalid pay date');
     const payDate = parsePayDate(payDateRaw);

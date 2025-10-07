@@ -199,7 +199,8 @@ const approveTimeRequest = async (req, res) => {
                 }, tx);
                 break;
             }
-            case 'uto': {
+            case 'uto':
+            case 'non_pto': {
                 const shouldDecrement = balance.baseUtoHours > 0;
                 updatedBalance = shouldDecrement
                     ? await tx.ptoBalance.update({

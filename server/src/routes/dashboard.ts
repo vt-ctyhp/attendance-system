@@ -2538,6 +2538,9 @@ const baseStyles = `
     body.dashboard--payroll .schedule-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem; }
     body.dashboard--payroll .schedule-days { display: flex; flex-wrap: wrap; gap: 0.5rem; }
     body.dashboard--payroll .schedule-option { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.4rem 0.7rem; border-radius: 999px; background: rgba(15,23,42,0.05); font-size: 0.85rem; border: 1px solid rgba(148,163,184,0.18); }
+    body.dashboard--payroll .compensation-row--missing td { background: rgba(254,243,199,0.35); }
+    body.dashboard--payroll .compensation-row--missing td:first-child { font-weight: 600; }
+    body.dashboard--payroll .compensation-row--missing td .meta a { font-weight: 600; }
     body.dashboard--payroll .actions-cell { text-align: right; }
     body.dashboard--payroll .actions-cell .button { white-space: nowrap; }
     body.dashboard--payroll .compensation-form__footer { display: flex; flex-direction: column; gap: 0.75rem; }
@@ -5252,11 +5255,7 @@ dashboardRouter.get('/payroll', async (req, res) => {
     }
   }
 
-  const latestConfigs = Array.from(latestConfigByUser.values()).sort((a, b) => {
-    const userA = employeeLookup.get(a.userId);
-    const userB = employeeLookup.get(b.userId);
-    return (userA?.name ?? '').localeCompare(userB?.name ?? '');
-  });
+  const employeesNeedingConfig = employees.filter((employee) => !latestConfigByUser.has(employee.id));
 
   const selectedConfig = normalizedEmployeeId ? latestConfigByUser.get(normalizedEmployeeId) : undefined;
 
@@ -5499,40 +5498,72 @@ dashboardRouter.get('/payroll', async (req, res) => {
     return typeof value === 'number' ? makeNumberValue(value) : '';
   })();
 
-  const latestConfigRows = latestConfigs.length
-    ? latestConfigs
-        .map((config) => {
-          const employee = employeeLookup.get(config.userId);
-          const scheduleSummary = summarizeSchedule(config.schedule);
-          const profileUrl = `/dashboard/employees/${config.userId}`;
-          const nameLabel = escapeHtml(employee?.name ?? `User ${config.userId}`);
-          const kpiLabel = config.kpiEligible
-            ? `Eligible${config.defaultKpiBonus ? ` (${formatCurrency(config.defaultKpiBonus)})` : ''}`
-            : 'Not eligible';
-          const accrualLabel = config.accrualEnabled
-            ? `Enabled${config.accrualMethod ? ` – ${escapeHtml(config.accrualMethod)}` : ''}`
-            : 'Disabled';
-          return `
-            <tr>
-              <td>
-                <a href="${profileUrl}">${nameLabel}</a>
-                <div class="meta">${escapeHtml(employee?.email ?? '')}</div>
-              </td>
-              <td>${escapeHtml(formatFullDate(config.effectiveOn))}</td>
-              <td>${formatCurrency(config.baseSemiMonthlySalary)}</td>
-              <td>${formatCurrency(config.monthlyAttendanceBonus)}</td>
-              <td>${formatCurrency(config.quarterlyAttendanceBonus)}</td>
-              <td>${escapeHtml(kpiLabel)}</td>
-              <td>
-                ${escapeHtml(accrualLabel)}
-                <div class="meta">PTO ${formatHours(config.ptoBalanceHours)}h • UTO ${formatHours(config.utoBalanceHours)}h</div>
-              </td>
-              <td>${scheduleSummary}</td>
-            </tr>
-          `;
-        })
-        .join('\n')
-    : '<tr><td colspan="8" class="empty">No compensation configurations have been recorded.</td></tr>';
+  const latestConfigRows = employees.length
+    ? employees.map((employee) => {
+      const profileUrl = `/dashboard/employees/${employee.id}`;
+      const config = latestConfigByUser.get(employee.id);
+
+      if (!config) {
+        return `
+          <tr class="compensation-row--missing">
+            <td>
+              <a href="${profileUrl}">${escapeHtml(employee.name)}</a>
+              <div class="meta">${escapeHtml(employee.email)}</div>
+              <div class="meta"><span class="status-chip status-chip--warn">Needs setup</span></div>
+            </td>
+            <td><span class="status-chip status-chip--warn">Not configured</span></td>
+            <td>—</td>
+            <td>—</td>
+            <td>—</td>
+            <td>—</td>
+            <td>—</td>
+            <td>
+              <div>Not configured</div>
+              <div class="meta"><a href="${profileUrl}">Set up compensation</a></div>
+            </td>
+          </tr>
+        `;
+      }
+
+      const scheduleSummary = summarizeSchedule(config.schedule);
+      const kpiLabel = config.kpiEligible
+        ? `Eligible${config.defaultKpiBonus ? ` (${formatCurrency(config.defaultKpiBonus)})` : ''}`
+        : 'Not eligible';
+      const accrualLabel = config.accrualEnabled
+        ? `Enabled${config.accrualMethod ? ` – ${escapeHtml(config.accrualMethod)}` : ''}`
+        : 'Disabled';
+
+      return `
+        <tr>
+          <td>
+            <a href="${profileUrl}">${escapeHtml(employee.name)}</a>
+            <div class="meta">${escapeHtml(employee.email)}</div>
+          </td>
+          <td>${escapeHtml(formatFullDate(config.effectiveOn))}</td>
+          <td>${formatCurrency(config.baseSemiMonthlySalary)}</td>
+          <td>${formatCurrency(config.monthlyAttendanceBonus)}</td>
+          <td>${formatCurrency(config.quarterlyAttendanceBonus)}</td>
+          <td>${escapeHtml(kpiLabel)}</td>
+          <td>
+            ${escapeHtml(accrualLabel)}
+            <div class="meta">PTO ${formatHours(config.ptoBalanceHours)}h • UTO ${formatHours(config.utoBalanceHours)}h</div>
+          </td>
+          <td>
+            ${scheduleSummary}
+            <div class="meta"><a href="${profileUrl}">View profile</a></div>
+          </td>
+        </tr>
+      `;
+    }).join('\n')
+    : '<tr><td colspan="8" class="empty">No employees found.</td></tr>';
+
+  const compensationSubtitle = (() => {
+    if (!employeesNeedingConfig.length) {
+      return 'Latest effective configuration per employee.';
+    }
+    const countLabel = employeesNeedingConfig.length === 1 ? 'employee needs setup' : 'employees need setup';
+    return `Latest effective configuration per employee. <span class="status-chip status-chip--warn">${employeesNeedingConfig.length} ${countLabel}</span> Use the "Set up compensation" links to finish onboarding.`;
+  })();
 
   const compensationTable = `
     <div class="table-scroll">
@@ -5845,7 +5876,7 @@ dashboardRouter.get('/payroll', async (req, res) => {
               <div class="card__header">
                 <div>
                   <h2 class="card__title">Compensation Summary</h2>
-                  <p class="card__subtitle">Latest effective configuration per employee.</p>
+                  <p class="card__subtitle">${compensationSubtitle}</p>
                 </div>
               </div>
               <div class="card__body">
@@ -8486,6 +8517,11 @@ dashboardRouter.get('/employees/:employeeId', async (req, res) => {
 
                     if (!response.ok) {
                       let message = 'Unable to save changes.';
+                      if (response.status === 403) {
+                        message = 'You do not have permission to manage compensation. Sign in with an admin account.';
+                      } else if (response.status === 401) {
+                        message = 'Your session expired. Refresh and sign in again.';
+                      }
                       try {
                         const data = await response.json();
                         if (data && typeof data.error === 'string') message = data.error;
