@@ -2983,7 +2983,12 @@ dashboardRouter.get(
       ? Math.min(Math.max(requestedDays, 1), 60)
       : 14;
 
-    const generationSummary = await ensureUpcomingShiftsForAllUsers(lookaheadDays);
+    const generationSummary = {
+      usersProcessed: 0,
+      created: 0,
+      skipped: 0,
+      triggered: false
+    };
 
     const now = new Date();
     const windowStart = timesheetDayStart(now);
@@ -3052,6 +3057,8 @@ dashboardRouter.get(
       email: string;
       label: string;
       reason?: string | null;
+      source: 'shift' | 'request';
+      overlap: boolean;
     };
 
     const combinedEntries: CombinedEntry[] = [];
@@ -3062,15 +3069,19 @@ dashboardRouter.get(
       make_up: 0
     };
 
-    for (const assignment of assignments) {
-      combinedEntries.push({
-        kind: 'shift',
-        start: assignment.startsAt,
-        end: assignment.endsAt,
-        employeeName: assignment.user?.name ?? `User ${assignment.userId}`,
-        email: assignment.user?.email ?? '',
-        label: assignment.label ?? TYPE_LABELS.shift
-      });
+    const shiftEntries = assignments.map((assignment) => ({
+      kind: 'shift' as ScheduleKind,
+      start: assignment.startsAt,
+      end: assignment.endsAt,
+      employeeName: assignment.user?.name ?? `User ${assignment.userId}`,
+      email: assignment.user?.email ?? '',
+      label: assignment.label ?? TYPE_LABELS.shift,
+      source: 'shift' as const,
+      overlap: false
+    }));
+
+    for (const entry of shiftEntries) {
+      combinedEntries.push(entry);
       totals.shift += 1;
     }
 
@@ -3089,12 +3100,47 @@ dashboardRouter.get(
         employeeName: request.user?.name ?? `User ${request.userId}`,
         email: request.user?.email ?? '',
         label: TYPE_LABELS[kind],
-        reason: request.reason ?? null
+        reason: request.reason ?? null,
+        source: 'request',
+        overlap: false
       });
       totals[kind] += 1;
     }
 
     combinedEntries.sort((a, b) => a.start.getTime() - b.start.getTime());
+
+    const entriesByUser = new Map<number, CombinedEntry[]>();
+    combinedEntries.forEach((entry) => {
+      const key = entry.email + entry.employeeName;
+    });
+
+    const entriesByUserId = new Map<string, CombinedEntry[]>();
+    for (const entry of combinedEntries) {
+      const key = `${entry.employeeName}|${entry.email}`;
+      const bucket = entriesByUserId.get(key);
+      if (bucket) {
+        bucket.push(entry);
+      } else {
+        entriesByUserId.set(key, [entry]);
+      }
+    }
+
+    for (const bucket of entriesByUserId.values()) {
+      bucket.sort((a, b) => a.start.getTime() - b.start.getTime());
+      for (let i = 0; i < bucket.length; i += 1) {
+        const current = bucket[i];
+        for (let j = i + 1; j < bucket.length; j += 1) {
+          const compare = bucket[j];
+          if (compare.start.getTime() >= current.end.getTime()) {
+            break;
+          }
+          if (compare.end.getTime() > current.start.getTime()) {
+            current.overlap = true;
+            compare.overlap = true;
+          }
+        }
+      }
+    }
 
     const shiftRows = combinedEntries.length
       ? combinedEntries
@@ -3105,8 +3151,14 @@ dashboardRouter.get(
             const endTime = formatTimeOfDay(entry.end);
             const duration = formatDuration(entry.start, entry.end);
             const displayLabel = entry.reason && entry.reason.trim().length ? entry.reason.trim() : entry.label;
+            const rowClass = entry.overlap
+              ? `schedule-row schedule-row--${entry.kind} schedule-row--overlap`
+              : `schedule-row schedule-row--${entry.kind}`;
+            const overlapChip = entry.overlap
+              ? '<span class="status-chip status-chip--warn">Overlap</span>'
+              : '';
             return `
-              <tr class="schedule-row schedule-row--${entry.kind}">
+              <tr class="${rowClass}">
                 <td>
                   ${escapeHtml(entry.employeeName)}
                   <div class="meta">${escapeHtml(entry.email)}</div>
@@ -3115,7 +3167,7 @@ dashboardRouter.get(
                 <td>${escapeHtml(startTime)}</td>
                 <td>${escapeHtml(endTime)}</td>
                 <td>${escapeHtml(duration)}</td>
-                <td>${escapeHtml(typeLabel)}</td>
+                <td>${escapeHtml(typeLabel)}${overlapChip}</td>
                 <td>${escapeHtml(displayLabel || '—')}</td>
               </tr>
             `;

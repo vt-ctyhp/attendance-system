@@ -21,7 +21,6 @@ const payroll_1 = require("../services/payroll/payroll");
 const attendance_1 = require("../services/payroll/attendance");
 const bonuses_1 = require("../services/payroll/bonuses");
 const timeRequestPolicy_1 = require("../services/timeRequestPolicy");
-const shiftPlanner_1 = require("../services/shiftPlanner");
 const DASHBOARD_TIME_ZONE = process.env.DASHBOARD_TIME_ZONE ?? 'America/Los_Angeles';
 const ISO_DATE_TIME = "yyyy-MM-dd'T'HH:mm:ssXXX";
 const ISO_DATE = 'yyyy-MM-dd';
@@ -2389,7 +2388,12 @@ exports.dashboardRouter.get('/shifts', (0, asyncHandler_1.asyncHandler)(async (r
     const lookaheadDays = Number.isFinite(requestedDays)
         ? Math.min(Math.max(requestedDays, 1), 60)
         : 14;
-    const generationSummary = await (0, shiftPlanner_1.ensureUpcomingShiftsForAllUsers)(lookaheadDays);
+    const generationSummary = {
+        usersProcessed: 0,
+        created: 0,
+        skipped: 0,
+        triggered: false
+    };
     const now = new Date();
     const windowStart = (0, timesheets_1.timesheetDayStart)(now);
     const windowEnd = (0, timesheets_1.timesheetDayEnd)((0, date_fns_1.addDays)(now, lookaheadDays));
@@ -2448,15 +2452,18 @@ exports.dashboardRouter.get('/shifts', (0, asyncHandler_1.asyncHandler)(async (r
         uto: 0,
         make_up: 0
     };
-    for (const assignment of assignments) {
-        combinedEntries.push({
-            kind: 'shift',
-            start: assignment.startsAt,
-            end: assignment.endsAt,
-            employeeName: assignment.user?.name ?? `User ${assignment.userId}`,
-            email: assignment.user?.email ?? '',
-            label: assignment.label ?? TYPE_LABELS.shift
-        });
+    const shiftEntries = assignments.map((assignment) => ({
+        kind: 'shift',
+        start: assignment.startsAt,
+        end: assignment.endsAt,
+        employeeName: assignment.user?.name ?? `User ${assignment.userId}`,
+        email: assignment.user?.email ?? '',
+        label: assignment.label ?? TYPE_LABELS.shift,
+        source: 'shift',
+        overlap: false
+    }));
+    for (const entry of shiftEntries) {
+        combinedEntries.push(entry);
         totals.shift += 1;
     }
     for (const request of requests) {
@@ -2474,11 +2481,44 @@ exports.dashboardRouter.get('/shifts', (0, asyncHandler_1.asyncHandler)(async (r
             employeeName: request.user?.name ?? `User ${request.userId}`,
             email: request.user?.email ?? '',
             label: TYPE_LABELS[kind],
-            reason: request.reason ?? null
+            reason: request.reason ?? null,
+            source: 'request',
+            overlap: false
         });
         totals[kind] += 1;
     }
     combinedEntries.sort((a, b) => a.start.getTime() - b.start.getTime());
+    const entriesByUser = new Map();
+    combinedEntries.forEach((entry) => {
+        const key = entry.email + entry.employeeName;
+    });
+    const entriesByUserId = new Map();
+    for (const entry of combinedEntries) {
+        const key = `${entry.employeeName}|${entry.email}`;
+        const bucket = entriesByUserId.get(key);
+        if (bucket) {
+            bucket.push(entry);
+        }
+        else {
+            entriesByUserId.set(key, [entry]);
+        }
+    }
+    for (const bucket of entriesByUserId.values()) {
+        bucket.sort((a, b) => a.start.getTime() - b.start.getTime());
+        for (let i = 0; i < bucket.length; i += 1) {
+            const current = bucket[i];
+            for (let j = i + 1; j < bucket.length; j += 1) {
+                const compare = bucket[j];
+                if (compare.start.getTime() >= current.end.getTime()) {
+                    break;
+                }
+                if (compare.end.getTime() > current.start.getTime()) {
+                    current.overlap = true;
+                    compare.overlap = true;
+                }
+            }
+        }
+    }
     const shiftRows = combinedEntries.length
         ? combinedEntries
             .map((entry) => {
@@ -2488,8 +2528,14 @@ exports.dashboardRouter.get('/shifts', (0, asyncHandler_1.asyncHandler)(async (r
             const endTime = formatTimeOfDay(entry.end);
             const duration = formatDuration(entry.start, entry.end);
             const displayLabel = entry.reason && entry.reason.trim().length ? entry.reason.trim() : entry.label;
+            const rowClass = entry.overlap
+                ? `schedule-row schedule-row--${entry.kind} schedule-row--overlap`
+                : `schedule-row schedule-row--${entry.kind}`;
+            const overlapChip = entry.overlap
+                ? '<span class="status-chip status-chip--warn">Overlap</span>'
+                : '';
             return `
-              <tr class="schedule-row schedule-row--${entry.kind}">
+              <tr class="${rowClass}">
                 <td>
                   ${escapeHtml(entry.employeeName)}
                   <div class="meta">${escapeHtml(entry.email)}</div>
@@ -2498,7 +2544,7 @@ exports.dashboardRouter.get('/shifts', (0, asyncHandler_1.asyncHandler)(async (r
                 <td>${escapeHtml(startTime)}</td>
                 <td>${escapeHtml(endTime)}</td>
                 <td>${escapeHtml(duration)}</td>
-                <td>${escapeHtml(typeLabel)}</td>
+                <td>${escapeHtml(typeLabel)}${overlapChip}</td>
                 <td>${escapeHtml(displayLabel || '—')}</td>
               </tr>
             `;
