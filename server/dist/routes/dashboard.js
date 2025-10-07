@@ -2461,10 +2461,16 @@ exports.dashboardRouter.get('/shifts', (0, asyncHandler_1.asyncHandler)(async (r
     }
     for (const request of requests) {
         const kind = mapRequestKind(request.type);
+        let start = request.startDate;
+        let end = request.endDate;
+        if (end.getTime() <= start.getTime() && typeof request.hours === 'number' && request.hours > 0) {
+            const minutes = Math.round(request.hours * 60);
+            end = new Date(start.getTime() + minutes * 60000);
+        }
         combinedEntries.push({
             kind,
-            start: request.startDate,
-            end: request.endDate,
+            start,
+            end,
             employeeName: request.user?.name ?? `User ${request.userId}`,
             email: request.user?.email ?? '',
             label: TYPE_LABELS[kind],
