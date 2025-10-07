@@ -40,6 +40,7 @@ const formatShortDate = (value) => (0, date_fns_tz_1.formatInTimeZone)(value, DA
 const formatIsoDateTime = (value) => (0, date_fns_tz_1.formatInTimeZone)(value, DASHBOARD_TIME_ZONE, ISO_DATE_TIME);
 const formatIsoDate = (value) => (0, date_fns_tz_1.formatInTimeZone)(value, DASHBOARD_TIME_ZONE, ISO_DATE);
 const formatTimeOfDay = (value) => (0, date_fns_tz_1.formatInTimeZone)(value, DASHBOARD_TIME_ZONE, 'h:mm a');
+const formatIsoDateList = (values) => values.length ? values.map((value) => formatIsoDateTime(value)).join('; ') : '';
 const minutesFormatter = (value) => `${value} min`;
 const formatOptionalDate = (value) => (value ? formatDateTime(value) : '—');
 const toDateParam = (value) => formatIsoDate(zonedStartOfDay(value));
@@ -1007,6 +1008,16 @@ const toSessionDetail = (session, now) => {
     const idleMinutes = session.minuteStats.filter((m) => m.idle).length;
     const presenceMisses = session.events.filter((event) => event.type === 'presence_miss').length;
     const pauseSummary = summarizePauses(session.pauses, now);
+    const breakPauses = session.pauses
+        .filter((pause) => pause.type === 'break')
+        .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime());
+    const lunchPauses = session.pauses
+        .filter((pause) => pause.type === 'lunch')
+        .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime());
+    const breakStartTimes = breakPauses.map((pause) => pause.startedAt);
+    const breakEndTimes = breakPauses.flatMap((pause) => (pause.endedAt ? [pause.endedAt] : []));
+    const lunchStartTimes = lunchPauses.map((pause) => pause.startedAt);
+    const lunchEndTimes = lunchPauses.flatMap((pause) => (pause.endedAt ? [pause.endedAt] : []));
     return {
         sessionId: session.id,
         startedAt: session.startedAt,
@@ -1017,7 +1028,11 @@ const toSessionDetail = (session, now) => {
         breakMinutes: pauseSummary.breakMinutes,
         lunches: pauseSummary.lunchCount,
         lunchMinutes: pauseSummary.lunchMinutes,
-        presenceMisses
+        presenceMisses,
+        breakStartTimes,
+        breakEndTimes,
+        lunchStartTimes,
+        lunchEndTimes
     };
 };
 const aggregateSessionsByUser = (sessions, now) => sessions.reduce((acc, session) => {
@@ -4666,8 +4681,12 @@ exports.dashboardRouter.get('/user/:userId', async (req, res) => {
     if (wantsCsv) {
         const header = [
             'Session ID',
-            'Started At ISO',
-            'Ended At ISO',
+            'Clock In ISO',
+            'Clock Out ISO',
+            'Break Starts ISO',
+            'Break Ends ISO',
+            'Lunch Starts ISO',
+            'Lunch Ends ISO',
             'Active Minutes',
             'Idle Minutes',
             'Breaks',
@@ -4681,6 +4700,10 @@ exports.dashboardRouter.get('/user/:userId', async (req, res) => {
             escapeCsv(detail.sessionId),
             escapeCsv(formatIsoDateTime(detail.startedAt)),
             escapeCsv(detail.endedAt ? formatIsoDateTime(detail.endedAt) : ''),
+            escapeCsv(formatIsoDateList(detail.breakStartTimes)),
+            escapeCsv(formatIsoDateList(detail.breakEndTimes)),
+            escapeCsv(formatIsoDateList(detail.lunchStartTimes)),
+            escapeCsv(formatIsoDateList(detail.lunchEndTimes)),
             escapeCsv(detail.activeMinutes),
             escapeCsv(detail.idleMinutes),
             escapeCsv(detail.breaks),

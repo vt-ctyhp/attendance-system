@@ -122,6 +122,10 @@ type SessionDetail = {
   lunches: number;
   lunchMinutes: number;
   presenceMisses: number;
+  breakStartTimes: Date[];
+  breakEndTimes: Date[];
+  lunchStartTimes: Date[];
+  lunchEndTimes: Date[];
 };
 
 type TotalsSource = {
@@ -250,6 +254,8 @@ const formatShortDate = (value: Date) => formatInTimeZone(value, DASHBOARD_TIME_
 const formatIsoDateTime = (value: Date) => formatInTimeZone(value, DASHBOARD_TIME_ZONE, ISO_DATE_TIME);
 const formatIsoDate = (value: Date) => formatInTimeZone(value, DASHBOARD_TIME_ZONE, ISO_DATE);
 const formatTimeOfDay = (value: Date) => formatInTimeZone(value, DASHBOARD_TIME_ZONE, 'h:mm a');
+const formatIsoDateList = (values: Date[]) =>
+  values.length ? values.map((value) => formatIsoDateTime(value)).join('; ') : '';
 
 const minutesFormatter = (value: number) => `${value} min`;
 
@@ -1404,6 +1410,18 @@ const toSessionDetail = (session: SessionRecord, now: Date): SessionDetail => {
   const presenceMisses = session.events.filter((event) => event.type === 'presence_miss').length;
   const pauseSummary = summarizePauses(session.pauses, now);
 
+  const breakPauses = session.pauses
+    .filter((pause) => pause.type === 'break')
+    .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime());
+  const lunchPauses = session.pauses
+    .filter((pause) => pause.type === 'lunch')
+    .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime());
+
+  const breakStartTimes = breakPauses.map((pause) => pause.startedAt);
+  const breakEndTimes = breakPauses.flatMap((pause) => (pause.endedAt ? [pause.endedAt] : []));
+  const lunchStartTimes = lunchPauses.map((pause) => pause.startedAt);
+  const lunchEndTimes = lunchPauses.flatMap((pause) => (pause.endedAt ? [pause.endedAt] : []));
+
   return {
     sessionId: session.id,
     startedAt: session.startedAt,
@@ -1414,7 +1432,11 @@ const toSessionDetail = (session: SessionRecord, now: Date): SessionDetail => {
     breakMinutes: pauseSummary.breakMinutes,
     lunches: pauseSummary.lunchCount,
     lunchMinutes: pauseSummary.lunchMinutes,
-    presenceMisses
+    presenceMisses,
+    breakStartTimes,
+    breakEndTimes,
+    lunchStartTimes,
+    lunchEndTimes
   };
 };
 
@@ -5456,8 +5478,12 @@ dashboardRouter.get('/user/:userId', async (req, res) => {
   if (wantsCsv) {
     const header = [
       'Session ID',
-      'Started At ISO',
-      'Ended At ISO',
+      'Clock In ISO',
+      'Clock Out ISO',
+      'Break Starts ISO',
+      'Break Ends ISO',
+      'Lunch Starts ISO',
+      'Lunch Ends ISO',
       'Active Minutes',
       'Idle Minutes',
       'Breaks',
@@ -5472,6 +5498,10 @@ dashboardRouter.get('/user/:userId', async (req, res) => {
         escapeCsv(detail.sessionId),
         escapeCsv(formatIsoDateTime(detail.startedAt)),
         escapeCsv(detail.endedAt ? formatIsoDateTime(detail.endedAt) : ''),
+        escapeCsv(formatIsoDateList(detail.breakStartTimes)),
+        escapeCsv(formatIsoDateList(detail.breakEndTimes)),
+        escapeCsv(formatIsoDateList(detail.lunchStartTimes)),
+        escapeCsv(formatIsoDateList(detail.lunchEndTimes)),
         escapeCsv(detail.activeMinutes),
         escapeCsv(detail.idleMinutes),
         escapeCsv(detail.breaks),
