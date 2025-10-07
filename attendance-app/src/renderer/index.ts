@@ -2,6 +2,8 @@ import { resolveHeroAvatarPaths, type HeroAvatarStatus } from './avatarResolver'
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
+const HEARTBEAT_INTERVAL_MS = MINUTE;
+const HEARTBEAT_IDLE_THRESHOLD_SECONDS = 60;
 
 type SessionStatus = 'clocked_out' | 'working' | 'break' | 'lunch';
 type RequestType = 'make_up' | 'pto' | 'uto' | 'edit';
@@ -493,7 +495,7 @@ const registerPresenceListeners = () => {
         pushActivity('Presence confirmed.', 'presence');
         showToast('Presence confirmed.', 'success');
         logAction('presence_confirm');
-        await hydrateFromServer();
+        await hydrateFromServer({ silent: true });
       }
     });
     presenceUnsubscribers.push(unsubscribe);
@@ -668,7 +670,7 @@ const postJson = async <T = unknown>(
 
 const startSessionOnServer = async (): Promise<boolean> => {
   if (!appContext.baseUrl) {
-    await hydrateFromServer().catch(() => undefined);
+    await hydrateFromServer({ silent: true }).catch(() => undefined);
   }
   requireServerContext();
   if (!appContext.email) {
@@ -746,6 +748,125 @@ const sendSimpleEvent = async (path: string) => {
     showToast('Unable to communicate with the attendance server.', 'danger');
     return false;
   }
+};
+
+const stopHeartbeatScheduler = () => {
+  if (heartbeatTimer !== null) {
+    window.clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+  lastHeartbeatMinuteKey = null;
+};
+
+const heartbeatShouldRun = () => state.session.status !== 'clocked_out';
+const shouldAutoHydrate = () => heartbeatShouldRun();
+
+const sendHeartbeat = async () => {
+  if (heartbeatInFlight) {
+    return;
+  }
+  if (!heartbeatShouldRun()) {
+    stopHeartbeatScheduler();
+    return;
+  }
+  const sessionId = appContext.sessionId;
+  if (!sessionId) {
+    return;
+  }
+  heartbeatInFlight = true;
+  try {
+    const systemStatus = typeof window.attendance.getSystemStatus === 'function'
+      ? await window.attendance.getSystemStatus()
+      : null;
+    const idleSeconds = typeof systemStatus?.idleSeconds === 'number' ? systemStatus.idleSeconds : null;
+    const isSessionWorking = state.session.status === 'working';
+    const onBreakOrLunch = state.session.status === 'break' || state.session.status === 'lunch';
+    const systemIdle = idleSeconds !== null && idleSeconds >= HEARTBEAT_IDLE_THRESHOLD_SECONDS;
+    const activeMinute = isSessionWorking && !systemIdle;
+    const idleFlag = onBreakOrLunch || systemIdle || !activeMinute;
+    const heartbeatTimestamp = new Date();
+    const timestampIso = heartbeatTimestamp.toISOString();
+
+    await postJson(
+      '/api/events/heartbeat',
+      {
+        sessionId,
+        timestamp: timestampIso,
+        activeMinute,
+        idleFlag,
+        idleSeconds,
+        keysCount: 0,
+        mouseCount: 0,
+        foregroundAppTitle: systemStatus?.foregroundApp?.title ?? null,
+        foregroundAppOwner: systemStatus?.foregroundApp?.owner ?? null,
+        activityBuckets: [],
+        platform: appContext.platform
+      },
+      { expectJson: false, requiresAuth: false }
+    );
+    console.info(
+      '[Heartbeat] sent',
+      JSON.stringify({ activeMinute, idleFlag, idleSeconds, timestamp: timestampIso })
+    );
+
+    const minuteKey = timestampIso.slice(0, 16);
+    if (minuteKey !== lastHeartbeatMinuteKey) {
+      lastHeartbeatMinuteKey = minuteKey;
+      if (activeMinute) {
+        state.today.activeMinutes += 1;
+      } else if (idleFlag) {
+        state.today.idleMinutes += 1;
+      }
+      updateTimesheetFromToday();
+      renderSnapshot();
+      renderTimesheet();
+      renderHero();
+    }
+  } catch (error) {
+    console.error('Failed to send heartbeat', error);
+  } finally {
+    heartbeatInFlight = false;
+  }
+};
+
+const startHeartbeatScheduler = () => {
+  if (!heartbeatShouldRun()) {
+    stopHeartbeatScheduler();
+    return;
+  }
+  if (heartbeatTimer !== null) {
+    return;
+  }
+  heartbeatTimer = window.setInterval(() => {
+    void sendHeartbeat();
+  }, HEARTBEAT_INTERVAL_MS);
+  void sendHeartbeat();
+};
+
+const reconcileHeartbeatScheduler = () => {
+  if (heartbeatShouldRun()) {
+    startHeartbeatScheduler();
+  } else {
+    stopHeartbeatScheduler();
+  }
+};
+
+const reconcileHydrationScheduler = () => {
+  if (!shouldAutoHydrate()) {
+    if (hydrateTimer !== null) {
+      window.clearInterval(hydrateTimer);
+      hydrateTimer = null;
+    }
+    return;
+  }
+  if (hydrateTimer !== null) {
+    return;
+  }
+  hydrateTimer = window.setInterval(() => {
+    if (shouldAutoHydrate()) {
+      void hydrateFromServer({ silent: true });
+    }
+  }, 60_000);
 };
 
 const confirmPresencePrompt = async (promptId: string) => {
@@ -1074,6 +1195,12 @@ const applyPresenceVisibility = () => {
     }
   }
 };
+
+let heartbeatTimer: ReturnType<typeof window.setInterval> | null = null;
+let heartbeatInFlight = false;
+let hydrateTimer: ReturnType<typeof window.setInterval> | null = null;
+let hydrationInFlight = false;
+let lastHeartbeatMinuteKey: string | null = null;
 const HERO_AVATAR_OVERTIME_THRESHOLD_MINUTES = 9 * 60;
 
 const MOTIVATION_PHRASES = [
@@ -1362,7 +1489,7 @@ const renderSnapshot = () => {
     {
       label: 'Active hours',
       value: formatHours(state.today.activeMinutes / 60),
-      meta: `Idle ${formatHours(state.today.idleMinutes / 60)} h`
+      meta: `Idle ${Math.round(state.today.idleMinutes)} min`
     },
     {
       label: 'Break time',
@@ -1397,6 +1524,7 @@ const renderTimesheet = () => {
     .map((day) => {
       const noteRow = day.note ? `<div class="form-hint">${escapeHtml(day.note)}</div>` : '';
       const tardyValue = `${day.tardyMinutes}`;
+      const idleMinutes = Math.round(day.idleHours * 60);
       return `
         <tr>
           <td>
@@ -1404,7 +1532,7 @@ const renderTimesheet = () => {
             ${noteRow}
           </td>
           <td>${escapeHtml(formatHours(day.activeHours))}</td>
-          <td>${escapeHtml(formatHours(day.idleHours))}</td>
+          <td>${escapeHtml(`${idleMinutes}`)}</td>
           <td>${day.breaks}</td>
           <td>${day.lunches}</td>
           <td>${escapeHtml(tardyValue)}</td>
@@ -1585,6 +1713,7 @@ const handleClockToggle = async () => {
     pushActivity('Clocked in', 'session');
     showToast('Clocked in. Have a great shift!', 'success');
     logAction('clock_in');
+    reconcileHeartbeatScheduler();
   } else {
     if (state.session.status === 'break') {
       const ended = await sendSimpleEvent('break/end');
@@ -1615,10 +1744,12 @@ const handleClockToggle = async () => {
     showToast('Clocked out. Rest well!', 'info');
     pushActivity('Clocked out', 'session');
     logAction('clock_out');
+    reconcileHeartbeatScheduler();
   }
   updateTimesheetFromToday();
   render();
-  void hydrateFromServer();
+  void hydrateFromServer({ silent: true });
+  reconcileHydrationScheduler();
 };
 
 const handleBreakToggle = async () => {
@@ -1656,7 +1787,8 @@ const handleBreakToggle = async () => {
   }
   updateTimesheetFromToday();
   render();
-  void hydrateFromServer();
+  void hydrateFromServer({ silent: true });
+  reconcileHydrationScheduler();
 };
 
 const handleLunchToggle = async () => {
@@ -1694,7 +1826,8 @@ const handleLunchToggle = async () => {
   }
   updateTimesheetFromToday();
   render();
-  void hydrateFromServer();
+  void hydrateFromServer({ silent: true });
+  reconcileHydrationScheduler();
 };
 
 const handlePresence = async () => {
@@ -1720,7 +1853,7 @@ const handlePresence = async () => {
   logAction('presence_confirm');
   updateTimesheetFromToday();
   render();
-  void hydrateFromServer();
+  void hydrateFromServer({ silent: true });
 };
 
 const handleRequestSubmit = async (event: SubmitEvent) => {
@@ -1837,7 +1970,7 @@ const handleRequestSubmit = async (event: SubmitEvent) => {
   renderRequests();
   renderSnapshot();
   logAction('request_submit');
-  void hydrateFromServer();
+  void hydrateFromServer({ silent: true });
 };
 
 const handleTimesheetChange = () => {
@@ -1902,7 +2035,8 @@ const mapOverviewPeriod = (period: OverviewTimesheetPeriod): TimesheetPeriod => 
   }
 });
 
-const applyOverview = (overview: OverviewResponse) => {
+const applyOverview = (overview: OverviewResponse, options: { silent?: boolean } = {}) => {
+  const { silent = false } = options;
   const previousView = state.timesheet.view;
   const periods: Record<TimesheetView, TimesheetPeriod> = {
     weekly: mapOverviewPeriod(overview.timesheet.periods.weekly),
@@ -1971,8 +2105,12 @@ const applyOverview = (overview: OverviewResponse) => {
 
   dom.timesheetView.value = state.timesheet.view;
   updateTimesheetFromToday();
+  reconcileHeartbeatScheduler();
+  reconcileHydrationScheduler();
   render();
-  showToast('Synced with attendance server.', 'info');
+  if (!silent) {
+    showToast('Synced with attendance server.', 'info');
+  }
 };
 
 const fetchOverview = async (baseUrl: string, email: string): Promise<OverviewResponse> => {
@@ -1986,7 +2124,11 @@ const fetchOverview = async (baseUrl: string, email: string): Promise<OverviewRe
   return (await response.json()) as OverviewResponse;
 };
 
-const hydrateFromServer = async () => {
+const hydrateFromServer = async ({ silent = false }: { silent?: boolean } = {}) => {
+  if (hydrationInFlight) {
+    return;
+  }
+  hydrationInFlight = true;
   try {
     const [bootstrap, settings] = await Promise.all([
       window.attendance.getBootstrap(),
@@ -2015,10 +2157,12 @@ const hydrateFromServer = async () => {
     await authenticate();
 
     const overview = await fetchOverview(baseUrl, email);
-    applyOverview(overview);
+    applyOverview(overview, { silent });
   } catch (error) {
     console.error('Failed to hydrate from server', error);
     showToast('Unable to load the latest data from the server.', 'danger');
+  } finally {
+    hydrationInFlight = false;
   }
 };
 
@@ -2072,6 +2216,8 @@ const initialize = () => {
 
   updateRequestHoursField();
   updateRequestHint();
+  reconcileHeartbeatScheduler();
+  reconcileHydrationScheduler();
   void hydrateFromServer();
 };
 
