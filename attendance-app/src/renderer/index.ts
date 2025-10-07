@@ -1695,7 +1695,7 @@ const updateRequestHint = () => {
       ? `${selectedLabel} request`
       : `${selectedLabel}: ${formatHours(Math.max(available, 0))}h available`;
   const makeUpRemaining = getMakeUpRemaining();
-  const summary = `PTO ${formatHours(state.balances.pto)}h • UTO ${formatHours(state.balances.uto)}h • Make-up remaining ${formatHours(makeUpRemaining)}h (cap ${formatHours(state.makeUpCap.cap)}h)`;
+  const summary = `Remaining balances: PTO ${formatHours(state.balances.pto)}h • UTO ${formatHours(state.balances.uto)}h • Make-up ${formatHours(makeUpRemaining)}h (cap ${formatHours(state.makeUpCap.cap)}h)`;
   dom.requestHint.textContent = `${selectedMessage} • ${summary}`;
 };
 
