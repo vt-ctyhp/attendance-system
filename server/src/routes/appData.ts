@@ -418,7 +418,7 @@ export const getAppOverview = asyncHandler(async (req, res) => {
   const idleActivities = buildIdleActivities(minuteStats, pauses, now);
 
   const activity = [
-    ...events.map(eventToActivity),
+    ...events.filter((event) => event.type !== 'heartbeat').map(eventToActivity),
     ...requests.map(requestToActivity),
     ...idleActivities
   ]
