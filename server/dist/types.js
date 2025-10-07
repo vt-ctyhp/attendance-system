@@ -19,7 +19,7 @@ const isPresenceStatus = (value) => exports.PRESENCE_STATUSES.includes(value);
 exports.isPresenceStatus = isPresenceStatus;
 const isEventType = (value) => exports.EVENT_TYPES.includes(value);
 exports.isEventType = isEventType;
-exports.TIME_REQUEST_TYPES = ['pto', 'non_pto', 'make_up'];
+exports.TIME_REQUEST_TYPES = ['pto', 'uto', 'make_up'];
 exports.TIME_REQUEST_STATUSES = ['pending', 'approved', 'denied'];
 exports.TIMESHEET_VIEWS = ['weekly', 'pay_period', 'monthly'];
 exports.TIMESHEET_EDIT_STATUSES = ['pending', 'approved', 'denied'];

@@ -6,10 +6,13 @@ export default defineConfig({
     include: ['**/*.test.{ts,js}'],
     globals: true,
     setupFiles: ['tests/setup.ts'],
-    globalSetup: ['tests/globalSetup.ts'],
+    globalSetup: 'tests/globalSetup.ts',
+    globalTeardown: 'tests/globalTeardown.ts',
     testTimeout: 20000,
-    maxWorkers: 1,
-    minWorkers: 1,
-    pool: 'forks'
+    threads: false,
+    maxConcurrency: 1,
+    sequence: {
+      concurrent: false
+    }
   }
 });

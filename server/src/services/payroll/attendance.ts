@@ -33,7 +33,7 @@ export type AttendanceDayDetail = {
   expectedHours: number;
   workedHours: number;
   ptoHours: number;
-  nonPtoHours: number;
+  utoHours: number;
   makeUpHours: number;
   tardyMinutes: number;
   holiday: boolean;
@@ -66,7 +66,7 @@ const toHours = (minutes: number) => Math.round((minutes / 60) * 100) / 100;
 
 const sumDayHours = (requests: TimeRequest[], start: Date, end: Date) => {
   const pto = new Map<string, number>();
-  const nonPto = new Map<string, number>();
+  const uto = new Map<string, number>();
   const makeUp = new Map<string, number>();
   const requestSummaries: AttendanceFactSnapshot['makeUpRequests'] = [];
 
@@ -78,7 +78,7 @@ const sumDayHours = (requests: TimeRequest[], start: Date, end: Date) => {
     const days = eachDayOfInterval({ start: overlapStart, end: overlapEnd });
     const perDay = request.hours / Math.max(days.length, 1);
     const targetMap =
-      request.type === 'pto' ? pto : request.type === 'non_pto' ? nonPto : makeUp;
+      request.type === 'pto' ? pto : request.type === 'uto' ? uto : makeUp;
 
     for (const day of days) {
       const key = buildDayKey(day);
@@ -96,7 +96,7 @@ const sumDayHours = (requests: TimeRequest[], start: Date, end: Date) => {
     }
   }
 
-  return { pto, nonPto, makeUp, requestSummaries };
+  return { pto, uto, makeUp, requestSummaries };
 };
 
 const buildScheduleLookup = (config: EmployeeCompSnapshot | null, weekday: number) => {
@@ -231,7 +231,7 @@ export const recalcMonthlyAttendanceFacts = async (
     let tardyMinutes = 0;
 
     const userRequests = requestsByUser.get(user.id) ?? [];
-    const { pto, nonPto, makeUp, requestSummaries } = sumDayHours(
+    const { pto, uto, makeUp, requestSummaries } = sumDayHours(
       userRequests,
       rangeStart,
       rangeEnd
@@ -250,7 +250,7 @@ export const recalcMonthlyAttendanceFacts = async (
         expectedHours: 0,
         workedHours: 0,
         ptoHours: 0,
-        nonPtoHours: 0,
+        utoHours: 0,
         makeUpHours: 0,
         tardyMinutes: 0,
         holiday: holidays.has(dayKey),
@@ -276,10 +276,10 @@ export const recalcMonthlyAttendanceFacts = async (
         detail.notes.push('PTO');
       }
 
-      const nonPtoDayHours = nonPto.get(dayKey) ?? 0;
-      if (nonPtoDayHours > 0) {
-        detail.nonPtoHours = Math.round(nonPtoDayHours * 100) / 100;
-        detail.notes.push('Non-PTO Request');
+      const utoDayHours = uto.get(dayKey) ?? 0;
+      if (utoDayHours > 0) {
+        detail.utoHours = Math.round(utoDayHours * 100) / 100;
+        detail.notes.push('UTO Request');
       }
 
       const makeUpDayHours = makeUp.get(dayKey) ?? 0;
@@ -299,7 +299,7 @@ export const recalcMonthlyAttendanceFacts = async (
 
       const deficit = Math.max(
         detail.expectedHours -
-          (detail.workedHours + detail.ptoHours + detail.nonPtoHours + detail.makeUpHours),
+          (detail.workedHours + detail.ptoHours + detail.utoHours + detail.makeUpHours),
         0
       );
       if (deficit > 0) {
@@ -349,7 +349,7 @@ export const recalcMonthlyAttendanceFacts = async (
     const residualAbsence = Math.round(
       absenceLedger.reduce((acc, entry) => acc + Math.max(entry.remaining, 0), 0) * 100
     ) / 100;
-    const nonPtoAbsenceHours = residualAbsence;
+    const utoAbsenceHours = residualAbsence;
 
     const uncoveredAbsence = Math.max(
       assignedHours - (workedHours + ptoHours + matchedMakeUpHours),
@@ -381,7 +381,7 @@ export const recalcMonthlyAttendanceFacts = async (
         assignedHours: new Decimal(Math.round(assignedHours * 100) / 100),
         workedHours: new Decimal(Math.round(workedHours * 100) / 100),
         ptoHours: new Decimal(Math.round(ptoHours * 100) / 100),
-        nonPtoAbsenceHours: new Decimal(Math.round(nonPtoAbsenceHours * 100) / 100),
+        utoAbsenceHours: new Decimal(Math.round(utoAbsenceHours * 100) / 100),
         tardyMinutes,
         matchedMakeUpHours: new Decimal(matchedMakeUpHours),
         isPerfect,
@@ -394,7 +394,7 @@ export const recalcMonthlyAttendanceFacts = async (
         assignedHours: new Decimal(Math.round(assignedHours * 100) / 100),
         workedHours: new Decimal(Math.round(workedHours * 100) / 100),
         ptoHours: new Decimal(Math.round(ptoHours * 100) / 100),
-        nonPtoAbsenceHours: new Decimal(Math.round(nonPtoAbsenceHours * 100) / 100),
+        utoAbsenceHours: new Decimal(Math.round(utoAbsenceHours * 100) / 100),
         tardyMinutes,
         matchedMakeUpHours: new Decimal(matchedMakeUpHours),
         isPerfect,

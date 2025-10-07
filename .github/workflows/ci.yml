@@ -2,40 +2,41 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
+      - master
   pull_request:
 
+env:
+  DATABASE_URL: postgresql://attendance:attendance@127.0.0.1:5433/attendance
+  TEST_DATABASE_TEMPLATE_URL: postgresql://attendance:attendance@127.0.0.1:5433/attendance
+
 jobs:
-  tests:
+  test:
     runs-on: ubuntu-latest
     services:
       postgres:
         image: postgres:15-alpine
         env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: attendance
+          POSTGRES_PASSWORD: attendance
           POSTGRES_DB: attendance
         ports:
-          - 5432:5432
+          - 5433:5432
         options: >-
-          --health-cmd "pg_isready -U postgres"
+          --health-cmd "pg_isready -U attendance -d attendance"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-    env:
-      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/attendance?schema=public
-      NODE_ENV: test
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Set up Node.js
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
+          cache: npm
           cache-dependency-path: |
             server/package-lock.json
             attendance-app/package-lock.json
@@ -48,14 +49,26 @@ jobs:
         working-directory: attendance-app
         run: npm ci
 
-      - name: Apply Prisma migrations
-        working-directory: server
-        run: npm run ensure:migrations
+      - name: Install Postgres client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Wait for Postgres
+        run: |
+          for i in {1..30}; do
+            if PGPASSWORD=attendance psql --host 127.0.0.1 --port 5433 --username attendance --dbname attendance -c 'SELECT 1' >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Postgres did not become ready in time" >&2
+          exit 1
+        shell: bash
 
       - name: Run server tests
         working-directory: server
         env:
-          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/attendance?schema=public
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          TEST_DATABASE_TEMPLATE_URL: ${{ env.TEST_DATABASE_TEMPLATE_URL }}
         run: npm test
 
       - name: Run renderer tests

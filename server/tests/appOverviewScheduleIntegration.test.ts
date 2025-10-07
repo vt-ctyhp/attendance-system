@@ -63,7 +63,7 @@ describe('GET /api/app/overview schedule section', () => {
         },
         {
           userId: user.id,
-          type: 'non_pto',
+          type: 'uto',
           status: 'approved',
           startDate: utoStart,
           endDate: utoEnd,

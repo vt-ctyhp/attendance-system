@@ -24,6 +24,7 @@ const isoDate = (date) => formatDate(date, 'yyyy-MM-dd');
 const dayLabel = (date) => formatDate(date, 'EEE, MMM d');
 const longDate = (date) => formatDate(date, 'LLLL d, yyyy');
 const roundHours = (minutes) => Math.round((minutes / 60) * 100) / 100;
+const roundToQuarterHour = (hours) => Math.round(hours * 4) / 4;
 const MINUTE_MS = 60000;
 const buildIdleActivities = (minuteStats, pauses, reference) => {
     if (!minuteStats.length) {
@@ -156,10 +157,30 @@ const mapRequestType = (type) => {
     if (type === 'make_up') {
         return 'make_up';
     }
+    if (type === 'pto') {
+        return 'pto';
+    }
+    if (type === 'uto' || type === 'non_pto') {
+        return 'uto';
+    }
     if (type === 'timesheet_edit') {
         return 'edit';
     }
-    return 'time_off';
+    return 'pto';
+};
+const requestTypeLabel = (type) => {
+    switch (type) {
+        case 'make_up':
+            return 'Make-up Hours';
+        case 'pto':
+            return 'PTO';
+        case 'uto':
+            return 'UTO';
+        case 'edit':
+            return 'Timesheet Edit';
+        default:
+            return 'Unknown Request';
+    }
 };
 const toRequestItem = (request) => ({
     id: request.id,
@@ -198,7 +219,7 @@ const eventToActivity = (event) => {
     };
 };
 const requestToActivity = (request) => {
-    const typeLabel = mapRequestType(request.type).replace('_', ' ');
+    const typeLabel = requestTypeLabel(mapRequestType(request.type));
     return {
         id: `request-${request.id}`,
         timestamp: request.updatedAt.toISOString(),
@@ -223,6 +244,7 @@ exports.getAppOverview = (0, asyncHandler_1.asyncHandler)(async (req, res) => {
             events: { orderBy: { ts: 'desc' } }
         }
     });
+    const balance = await prisma_1.prisma.ptoBalance.findUnique({ where: { userId: user.id } });
     const previousCompleted = latestSession?.endedAt
         ? latestSession
         : await prisma_1.prisma.session.findFirst({
@@ -296,21 +318,17 @@ exports.getAppOverview = (0, asyncHandler_1.asyncHandler)(async (req, res) => {
         take: 10
     });
     const requestItems = requests.map(toRequestItem);
-    const [events, cap, usedHours] = await Promise.all([
+    const [events, cap, usedHours, schedule] = await Promise.all([
         prisma_1.prisma.event.findMany({
             where: { session: { userId: user.id } },
             orderBy: { ts: 'desc' },
             take: 10
         }),
         (0, timeRequestPolicy_1.getMakeupCapHoursPerMonth)(),
-        (0, timeRequestPolicy_1.getApprovedMakeupHoursThisMonth)(prisma_1.prisma, user.id)
+        (0, timeRequestPolicy_1.getApprovedMakeupHoursThisMonth)(prisma_1.prisma, user.id),
+        (0, schedule_1.getUserSchedule)({ userId: user.id, sessionStatus, reference: now })
     ]);
     const idleActivities = buildIdleActivities(minuteStats, pauses, now);
-    const schedule = await (0, schedule_1.getUserSchedule)({
-        userId: user.id,
-        sessionStatus,
-        reference: now
-    });
     const activity = [
         ...events.map(eventToActivity),
         ...requests.map(requestToActivity),
@@ -346,6 +364,11 @@ exports.getAppOverview = (0, asyncHandler_1.asyncHandler)(async (req, res) => {
         makeUpCap: {
             used: Math.round(usedHours * 100) / 100,
             cap
+        },
+        balances: {
+            pto: roundToQuarterHour(balance?.ptoHours ?? 0),
+            uto: roundToQuarterHour(balance?.utoHours ?? 0),
+            makeUp: roundToQuarterHour(balance?.makeUpHours ?? 0)
         },
         meta: {
             generatedAt: new Date().toISOString(),

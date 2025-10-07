@@ -115,7 +115,7 @@ describe('schedule builder', () => {
     await prisma.timeRequest.create({
       data: {
         userId: user.id,
-        type: 'non_pto',
+        type: 'uto',
         status: 'approved',
         startDate: toZonedUtc('2025-05-02T09:00:00'),
         endDate: toZonedUtc('2025-05-02T13:00:00'),
@@ -152,4 +152,3 @@ describe('schedule builder', () => {
     expect(schedule.upcoming).toHaveLength(0);
   });
 });
-

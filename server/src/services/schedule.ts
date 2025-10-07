@@ -149,6 +149,7 @@ const mapRequestKind = (type: string): ScheduleEntryKind => {
   switch (type) {
     case 'pto':
       return 'pto';
+    case 'uto':
     case 'non_pto':
       return 'uto';
     case 'make_up':
@@ -187,7 +188,7 @@ const shiftDelegate = (prisma as unknown as {
       where: {
         userId,
         status: 'approved',
-        type: { in: ['pto', 'non_pto', 'make_up'] },
+        type: { in: ['pto', 'uto', 'non_pto', 'make_up'] },
         NOT: {
           OR: [
             { endDate: { lt: windowStart } },

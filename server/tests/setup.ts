@@ -27,6 +27,7 @@ const resetFeatureFlags = async () => {
 
 const resetDatabase = async () => {
   const client = await getPrisma();
+
   const tables = [
     '"AttendanceMonthFact"',
     '"BalanceLedger"',

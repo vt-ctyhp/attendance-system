@@ -38,7 +38,7 @@ const toSnapshot = (config) => ({
     accrualEnabled: config.accrualEnabled,
     accrualMethod: config.accrualMethod,
     ptoBalanceHours: Number(config.ptoBalanceHours),
-    nonPtoBalanceHours: Number(config.nonPtoBalanceHours),
+    utoBalanceHours: Number(config.utoBalanceHours),
     createdAt: config.createdAt,
     updatedAt: config.updatedAt
 });
@@ -79,7 +79,7 @@ const upsertEmployeeConfig = async (input, actorId) => {
         accrualEnabled: input.accrualEnabled,
         accrualMethod: input.accrualMethod ?? null,
         ptoBalanceHours: new library_1.Decimal(input.ptoBalanceHours),
-        nonPtoBalanceHours: new library_1.Decimal(input.nonPtoBalanceHours)
+        utoBalanceHours: new library_1.Decimal(input.utoBalanceHours)
     };
     await prisma_1.prisma.employeeCompConfig.upsert({
         where: { userId_effectiveOn: { userId: input.userId, effectiveOn: input.effectiveOn } },

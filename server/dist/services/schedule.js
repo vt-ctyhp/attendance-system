@@ -81,6 +81,7 @@ const mapRequestKind = (type) => {
     switch (type) {
         case 'pto':
             return 'pto';
+        case 'uto':
         case 'non_pto':
             return 'uto';
         case 'make_up':
@@ -89,26 +90,29 @@ const mapRequestKind = (type) => {
     }
 };
 const loadScheduleSources = async (userId, windowStart, windowEnd) => {
+    const shiftDelegate = prisma_1.prisma.shiftAssignment;
     const [shifts, requests] = await Promise.all([
-        prisma_1.prisma.shiftAssignment.findMany({
-            where: {
-                userId,
-                OR: [
-                    { startsAt: { gte: windowStart, lt: windowEnd } },
-                    { endsAt: { gt: windowStart, lte: windowEnd } },
-                    {
-                        startsAt: { lte: windowStart },
-                        endsAt: { gte: windowStart }
-                    }
-                ]
-            },
-            orderBy: { startsAt: 'asc' }
-        }),
+        shiftDelegate
+            ? shiftDelegate.findMany({
+                where: {
+                    userId,
+                    OR: [
+                        { startsAt: { gte: windowStart, lt: windowEnd } },
+                        { endsAt: { gt: windowStart, lte: windowEnd } },
+                        {
+                            startsAt: { lte: windowStart },
+                            endsAt: { gte: windowStart }
+                        }
+                    ]
+                },
+                orderBy: { startsAt: 'asc' }
+            })
+            : Promise.resolve([]),
         prisma_1.prisma.timeRequest.findMany({
             where: {
                 userId,
                 status: 'approved',
-                type: { in: ['pto', 'non_pto', 'make_up'] },
+                type: { in: ['pto', 'uto', 'non_pto', 'make_up'] },
                 NOT: {
                     OR: [
                         { endDate: { lt: windowStart } },

@@ -171,7 +171,7 @@ type RosterStatusKey =
   | 'logged_out'
   | 'not_logged_in'
   | 'pto'
-  | 'day_off'
+  | 'uto'
   | 'make_up';
 
 type TodayRosterRow = {
@@ -514,12 +514,12 @@ const loginFormSchema = z.object({
 });
 
 
-const relevantRequestTypes: TimeRequestType[] = ['pto', 'non_pto'];
+const relevantRequestTypes: TimeRequestType[] = ['pto', 'uto'];
 const visibleRequestStatuses: TimeRequestStatus[] = ['pending', 'approved'];
 
 const requestTypeLabels: Record<TimeRequestType, string> = {
   pto: 'PTO',
-  non_pto: 'Non-PTO',
+  uto: 'UTO',
   make_up: 'Make-Up'
 };
 
@@ -784,7 +784,7 @@ const collectAttendanceSummary = async (
     totals: {
       workedHours: 0,
       ptoHours: 0,
-      nonPtoHours: 0,
+      utoHours: 0,
       makeUpHours: 0,
       tardyMinutes: 0,
       tardyEvents: 0,
@@ -823,7 +823,7 @@ const collectAttendanceSummary = async (
         const expectedHours = Math.round(toNumber(raw.expectedHours) * 100) / 100;
         const workedHours = Math.round(toNumber(raw.workedHours) * 100) / 100;
         const ptoHours = Math.round(toNumber(raw.ptoHours) * 100) / 100;
-        const nonPtoHours = Math.round(toNumber(raw.nonPtoHours) * 100) / 100;
+        const utoHours = Math.round(toNumber(raw.utoHours) * 100) / 100;
         const makeUpHours = Math.round(toNumber(raw.makeUpHours) * 100) / 100;
         const tardyMinutes = Math.max(0, Math.round(toNumber(raw.tardyMinutes)));
         const notes = Array.isArray(raw.notes)
@@ -847,7 +847,7 @@ const collectAttendanceSummary = async (
             expectedHours,
             workedHours,
             ptoHours,
-            nonPtoHours,
+            utoHours,
             makeUpHours,
             tardyMinutes,
             breakCount,
@@ -866,7 +866,7 @@ const collectAttendanceSummary = async (
           detail.expectedHours = expectedHours;
           detail.workedHours = workedHours;
           detail.ptoHours = ptoHours;
-          detail.nonPtoHours = nonPtoHours;
+          detail.utoHours = utoHours;
           detail.makeUpHours = makeUpHours;
           detail.tardyMinutes = tardyMinutes;
           detail.breakCount = breakCount;
@@ -880,7 +880,7 @@ const collectAttendanceSummary = async (
         }
         summary.totals.workedHours += workedHours;
         summary.totals.ptoHours += ptoHours;
-        summary.totals.nonPtoHours += nonPtoHours;
+        summary.totals.utoHours += utoHours;
         summary.totals.makeUpHours += makeUpHours;
         if (expectedHours > 0) {
           summary.totals.scheduledDays += 1;
@@ -930,7 +930,7 @@ const collectAttendanceSummary = async (
       const ratio = Math.min(1, overlapDays / totalDays);
       summary.totals.workedHours += Number(fact.workedHours) * ratio;
       summary.totals.ptoHours += Number(fact.ptoHours) * ratio;
-      summary.totals.nonPtoHours += Number(fact.nonPtoAbsenceHours) * ratio;
+      summary.totals.utoHours += Number(fact.utoAbsenceHours) * ratio;
       summary.totals.makeUpHours += Number(fact.matchedMakeUpHours) * ratio;
       const tardyMinutes = Math.round(Number(fact.tardyMinutes) * ratio);
       summary.totals.tardyMinutes += tardyMinutes;
@@ -956,7 +956,7 @@ const collectAttendanceSummary = async (
         expectedHours: 0,
         workedHours: 0,
         ptoHours: 0,
-        nonPtoHours: 0,
+        utoHours: 0,
         makeUpHours: 0,
         tardyMinutes: 0,
         breakCount: 0,
@@ -1074,7 +1074,7 @@ const collectAttendanceSummary = async (
 
   summary.totals.workedHours = Math.round(summary.totals.workedHours * 100) / 100;
   summary.totals.ptoHours = Math.round(summary.totals.ptoHours * 100) / 100;
-  summary.totals.nonPtoHours = Math.round(summary.totals.nonPtoHours * 100) / 100;
+  summary.totals.utoHours = Math.round(summary.totals.utoHours * 100) / 100;
   summary.totals.makeUpHours = Math.round(summary.totals.makeUpHours * 100) / 100;
 
   return summary;
@@ -1099,7 +1099,7 @@ type AttendanceSnapshotDay = {
   expectedHours?: number;
   workedHours?: number;
   ptoHours?: number;
-  nonPtoHours?: number;
+  utoHours?: number;
   makeUpHours?: number;
   tardyMinutes?: number;
   breakCount?: number;
@@ -1123,7 +1123,7 @@ type PeriodAttendanceDetail = {
   expectedHours: number;
   workedHours: number;
   ptoHours: number;
-  nonPtoHours: number;
+  utoHours: number;
   makeUpHours: number;
   tardyMinutes: number;
   breakCount: number;
@@ -1142,7 +1142,7 @@ type PeriodAttendanceSummary = {
   totals: {
     workedHours: number;
     ptoHours: number;
-    nonPtoHours: number;
+    utoHours: number;
     makeUpHours: number;
     tardyMinutes: number;
     tardyEvents: number;
@@ -1556,7 +1556,7 @@ const resolveTimeAwayStatus = (
     logged_out: 96,
     not_logged_in: 95,
     pto: 0,
-    day_off: 1,
+    uto: 1,
     make_up: 2
   };
 
@@ -1566,15 +1566,15 @@ const resolveTimeAwayStatus = (
       if (request.type === 'pto') {
         return { key: 'pto' as const, startDate: request.startDate };
       }
-      if (request.type === 'non_pto') {
-        return { key: 'day_off' as const, startDate: request.startDate };
+      if (request.type === 'uto') {
+        return { key: 'uto' as const, startDate: request.startDate };
       }
       if (request.type === 'make_up') {
         return { key: 'make_up' as const, startDate: request.startDate };
       }
       return null;
     })
-    .filter((value): value is { key: 'pto' | 'day_off' | 'make_up'; startDate: Date } => value !== null);
+    .filter((value): value is { key: 'pto' | 'uto' | 'make_up'; startDate: Date } => value !== null);
 
   if (!mapped.length) {
     return null;
@@ -1591,7 +1591,7 @@ const resolveTimeAwayStatus = (
 
   const selection = mapped[0];
   const since = selection.startDate > dayStart ? selection.startDate : dayStart;
-  const label = selection.key === 'pto' ? 'PTO' : selection.key === 'day_off' ? 'Day Off' : 'Make up Hours';
+  const label = selection.key === 'pto' ? 'PTO' : selection.key === 'uto' ? 'UTO' : 'Make up Hours';
   return { key: selection.key, label, since };
 };
 
@@ -2181,7 +2181,7 @@ const baseStyles = `
   .badges { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.35rem; }
   .badge { display: inline-flex; align-items: center; padding: 0.15rem 0.45rem; border-radius: 999px; font-size: 0.7rem; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; background: #e5e7eb; color: #111827; border: 1px solid transparent; }
   .badge-pto { background: #fef3c7; color: #92400e; }
-  .badge-non_pto { background: #dbeafe; color: #1e3a8a; }
+  .badge-uto { background: #dbeafe; color: #1e3a8a; }
   .badge-status-pending { border-style: dashed; border-color: currentColor; }
   .badge-status-approved { border-color: rgba(0,0,0,0.05); }
   .badge-status-denied { opacity: 0.6; text-decoration: line-through; }
@@ -4276,7 +4276,7 @@ dashboardRouter.get('/overview', async (req, res) => {
                 logged_out: 'offline',
                 not_logged_in: 'offline',
                 pto: 'offline',
-                day_off: 'offline',
+                uto: 'offline',
                 make_up: 'offline'
               };
 
@@ -4450,10 +4450,10 @@ dashboardRouter.get('/balances', async (req, res) => {
     name: user.name,
     email: user.email,
     pto: user.balance?.ptoHours ?? 0,
-    nonPto: user.balance?.nonPtoHours ?? 0,
+    uto: user.balance?.utoHours ?? 0,
     makeUp: user.balance?.makeUpHours ?? 0,
     basePto: user.balance?.basePtoHours ?? 0,
-    baseNonPto: user.balance?.baseNonPtoHours ?? 0,
+    baseUto: user.balance?.baseUtoHours ?? 0,
     baseMakeUp: user.balance?.baseMakeUpHours ?? 0,
     updatedAt: user.balance?.updatedAt ?? null
   }));
@@ -4464,10 +4464,10 @@ dashboardRouter.get('/balances', async (req, res) => {
       'Name',
       'Email',
       'PTO Hours',
-      'Non-PTO Hours',
+      'UTO Hours',
       'Make-Up Hours',
       'Base PTO',
-      'Base Non-PTO',
+      'Base UTO',
       'Base Make-Up',
       'Updated At ISO',
       'Timezone'
@@ -4477,10 +4477,10 @@ dashboardRouter.get('/balances', async (req, res) => {
         escapeCsv(row.name),
         escapeCsv(row.email),
         escapeCsv(formatHours(row.pto)),
-        escapeCsv(formatHours(row.nonPto)),
+        escapeCsv(formatHours(row.uto)),
         escapeCsv(formatHours(row.makeUp)),
         escapeCsv(formatHours(row.basePto)),
-        escapeCsv(formatHours(row.baseNonPto)),
+        escapeCsv(formatHours(row.baseUto)),
         escapeCsv(formatHours(row.baseMakeUp)),
         escapeCsv(row.updatedAt ? formatIsoDateTime(row.updatedAt) : ''),
         escapeCsv(DASHBOARD_TIME_ZONE)
@@ -4502,11 +4502,11 @@ dashboardRouter.get('/balances', async (req, res) => {
   const totals = rows.reduce(
     (acc, row) => {
       acc.pto += row.pto;
-      acc.nonPto += row.nonPto;
+      acc.uto += row.uto;
       acc.makeUp += row.makeUp;
       return acc;
     },
-    { pto: 0, nonPto: 0, makeUp: 0 }
+    { pto: 0, uto: 0, makeUp: 0 }
   );
 
   const tableRows = rows
@@ -4517,7 +4517,7 @@ dashboardRouter.get('/balances', async (req, res) => {
         <td><a href="/dashboard/balances?userId=${row.id}">${escapeHtml(row.name)}</a></td>
         <td>${escapeHtml(row.email)}</td>
         <td>${escapeHtml(formatHours(row.pto))} h<div class="meta">Base ${escapeHtml(formatHours(row.basePto))} h</div></td>
-        <td>${escapeHtml(formatHours(row.nonPto))} h<div class="meta">Base ${escapeHtml(formatHours(row.baseNonPto))} h</div></td>
+        <td>${escapeHtml(formatHours(row.uto))} h<div class="meta">Base ${escapeHtml(formatHours(row.baseUto))} h</div></td>
         <td>${escapeHtml(formatHours(row.makeUp))} h<div class="meta">Base ${escapeHtml(formatHours(row.baseMakeUp))} h</div></td>
         <td>${escapeHtml(updatedLabel)}</td>
       </tr>`;
@@ -4529,7 +4529,7 @@ dashboardRouter.get('/balances', async (req, res) => {
         <tr class="totals">
           <th colspan="2">Totals</th>
           <th>${escapeHtml(formatHours(totals.pto))} h</th>
-          <th>${escapeHtml(formatHours(totals.nonPto))} h</th>
+          <th>${escapeHtml(formatHours(totals.uto))} h</th>
           <th>${escapeHtml(formatHours(totals.makeUp))} h</th>
           <th></th>
         </tr>
@@ -4560,9 +4560,9 @@ dashboardRouter.get('/balances', async (req, res) => {
           <div class="summary-meta">Base <span data-balance-base>${escapeHtml(formatHours(balance.basePtoHours))}</span> h</div>
         </div>
         <div class="summary-card">
-          <div class="summary-title">Non-PTO Remaining</div>
-          <div class="summary-value">${escapeHtml(formatHours(balance.nonPtoHours))} h</div>
-          <div class="summary-meta">Base ${escapeHtml(formatHours(balance.baseNonPtoHours))} h</div>
+          <div class="summary-title">UTO Remaining</div>
+          <div class="summary-value">${escapeHtml(formatHours(balance.utoHours))} h</div>
+          <div class="summary-meta">Base ${escapeHtml(formatHours(balance.baseUtoHours))} h</div>
         </div>
         <div class="summary-card">
           <div class="summary-title">Make-Up Hours</div>
@@ -4788,7 +4788,7 @@ dashboardRouter.get('/balances', async (req, res) => {
                               <th>User</th>
                               <th>Email</th>
                               <th>PTO</th>
-                              <th>Non-PTO</th>
+                              <th>UTO</th>
                               <th>Make-Up</th>
                               <th>Updated</th>
                             </tr>
@@ -4874,10 +4874,10 @@ dashboardRouter.get('/user/:userId/balances', async (req, res) => {
   const balance = user.balance;
   const summary = {
     pto: balance?.ptoHours ?? 0,
-    nonPto: balance?.nonPtoHours ?? 0,
+    uto: balance?.utoHours ?? 0,
     makeUp: balance?.makeUpHours ?? 0,
     basePto: balance?.basePtoHours ?? 0,
-    baseNonPto: balance?.baseNonPtoHours ?? 0,
+    baseUto: balance?.baseUtoHours ?? 0,
     baseMakeUp: balance?.baseMakeUpHours ?? 0,
     updatedAt: balance?.updatedAt ?? null
   };
@@ -4901,9 +4901,9 @@ dashboardRouter.get('/user/:userId/balances', async (req, res) => {
         <div class="summary-meta">Base ${escapeHtml(formatHours(summary.basePto))} h</div>
       </div>
       <div class="summary-card">
-        <div class="summary-title">Non-PTO Remaining</div>
-        <div class="summary-value">${escapeHtml(formatHours(summary.nonPto))} h</div>
-        <div class="summary-meta">Base ${escapeHtml(formatHours(summary.baseNonPto))} h</div>
+        <div class="summary-title">UTO Remaining</div>
+        <div class="summary-value">${escapeHtml(formatHours(summary.uto))} h</div>
+        <div class="summary-meta">Base ${escapeHtml(formatHours(summary.baseUto))} h</div>
       </div>
       <div class="summary-card">
         <div class="summary-title">Make-Up Earned</div>
@@ -5404,7 +5404,7 @@ dashboardRouter.get('/payroll', async (req, res) => {
           <td>${formatHours(toNumber(fact.assignedHours))} h</td>
           <td>${formatHours(toNumber(fact.workedHours))} h</td>
           <td>${formatHours(toNumber(fact.ptoHours))} h</td>
-          <td>${formatHours(toNumber(fact.nonPtoAbsenceHours))} h</td>
+          <td>${formatHours(toNumber(fact.utoAbsenceHours))} h</td>
           <td>${formatHours(toNumber(fact.matchedMakeUpHours))} h</td>
           <td>${fact.tardyMinutes}</td>
           <td>${statusChip}</td>
@@ -5423,7 +5423,7 @@ dashboardRouter.get('/payroll', async (req, res) => {
               <th>Assigned</th>
               <th>Worked</th>
               <th>PTO</th>
-              <th>Non-PTO</th>
+              <th>UTO</th>
               <th>Make-Up</th>
               <th>Tardy (m)</th>
               <th>Status</th>
@@ -5517,7 +5517,7 @@ dashboardRouter.get('/payroll', async (req, res) => {
               <td>${escapeHtml(kpiLabel)}</td>
               <td>
                 ${escapeHtml(accrualLabel)}
-                <div class="meta">PTO ${formatHours(config.ptoBalanceHours)}h • Non-PTO ${formatHours(config.nonPtoBalanceHours)}h</div>
+                <div class="meta">PTO ${formatHours(config.ptoBalanceHours)}h • UTO ${formatHours(config.utoBalanceHours)}h</div>
               </td>
               <td>${scheduleSummary}</td>
             </tr>
@@ -6005,9 +6005,9 @@ dashboardRouter.get('/payroll', async (req, res) => {
                               }" required />
                             </label>
                             <label>
-                              <span>Non-PTO Balance (hours)</span>
-                              <input type="number" name="nonPtoBalanceHours" step="0.25" value="${
-                                selectedConfig ? makeNumberValue(selectedConfig.nonPtoBalanceHours) : ''
+                              <span>UTO Balance (hours)</span>
+                              <input type="number" name="utoBalanceHours" step="0.25" value="${
+                                selectedConfig ? makeNumberValue(selectedConfig.utoBalanceHours) : ''
                               }" required />
                             </label>
                             <label>
@@ -6277,7 +6277,7 @@ dashboardRouter.get('/payroll', async (req, res) => {
                     const accrualEnabled = form.querySelector('input[name="accrualEnabled"]');
                     const accrualMethod = form.querySelector('input[name="accrualMethod"]');
                     const ptoInput = form.querySelector('input[name="ptoBalanceHours"]');
-                    const nonPtoInput = form.querySelector('input[name="nonPtoBalanceHours"]');
+                    const utoInput = form.querySelector('input[name="utoBalanceHours"]');
                     const makeupInput = form.querySelector('input[name="makeupBalanceHours"]');
 
                     if (!(userSelect instanceof HTMLSelectElement) || !userSelect.value) {
@@ -6331,7 +6331,7 @@ dashboardRouter.get('/payroll', async (req, res) => {
                           ? accrualMethod.value.trim() || null
                           : null,
                       ptoBalanceHours: toFinite(ptoInput, 'PTO balance', { required: accrualEnabledChecked }),
-                      nonPtoBalanceHours: toFinite(nonPtoInput, 'Non-PTO balance', {
+                      utoBalanceHours: toFinite(utoInput, 'UTO balance', {
                         required: accrualEnabledChecked
                       }),
                       makeupBalanceHours: toFinite(makeupInput, 'Makeup balance', {
@@ -6938,7 +6938,7 @@ dashboardRouter.get('/payroll/summary/:payDate', async (req, res) => {
     totals: {
       workedHours: number;
       ptoHours: number;
-      nonPtoHours: number;
+      utoHours: number;
       makeUpHours: number;
       tardyMinutes: number;
       tardyEvents: number;
@@ -6965,7 +6965,7 @@ dashboardRouter.get('/payroll/summary/:payDate', async (req, res) => {
       const totals = attendanceSummary.totals;
       const behavior = summarizeBehavior(attendanceSummary);
       const totalHoursRaw =
-        totals.workedHours + totals.ptoHours + totals.nonPtoHours + totals.makeUpHours;
+        totals.workedHours + totals.ptoHours + totals.utoHours + totals.makeUpHours;
       const totalHours = Math.round(totalHoursRaw * 100) / 100;
       const payLine = {
         baseAmount: Math.round(Number(line.baseAmount) * 100) / 100,
@@ -6989,7 +6989,7 @@ dashboardRouter.get('/payroll/summary/:payDate', async (req, res) => {
         totals: {
           workedHours: Math.round(totals.workedHours * 100) / 100,
           ptoHours: Math.round(totals.ptoHours * 100) / 100,
-          nonPtoHours: Math.round(totals.nonPtoHours * 100) / 100,
+          utoHours: Math.round(totals.utoHours * 100) / 100,
           makeUpHours: Math.round(totals.makeUpHours * 100) / 100,
           tardyMinutes: totals.tardyMinutes,
           tardyEvents: totals.tardyEvents,
@@ -7088,7 +7088,7 @@ dashboardRouter.get('/payroll/summary/:payDate', async (req, res) => {
           </td>
           <td>${formatHoursCell(Math.round(employee.totalHours * 100) / 100)}</td>
           <td>${formatHoursCell(employee.totals.ptoHours)}</td>
-          <td>${formatHoursCell(employee.totals.nonPtoHours)}</td>
+          <td>${formatHoursCell(employee.totals.utoHours)}</td>
           <td>${formatHoursCell(employee.totals.makeUpHours)}</td>
           <td>${tardyLabel}</td>
           <td>${escapeHtml(formatPercent(employee.onTimePercent))}</td>
@@ -7109,7 +7109,7 @@ dashboardRouter.get('/payroll/summary/:payDate', async (req, res) => {
               <th>Employee</th>
               <th>Total Hours</th>
               <th>PTO Hours</th>
-              <th>Non-PTO Hours</th>
+              <th>UTO Hours</th>
               <th>Make-up Hours</th>
               <th>Tardy (m)</th>
               <th>On-time %</th>
@@ -7405,7 +7405,7 @@ dashboardRouter.get(['/payroll/period/:payDate', '/payroll/period/:payDate/emplo
   const totals = attendanceSummary?.totals ?? {
     workedHours: 0,
     ptoHours: 0,
-    nonPtoHours: 0,
+    utoHours: 0,
     makeUpHours: 0,
     tardyMinutes: 0,
     tardyEvents: 0,
@@ -7537,9 +7537,9 @@ dashboardRouter.get(['/payroll/period/:payDate', '/payroll/period/:payDate/emplo
       meta: totals.ptoHours ? 'Approved PTO this period' : 'No PTO recorded'
     },
     {
-      label: 'Non-PTO Hours',
-      value: totals.nonPtoHours ? formatHoursDisplay(totals.nonPtoHours) : '—',
-      meta: totals.nonPtoHours ? 'Approved non-PTO time' : 'No non-PTO time recorded'
+      label: 'UTO Hours',
+      value: totals.utoHours ? formatHoursDisplay(totals.utoHours) : '—',
+      meta: totals.utoHours ? 'Approved non-PTO time' : 'No non-PTO time recorded'
     },
     {
       label: 'Make-up Hours',
@@ -7605,7 +7605,7 @@ dashboardRouter.get(['/payroll/period/:payDate', '/payroll/period/:payDate/emplo
       <tbody>
         <tr><td>Worked</td><td>${formatHoursDisplay(totals.workedHours)}</td></tr>
         <tr><td>PTO</td><td>${totals.ptoHours ? formatHoursDisplay(totals.ptoHours) : '—'}</td></tr>
-        <tr><td>Non-PTO</td><td>${totals.nonPtoHours ? formatHoursDisplay(totals.nonPtoHours) : '—'}</td></tr>
+        <tr><td>UTO</td><td>${totals.utoHours ? formatHoursDisplay(totals.utoHours) : '—'}</td></tr>
         <tr><td>Make-up</td><td>${totals.makeUpHours ? formatHoursDisplay(totals.makeUpHours) : '—'}</td></tr>
       </tbody>
     </table>
@@ -7688,7 +7688,7 @@ dashboardRouter.get(['/payroll/period/:payDate', '/payroll/period/:payDate/emplo
           const worked = detail.workedHours ? formatHoursDisplay(detail.workedHours) : '—';
           const pto = detail.ptoHours ? formatHoursDisplay(detail.ptoHours) : '—';
           const makeUp = detail.makeUpHours ? formatHoursDisplay(detail.makeUpHours) : '—';
-          const nonPto = detail.nonPtoHours ? formatHoursDisplay(detail.nonPtoHours) : '—';
+          const uto = detail.utoHours ? formatHoursDisplay(detail.utoHours) : '—';
           const tardy = detail.tardyMinutes ? `${detail.tardyMinutes} min` : '—';
           const shift = formatShiftRange(detail.clockIn, detail.clockOut);
           const breaks = formatPauseSummary(detail.breakCount, detail.breakMinutes);
@@ -7705,7 +7705,7 @@ dashboardRouter.get(['/payroll/period/:payDate', '/payroll/period/:payDate/emplo
               <td>${escapeHtml(worked)}</td>
               <td>${escapeHtml(pto)}</td>
               <td>${escapeHtml(makeUp)}</td>
-              <td>${escapeHtml(nonPto)}</td>
+              <td>${escapeHtml(uto)}</td>
               <td>${escapeHtml(tardy)}</td>
               <td>${escapeHtml(breaks)}</td>
               <td>${escapeHtml(lunches)}</td>
@@ -7729,7 +7729,7 @@ dashboardRouter.get(['/payroll/period/:payDate', '/payroll/period/:payDate/emplo
                 <th>Worked</th>
                 <th>PTO</th>
                 <th>Make-up</th>
-                <th>Non-PTO</th>
+                <th>UTO</th>
                 <th>Tardy</th>
                 <th>Breaks</th>
                 <th>Lunch</th>
@@ -7758,10 +7758,10 @@ dashboardRouter.get(['/payroll/period/:payDate', '/payroll/period/:payDate/emplo
       detail: `${totals.absenceDays} day${totals.absenceDays === 1 ? '' : 's'} flagged`
     });
   }
-  if (totals.nonPtoHours > 0) {
+  if (totals.utoHours > 0) {
     exceptionItems.push({
-      label: 'Non-PTO usage',
-      detail: formatHoursDisplay(totals.nonPtoHours)
+      label: 'UTO usage',
+      detail: formatHoursDisplay(totals.utoHours)
     });
   }
   const missingPunches = detailList.filter(

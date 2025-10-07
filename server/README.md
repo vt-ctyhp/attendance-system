@@ -2,22 +2,20 @@
 
 ## Tests
 - Install dependencies with `npm install` (once).
-- Ensure Prisma client is generated: `npx prisma generate`.
-- Start a Postgres instance locally. A quick option is
+- Start a Postgres instance (defaults match the docker-compose dev stack: user `attendance`, password `attendance`, host `127.0.0.1`, port `5433`). For example:
   ```bash
   docker run --rm -d \
     --name attendance-postgres \
     -e POSTGRES_USER=attendance \
     -e POSTGRES_PASSWORD=attendance \
-    -e POSTGRES_DB=attendance_test \
-    -p 5432:5432 \
+    -e POSTGRES_DB=attendance \
+    -p 5433:5432 \
     postgres:15-alpine
   ```
-- Run the suite with `npm test`. The script automatically points `DATABASE_URL` and `TEST_DATABASE_URL` at
-  `postgresql://attendance:attendance@127.0.0.1:5432/attendance_test?schema=public` unless you override them.
+- Apply migrations with the idempotent helper: `npm run db:ensure`. It baselines existing schemas (marking prior migrations as applied) and executes the latest UTO rename migration without data loss.
+- Execute the suite with `npm test`. The runner provisions a fresh ephemeral database for each run, applies all Prisma migrations, and truncates data between individual tests.
 
-Vitest runs sequentially, truncates the Postgres schema between tests, and now includes a health check that
-performs a write/read round-trip.
+Vitest runs sequentially, truncates the Postgres schema between tests, and includes a health probe that performs a write/read round-trip.
 
 ## Migrations & Seeds
 

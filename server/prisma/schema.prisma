@@ -123,7 +123,7 @@ model EmployeeCompConfig {
   accrualEnabled           Boolean   @default(false)
   accrualMethod            String?
   ptoBalanceHours          Decimal   @default(0) @db.Decimal(10, 2)
-  nonPtoBalanceHours       Decimal   @default(0) @db.Decimal(10, 2)
+  utoBalanceHours         Decimal   @default(0) @db.Decimal(10, 2)
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
 
@@ -154,7 +154,7 @@ model AttendanceMonthFact {
   assignedHours          Decimal  @db.Decimal(10, 2)
   workedHours            Decimal  @db.Decimal(10, 2)
   ptoHours               Decimal  @db.Decimal(10, 2)
-  nonPtoAbsenceHours     Decimal  @db.Decimal(10, 2)
+  utoAbsenceHours     Decimal  @db.Decimal(10, 2)
   tardyMinutes           Int
   matchedMakeUpHours     Decimal  @db.Decimal(10, 2)
   isPerfect              Boolean
@@ -247,10 +247,10 @@ model PtoBalance {
   userId       Int      @unique
   user         User     @relation(fields: [userId], references: [id])
   basePtoHours     Float    @default(0)
-  baseNonPtoHours  Float    @default(0)
+  baseUtoHours     Float    @default(0)
   baseMakeUpHours  Float    @default(0)
   ptoHours         Float    @default(0)
-  nonPtoHours      Float    @default(0)
+  utoHours         Float    @default(0)
   makeUpHours      Float    @default(0)
   lastAccrualMonth String?
   updatedAt    DateTime @updatedAt

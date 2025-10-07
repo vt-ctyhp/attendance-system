@@ -45,7 +45,7 @@ const employeeConfigSchema = zod_1.z.object({
     accrualEnabled: zod_1.z.boolean(),
     accrualMethod: zod_1.z.string().max(100).optional().nullable(),
     ptoBalanceHours: zod_1.z.number().finite(),
-    nonPtoBalanceHours: zod_1.z.number().finite()
+    utoBalanceHours: zod_1.z.number().finite()
 });
 payrollRouter.get('/config', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     const querySchema = zod_1.z.object({ userId: zod_1.z.coerce.number().int().positive().optional() });
@@ -67,7 +67,7 @@ payrollRouter.post('/config', (0, asyncHandler_1.asyncHandler)(async (req, res) 
         accrualEnabled: input.accrualEnabled,
         accrualMethod: input.accrualMethod,
         ptoBalanceHours: input.ptoBalanceHours,
-        nonPtoBalanceHours: input.nonPtoBalanceHours
+        utoBalanceHours: input.utoBalanceHours
     }, req.user?.id);
     res.status(201).json({ success: true });
 }));

@@ -21,7 +21,7 @@ const buildDayKey = (date) => (0, date_fns_tz_1.formatInTimeZone)(date, constant
 const toHours = (minutes) => Math.round((minutes / 60) * 100) / 100;
 const sumDayHours = (requests, start, end) => {
     const pto = new Map();
-    const nonPto = new Map();
+    const uto = new Map();
     const makeUp = new Map();
     const requestSummaries = [];
     for (const request of requests) {
@@ -31,7 +31,7 @@ const sumDayHours = (requests, start, end) => {
             continue;
         const days = (0, date_fns_1.eachDayOfInterval)({ start: overlapStart, end: overlapEnd });
         const perDay = request.hours / Math.max(days.length, 1);
-        const targetMap = request.type === 'pto' ? pto : request.type === 'non_pto' ? nonPto : makeUp;
+        const targetMap = request.type === 'pto' ? pto : request.type === 'uto' ? uto : makeUp;
         for (const day of days) {
             const key = buildDayKey(day);
             const existing = targetMap.get(key) ?? 0;
@@ -46,7 +46,7 @@ const sumDayHours = (requests, start, end) => {
             });
         }
     }
-    return { pto, nonPto, makeUp, requestSummaries };
+    return { pto, uto, makeUp, requestSummaries };
 };
 const buildScheduleLookup = (config, weekday) => {
     if (!config)
@@ -171,7 +171,7 @@ const recalcMonthlyAttendanceFacts = async (monthKey, actorId) => {
         let ptoHours = 0;
         let tardyMinutes = 0;
         const userRequests = requestsByUser.get(user.id) ?? [];
-        const { pto, nonPto, makeUp, requestSummaries } = sumDayHours(userRequests, rangeStart, rangeEnd);
+        const { pto, uto, makeUp, requestSummaries } = sumDayHours(userRequests, rangeStart, rangeEnd);
         const absenceLedger = [];
         for (const day of days) {
             const dayKey = buildDayKey(day);
@@ -184,7 +184,7 @@ const recalcMonthlyAttendanceFacts = async (monthKey, actorId) => {
                 expectedHours: 0,
                 workedHours: 0,
                 ptoHours: 0,
-                nonPtoHours: 0,
+                utoHours: 0,
                 makeUpHours: 0,
                 tardyMinutes: 0,
                 holiday: holidays.has(dayKey),
@@ -206,10 +206,10 @@ const recalcMonthlyAttendanceFacts = async (monthKey, actorId) => {
                 ptoHours += detail.ptoHours;
                 detail.notes.push('PTO');
             }
-            const nonPtoDayHours = nonPto.get(dayKey) ?? 0;
-            if (nonPtoDayHours > 0) {
-                detail.nonPtoHours = Math.round(nonPtoDayHours * 100) / 100;
-                detail.notes.push('Non-PTO Request');
+            const utoDayHours = uto.get(dayKey) ?? 0;
+            if (utoDayHours > 0) {
+                detail.utoHours = Math.round(utoDayHours * 100) / 100;
+                detail.notes.push('UTO Request');
             }
             const makeUpDayHours = makeUp.get(dayKey) ?? 0;
             if (makeUpDayHours > 0) {
@@ -225,7 +225,7 @@ const recalcMonthlyAttendanceFacts = async (monthKey, actorId) => {
                 }
             }
             const deficit = Math.max(detail.expectedHours -
-                (detail.workedHours + detail.ptoHours + detail.nonPtoHours + detail.makeUpHours), 0);
+                (detail.workedHours + detail.ptoHours + detail.utoHours + detail.makeUpHours), 0);
             if (deficit > 0) {
                 absenceLedger.push({ date: day, remaining: deficit });
                 detail.notes.push('Absence');
@@ -262,7 +262,7 @@ const recalcMonthlyAttendanceFacts = async (monthKey, actorId) => {
         }
         matchedMakeUpHours = Math.round(Math.min(matchedMakeUpHours, constants_1.MAX_MAKEUP_HOURS_PER_MONTH) * 100) / 100;
         const residualAbsence = Math.round(absenceLedger.reduce((acc, entry) => acc + Math.max(entry.remaining, 0), 0) * 100) / 100;
-        const nonPtoAbsenceHours = residualAbsence;
+        const utoAbsenceHours = residualAbsence;
         const uncoveredAbsence = Math.max(assignedHours - (workedHours + ptoHours + matchedMakeUpHours), 0);
         const isPerfect = tardyMinutes <= constants_1.MAX_TARDY_MINUTES_FOR_BONUS && uncoveredAbsence < 0.01;
         const snapshot = {
@@ -286,7 +286,7 @@ const recalcMonthlyAttendanceFacts = async (monthKey, actorId) => {
                 assignedHours: new library_1.Decimal(Math.round(assignedHours * 100) / 100),
                 workedHours: new library_1.Decimal(Math.round(workedHours * 100) / 100),
                 ptoHours: new library_1.Decimal(Math.round(ptoHours * 100) / 100),
-                nonPtoAbsenceHours: new library_1.Decimal(Math.round(nonPtoAbsenceHours * 100) / 100),
+                utoAbsenceHours: new library_1.Decimal(Math.round(utoAbsenceHours * 100) / 100),
                 tardyMinutes,
                 matchedMakeUpHours: new library_1.Decimal(matchedMakeUpHours),
                 isPerfect,
@@ -299,7 +299,7 @@ const recalcMonthlyAttendanceFacts = async (monthKey, actorId) => {
                 assignedHours: new library_1.Decimal(Math.round(assignedHours * 100) / 100),
                 workedHours: new library_1.Decimal(Math.round(workedHours * 100) / 100),
                 ptoHours: new library_1.Decimal(Math.round(ptoHours * 100) / 100),
-                nonPtoAbsenceHours: new library_1.Decimal(Math.round(nonPtoAbsenceHours * 100) / 100),
+                utoAbsenceHours: new library_1.Decimal(Math.round(utoAbsenceHours * 100) / 100),
                 tardyMinutes,
                 matchedMakeUpHours: new library_1.Decimal(matchedMakeUpHours),
                 isPerfect,

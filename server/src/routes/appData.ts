@@ -34,6 +34,7 @@ const dayLabel = (date: Date) => formatDate(date, 'EEE, MMM d');
 const longDate = (date: Date) => formatDate(date, 'LLLL d, yyyy');
 
 const roundHours = (minutes: number) => Math.round((minutes / 60) * 100) / 100;
+const roundToQuarterHour = (hours: number) => Math.round(hours * 4) / 4;
 const MINUTE_MS = 60_000;
 
 type IdleActivity = { id: string; timestamp: string; message: string; category: 'idle' };
@@ -194,14 +195,35 @@ const resolveSessionStatus = (session: Prisma.SessionGetPayload<{ include: { pau
   };
 };
 
-const mapRequestType = (type: string): 'make_up' | 'time_off' | 'edit' => {
+const mapRequestType = (type: string): 'make_up' | 'pto' | 'uto' | 'edit' => {
   if (type === 'make_up') {
     return 'make_up';
+  }
+  if (type === 'pto') {
+    return 'pto';
+  }
+  if (type === 'uto' || type === 'non_pto') {
+    return 'uto';
   }
   if (type === 'timesheet_edit') {
     return 'edit';
   }
-  return 'time_off';
+  return 'pto';
+};
+
+const requestTypeLabel = (type: 'make_up' | 'pto' | 'uto' | 'edit') => {
+  switch (type) {
+    case 'make_up':
+      return 'Make-up Hours';
+    case 'pto':
+      return 'PTO';
+    case 'uto':
+      return 'UTO';
+    case 'edit':
+      return 'Timesheet Edit';
+    default:
+      return 'Unknown Request';
+  }
 };
 
 const toRequestItem = (request: {
@@ -256,10 +278,8 @@ const requestToActivity = (request: {
   type: string;
   status: string;
   updatedAt: Date;
-  startDate: Date;
-  endDate: Date;
 }) => {
-  const typeLabel = mapRequestType(request.type).replace('_', ' ');
+  const typeLabel = requestTypeLabel(mapRequestType(request.type));
   return {
     id: `request-${request.id}`,
     timestamp: request.updatedAt.toISOString(),
@@ -269,172 +289,174 @@ const requestToActivity = (request: {
 };
 
 export const getAppOverview = asyncHandler(async (req, res) => {
-    const { email } = parseWithSchema(overviewQuerySchema, req.query, 'Invalid query parameters');
+  const { email } = parseWithSchema(overviewQuerySchema, req.query, 'Invalid query parameters');
 
-    const user = await prisma.user.findFirst({
-      where: { email: { equals: email, mode: 'insensitive' } }
-    });
-
-    if (!user) {
-      throw HttpError.notFound('User not found');
-    }
-
-    const [latestSession] = await prisma.session.findMany({
-      where: { userId: user.id },
-      orderBy: { startedAt: 'desc' },
-      take: 1,
-      include: {
-        pauses: { orderBy: { sequence: 'asc' } },
-        events: { orderBy: { ts: 'desc' } }
-      }
-    });
-
-    const previousCompleted = latestSession?.endedAt
-      ? latestSession
-      : await prisma.session.findFirst({
-          where: { userId: user.id, endedAt: { not: null } },
-          orderBy: { endedAt: 'desc' }
-        });
-
-    const sessionStatus = resolveSessionStatus(latestSession ?? null);
-    const lastClockedOutAt = previousCompleted?.endedAt ?? null;
-    const activeSessionId = !latestSession || latestSession.status !== 'active' ? null : latestSession.id;
-
-    const now = new Date();
-    const todayStart = timesheetDayStart(now);
-    const todayEnd = timesheetDayEnd(now);
-
-    const minuteStats = await prisma.minuteStat.findMany({
-      where: {
-        session: { userId: user.id },
-        minuteStart: { gte: todayStart, lt: todayEnd }
-      },
-      select: { minuteStart: true, active: true, idle: true }
-    });
-
-    const pauses = await prisma.sessionPause.findMany({
-      where: {
-        session: { userId: user.id },
-        startedAt: { gte: todayStart, lt: todayEnd }
-      },
-      select: { type: true, durationMinutes: true, startedAt: true, endedAt: true }
-    });
-
-    const presenceMisses = await prisma.event.count({
-      where: {
-        session: { userId: user.id },
-        type: 'presence_miss',
-        ts: { gte: todayStart, lt: todayEnd }
-      }
-    });
-
-    const breakMinutes = pauses
-      .filter((pause) => pause.type === 'break')
-      .reduce((total, pause) => {
-        if (typeof pause.durationMinutes === 'number') {
-          return total + pause.durationMinutes;
-        }
-        const end = pause.endedAt ?? now;
-        return total + Math.max(0, differenceInMinutes(end, pause.startedAt));
-      }, 0);
-
-    const lunchMinutes = pauses
-      .filter((pause) => pause.type === 'lunch')
-      .reduce((total, pause) => {
-        if (typeof pause.durationMinutes === 'number') {
-          return total + pause.durationMinutes;
-        }
-        const end = pause.endedAt ?? now;
-        return total + Math.max(0, differenceInMinutes(end, pause.startedAt));
-      }, 0);
-
-    const todaySnapshot = {
-      date: isoDate(now),
-      label: dayLabel(now),
-      activeMinutes: minuteStats.filter((stat) => stat.active).length,
-      idleMinutes: minuteStats.filter((stat) => stat.idle).length,
-      breakMinutes,
-      lunchMinutes,
-      breaksCount: pauses.filter((pause) => pause.type === 'break').length,
-      lunchCount: pauses.filter((pause) => pause.type === 'lunch').length,
-      presenceMisses
-    };
-
-    const [weekly, payPeriod, monthly] = await Promise.all([
-      toTimesheetPeriod(user.id, 'weekly', now),
-      toTimesheetPeriod(user.id, 'pay_period', now),
-      toTimesheetPeriod(user.id, 'monthly', now)
-    ]);
-
-    const requests = await prisma.timeRequest.findMany({
-      where: { userId: user.id },
-      orderBy: { createdAt: 'desc' },
-      take: 10
-    });
-
-    const requestItems = requests.map(toRequestItem);
-
-    const [events, cap, usedHours] = await Promise.all([
-      prisma.event.findMany({
-        where: { session: { userId: user.id } },
-        orderBy: { ts: 'desc' },
-        take: 10
-      }),
-      getMakeupCapHoursPerMonth(),
-      getApprovedMakeupHoursThisMonth(prisma, user.id)
-    ]);
-
-    const idleActivities = buildIdleActivities(minuteStats, pauses, now);
-
-    const schedule = await getUserSchedule({
-      userId: user.id,
-      sessionStatus,
-      reference: now
-    });
-
-    const activity = [
-      ...events.map(eventToActivity),
-      ...requests.map(requestToActivity),
-      ...idleActivities
-    ]
-      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-      .slice(0, 12);
-
-    res.json({
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        location: user.role === 'manager' ? 'Market Street HQ' : 'San Francisco Retail Floor'
-      },
-      session: {
-        ...sessionStatus,
-        id: activeSessionId,
-        lastClockedOutAt
-      },
-      today: todaySnapshot,
-      timesheet: {
-        view: 'weekly' as const,
-        periods: {
-          weekly,
-          pay_period: payPeriod,
-          monthly
-        }
-      },
-      requests: requestItems,
-      schedule,
-      activity,
-      makeUpCap: {
-        used: Math.round(usedHours * 100) / 100,
-        cap
-      },
-      meta: {
-        generatedAt: new Date().toISOString(),
-        referenceDate: longDate(now)
-      }
-    });
+  const user = await prisma.user.findFirst({
+    where: { email: { equals: email, mode: 'insensitive' } }
   });
+
+  if (!user) {
+    throw HttpError.notFound('User not found');
+  }
+
+  const [latestSession] = await prisma.session.findMany({
+    where: { userId: user.id },
+    orderBy: { startedAt: 'desc' },
+    take: 1,
+    include: {
+      pauses: { orderBy: { sequence: 'asc' } },
+      events: { orderBy: { ts: 'desc' } }
+    }
+  });
+
+  const balance = await prisma.ptoBalance.findUnique({ where: { userId: user.id } });
+
+  const previousCompleted = latestSession?.endedAt
+    ? latestSession
+    : await prisma.session.findFirst({
+        where: { userId: user.id, endedAt: { not: null } },
+        orderBy: { endedAt: 'desc' }
+      });
+
+  const sessionStatus = resolveSessionStatus(latestSession ?? null);
+  const lastClockedOutAt = previousCompleted?.endedAt ?? null;
+  const activeSessionId = !latestSession || latestSession.status !== 'active' ? null : latestSession.id;
+
+  const now = new Date();
+  const todayStart = timesheetDayStart(now);
+  const todayEnd = timesheetDayEnd(now);
+
+  const minuteStats = await prisma.minuteStat.findMany({
+    where: {
+      session: { userId: user.id },
+      minuteStart: { gte: todayStart, lt: todayEnd }
+    },
+    select: { minuteStart: true, active: true, idle: true }
+  });
+
+  const pauses = await prisma.sessionPause.findMany({
+    where: {
+      session: { userId: user.id },
+      startedAt: { gte: todayStart, lt: todayEnd }
+    },
+    select: { type: true, durationMinutes: true, startedAt: true, endedAt: true }
+  });
+
+  const presenceMisses = await prisma.event.count({
+    where: {
+      session: { userId: user.id },
+      type: 'presence_miss',
+      ts: { gte: todayStart, lt: todayEnd }
+    }
+  });
+
+  const breakMinutes = pauses
+    .filter((pause) => pause.type === 'break')
+    .reduce((total, pause) => {
+      if (typeof pause.durationMinutes === 'number') {
+        return total + pause.durationMinutes;
+      }
+      const end = pause.endedAt ?? now;
+      return total + Math.max(0, differenceInMinutes(end, pause.startedAt));
+    }, 0);
+
+  const lunchMinutes = pauses
+    .filter((pause) => pause.type === 'lunch')
+    .reduce((total, pause) => {
+      if (typeof pause.durationMinutes === 'number') {
+        return total + pause.durationMinutes;
+      }
+      const end = pause.endedAt ?? now;
+      return total + Math.max(0, differenceInMinutes(end, pause.startedAt));
+    }, 0);
+
+  const todaySnapshot = {
+    date: isoDate(now),
+    label: dayLabel(now),
+    activeMinutes: minuteStats.filter((stat) => stat.active).length,
+    idleMinutes: minuteStats.filter((stat) => stat.idle).length,
+    breakMinutes,
+    lunchMinutes,
+    breaksCount: pauses.filter((pause) => pause.type === 'break').length,
+    lunchCount: pauses.filter((pause) => pause.type === 'lunch').length,
+    presenceMisses
+  };
+
+  const [weekly, payPeriod, monthly] = await Promise.all([
+    toTimesheetPeriod(user.id, 'weekly', now),
+    toTimesheetPeriod(user.id, 'pay_period', now),
+    toTimesheetPeriod(user.id, 'monthly', now)
+  ]);
+
+  const requests = await prisma.timeRequest.findMany({
+    where: { userId: user.id },
+    orderBy: { createdAt: 'desc' },
+    take: 10
+  });
+
+  const requestItems = requests.map(toRequestItem);
+
+  const [events, cap, usedHours, schedule] = await Promise.all([
+    prisma.event.findMany({
+      where: { session: { userId: user.id } },
+      orderBy: { ts: 'desc' },
+      take: 10
+    }),
+    getMakeupCapHoursPerMonth(),
+    getApprovedMakeupHoursThisMonth(prisma, user.id),
+    getUserSchedule({ userId: user.id, sessionStatus, reference: now })
+  ]);
+
+  const idleActivities = buildIdleActivities(minuteStats, pauses, now);
+
+  const activity = [
+    ...events.map(eventToActivity),
+    ...requests.map(requestToActivity),
+    ...idleActivities
+  ]
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    .slice(0, 12);
+
+  res.json({
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      location: user.role === 'manager' ? 'Market Street HQ' : 'San Francisco Retail Floor'
+    },
+    session: {
+      ...sessionStatus,
+      id: activeSessionId,
+      lastClockedOutAt
+    },
+    today: todaySnapshot,
+    timesheet: {
+      view: 'weekly' as const,
+      periods: {
+        weekly,
+        pay_period: payPeriod,
+        monthly
+      }
+    },
+    requests: requestItems,
+    schedule,
+    activity,
+    makeUpCap: {
+      used: Math.round(usedHours * 100) / 100,
+      cap
+    },
+    balances: {
+      pto: roundToQuarterHour(balance?.ptoHours ?? 0),
+      uto: roundToQuarterHour(balance?.utoHours ?? 0),
+      makeUp: roundToQuarterHour(balance?.makeUpHours ?? 0)
+    },
+    meta: {
+      generatedAt: new Date().toISOString(),
+      referenceDate: longDate(now)
+    }
+  });
+});
 
 export const appDataRouter = Router();
 

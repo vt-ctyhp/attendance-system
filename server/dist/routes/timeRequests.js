@@ -199,13 +199,13 @@ const approveTimeRequest = async (req, res) => {
                 }, tx);
                 break;
             }
-            case 'non_pto': {
-                const shouldDecrement = balance.baseNonPtoHours > 0;
+            case 'uto': {
+                const shouldDecrement = balance.baseUtoHours > 0;
                 updatedBalance = shouldDecrement
                     ? await tx.ptoBalance.update({
                         where: { id: balance.id },
                         data: {
-                            nonPtoHours: Math.max(balance.nonPtoHours - effectiveHours, 0)
+                            utoHours: Math.max(balance.utoHours - effectiveHours, 0)
                         }
                     })
                     : balance;

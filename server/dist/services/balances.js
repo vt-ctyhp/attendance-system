@@ -27,8 +27,8 @@ const recalcBalance = async (userId, client) => {
             case 'pto':
                 acc.pto += hours;
                 break;
-            case 'non_pto':
-                acc.nonPto += hours;
+            case 'uto':
+                acc.uto += hours;
                 break;
             case 'make_up':
                 acc.makeUp += hours;
@@ -37,12 +37,12 @@ const recalcBalance = async (userId, client) => {
                 break;
         }
         return acc;
-    }, { pto: 0, nonPto: 0, makeUp: 0 });
+    }, { pto: 0, uto: 0, makeUp: 0 });
     return db.ptoBalance.update({
         where: { id: balance.id },
         data: {
             ptoHours: balance.basePtoHours - totals.pto,
-            nonPtoHours: Math.max(balance.baseNonPtoHours - totals.nonPto, 0),
+            utoHours: Math.max(balance.baseUtoHours - totals.uto, 0),
             makeUpHours: balance.baseMakeUpHours + totals.makeUp
         }
     });
