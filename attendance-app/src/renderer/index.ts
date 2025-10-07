@@ -2104,6 +2104,9 @@ const applyOverview = (overview: OverviewResponse, options: { silent?: boolean }
 
   state.today.tardyMinutes = state.today.tardyMinutes ?? (state.today.presenceMisses ?? 0);
   state.today.presenceMisses = state.today.presenceMisses ?? 0;
+  if (!presenceEnabled) {
+    state.today.presenceMisses = 0;
+  }
 
   appContext.sessionId = overview.session.id;
 
