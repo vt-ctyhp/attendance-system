@@ -2543,6 +2543,12 @@ const baseStyles = `
     body.dashboard--payroll .compensation-row--missing td { background: rgba(254,243,199,0.35); }
     body.dashboard--payroll .compensation-row--missing td:first-child { font-weight: 600; }
     body.dashboard--payroll .compensation-row--missing td .meta a { font-weight: 600; }
+    body.dashboard--shifts .schedule-row--pto td { background: rgba(191, 219, 254, 0.55); }
+    body.dashboard--shifts .schedule-row--uto td { background: rgba(254, 215, 170, 0.55); }
+    body.dashboard--shifts .schedule-row--make_up td { background: rgba(187, 247, 208, 0.6); }
+    body.dashboard--shifts .schedule-row--pto td:first-child,
+    body.dashboard--shifts .schedule-row--uto td:first-child,
+    body.dashboard--shifts .schedule-row--make_up td:first-child { font-weight: 600; }
     body.dashboard--payroll .actions-cell { text-align: right; }
     body.dashboard--payroll .actions-cell .button { white-space: nowrap; }
     body.dashboard--payroll .compensation-form__footer { display: flex; flex-direction: column; gap: 0.75rem; }
@@ -2994,6 +3000,18 @@ dashboardRouter.get(
       orderBy: [{ startsAt: 'asc' }]
     });
 
+    const requests = await prisma.timeRequest.findMany({
+      where: {
+        status: 'approved',
+        startDate: { lte: windowEnd },
+        endDate: { gte: windowStart }
+      },
+      include: {
+        user: { select: { id: true, name: true, email: true } }
+      },
+      orderBy: [{ startDate: 'asc' }]
+    });
+
     const formatDuration = (start: Date, end: Date) => {
       const minutes = Math.max(0, differenceInMinutes(end, start));
       if (minutes < 60) {
@@ -3004,32 +3022,100 @@ dashboardRouter.get(
       return remaining === 0 ? `${hours} hr${hours === 1 ? '' : 's'}` : `${hours} hr ${remaining} min`;
     };
 
-    const shiftRows = assignments.length
-      ? assignments
-          .map((assignment) => {
-            const employeeName = assignment.user?.name ?? `User ${assignment.userId}`;
-            const email = assignment.user?.email ?? '';
-            const dateLabel = formatFullDate(assignment.startsAt);
-            const startTime = formatTimeOfDay(assignment.startsAt);
-            const endTime = formatTimeOfDay(assignment.endsAt);
-            const duration = formatDuration(assignment.startsAt, assignment.endsAt);
-            const label = assignment.label ?? '';
+    type ScheduleKind = 'shift' | 'pto' | 'uto' | 'make_up';
+
+    const TYPE_LABELS: Record<ScheduleKind, string> = {
+      shift: 'Scheduled Shift',
+      pto: 'Paid Time Off',
+      uto: 'Unpaid Time Off',
+      make_up: 'Make-up Hours'
+    };
+
+    const mapRequestKind = (type: string): ScheduleKind => {
+      switch (type) {
+        case 'pto':
+          return 'pto';
+        case 'uto':
+        case 'non_pto':
+          return 'uto';
+        case 'make_up':
+        default:
+          return 'make_up';
+      }
+    };
+
+    type CombinedEntry = {
+      kind: ScheduleKind;
+      start: Date;
+      end: Date;
+      employeeName: string;
+      email: string;
+      label: string;
+      reason?: string | null;
+    };
+
+    const combinedEntries: CombinedEntry[] = [];
+    const totals: Record<ScheduleKind, number> = {
+      shift: 0,
+      pto: 0,
+      uto: 0,
+      make_up: 0
+    };
+
+    for (const assignment of assignments) {
+      combinedEntries.push({
+        kind: 'shift',
+        start: assignment.startsAt,
+        end: assignment.endsAt,
+        employeeName: assignment.user?.name ?? `User ${assignment.userId}`,
+        email: assignment.user?.email ?? '',
+        label: assignment.label ?? TYPE_LABELS.shift
+      });
+      totals.shift += 1;
+    }
+
+    for (const request of requests) {
+      const kind = mapRequestKind(request.type);
+      combinedEntries.push({
+        kind,
+        start: request.startDate,
+        end: request.endDate,
+        employeeName: request.user?.name ?? `User ${request.userId}`,
+        email: request.user?.email ?? '',
+        label: TYPE_LABELS[kind],
+        reason: request.reason ?? null
+      });
+      totals[kind] += 1;
+    }
+
+    combinedEntries.sort((a, b) => a.start.getTime() - b.start.getTime());
+
+    const shiftRows = combinedEntries.length
+      ? combinedEntries
+          .map((entry) => {
+            const typeLabel = TYPE_LABELS[entry.kind];
+            const dateLabel = formatFullDate(entry.start);
+            const startTime = formatTimeOfDay(entry.start);
+            const endTime = formatTimeOfDay(entry.end);
+            const duration = formatDuration(entry.start, entry.end);
+            const displayLabel = entry.reason && entry.reason.trim().length ? entry.reason.trim() : entry.label;
             return `
-              <tr>
+              <tr class="schedule-row schedule-row--${entry.kind}">
                 <td>
-                  ${escapeHtml(employeeName)}
-                  <div class="meta">${escapeHtml(email)}</div>
+                  ${escapeHtml(entry.employeeName)}
+                  <div class="meta">${escapeHtml(entry.email)}</div>
                 </td>
                 <td>${escapeHtml(dateLabel)}</td>
                 <td>${escapeHtml(startTime)}</td>
                 <td>${escapeHtml(endTime)}</td>
                 <td>${escapeHtml(duration)}</td>
-                <td>${escapeHtml(label || '—')}</td>
+                <td>${escapeHtml(typeLabel)}</td>
+                <td>${escapeHtml(displayLabel || '—')}</td>
               </tr>
             `;
           })
           .join('\n')
-      : `<tr><td colspan="6" class="empty">No shifts scheduled for the next ${lookaheadDays} day${lookaheadDays === 1 ? '' : 's'}.</td></tr>`;
+      : `<tr><td colspan="7" class="empty">No shifts scheduled for the next ${lookaheadDays} day${lookaheadDays === 1 ? '' : 's'}.</td></tr>`;
 
     const summaryCard = `
       <section class="card card--summary">
@@ -3052,6 +3138,18 @@ dashboardRouter.get(
             <div>
               <dt>Shifts Skipped</dt>
               <dd>${generationSummary.skipped}</dd>
+            </div>
+            <div>
+              <dt>PTO Blocks</dt>
+              <dd>${totals.pto}</dd>
+            </div>
+            <div>
+              <dt>UTO Blocks</dt>
+              <dd>${totals.uto}</dd>
+            </div>
+            <div>
+              <dt>Make-up Blocks</dt>
+              <dd>${totals.make_up}</dd>
             </div>
           </dl>
         </div>
@@ -3118,7 +3216,8 @@ dashboardRouter.get(
                         <th>Start</th>
                         <th>End</th>
                         <th>Duration</th>
-                        <th>Label</th>
+                        <th>Type</th>
+                        <th>Label / Reason</th>
                       </tr>
                     </thead>
                     <tbody>
