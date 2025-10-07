@@ -1,6 +1,7 @@
 import { resolveHeroAvatarPaths, type HeroAvatarStatus } from './avatarResolver';
 
 const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
 
 type SessionStatus = 'clocked_out' | 'working' | 'break' | 'lunch';
 type RequestType = 'make_up' | 'pto' | 'uto' | 'edit';
@@ -219,6 +220,18 @@ const formatDayLabel = (date: Date) =>
 const formatDateLong = (date: Date) =>
   new Intl.DateTimeFormat(undefined, { month: 'long', day: 'numeric', year: 'numeric' }).format(date);
 
+const formatTimeOfDay = (date: Date) =>
+  new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(date);
+
+const formatDateTimeLong = (date: Date) =>
+  new Intl.DateTimeFormat(undefined, {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  }).format(date);
+
 const formatMonthLabel = (date: Date) =>
   new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(date);
 
@@ -279,6 +292,25 @@ const formatDurationMinutes = (minutes: number) => {
 const formatHours = (hours: number) => {
   const rounded = Math.round(hours * 100) / 100;
   return Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(2);
+};
+
+const parseDateTimeInput = (dateValue: string | null | undefined, timeValue: string | null | undefined): Date | null => {
+  if (!dateValue || !timeValue) {
+    return null;
+  }
+  const candidate = new Date(`${dateValue}T${timeValue}`);
+  if (Number.isNaN(candidate.getTime())) {
+    return null;
+  }
+  return candidate;
+};
+
+const diffHours = (start: Date, end: Date) => {
+  const diff = end.getTime() - start.getTime();
+  if (diff <= 0) {
+    return 0;
+  }
+  return Math.round((diff / HOUR) * 100) / 100;
 };
 
 const getMakeUpRemaining = () => Math.max(state.makeUpCap.cap - state.makeUpCap.used, 0);
@@ -1088,12 +1120,60 @@ const dom = {
   requestType: document.getElementById('request-type') as HTMLSelectElement,
   requestHours: document.getElementById('request-hours') as HTMLInputElement,
   requestStartDate: document.getElementById('request-start-date') as HTMLInputElement,
+  requestStartTime: document.getElementById('request-start-time') as HTMLInputElement,
   requestEndDate: document.getElementById('request-end-date') as HTMLInputElement,
+  requestEndTime: document.getElementById('request-end-time') as HTMLInputElement,
   requestReason: document.getElementById('request-reason') as HTMLTextAreaElement,
   requestHint: document.getElementById('request-hint')!,
   scheduleList: document.getElementById('schedule-list')!,
   activityList: document.getElementById('activity-list')!,
   makeupProgress: document.getElementById('makeup-progress')!
+};
+
+const resolveRequestRange = () => {
+  const startDateValue = dom.requestStartDate.value;
+  const startTimeValue = dom.requestStartTime.value;
+  const endDateValue = dom.requestEndDate.value || startDateValue;
+  const endTimeValue = dom.requestEndTime.value;
+
+  const start = parseDateTimeInput(startDateValue, startTimeValue);
+  const end = parseDateTimeInput(endDateValue, endTimeValue);
+  if (!start || !end) {
+    return null;
+  }
+  return { start, end };
+};
+
+const calculateRequestHoursFromInputs = (): number | null => {
+  const range = resolveRequestRange();
+  if (!range) {
+    return null;
+  }
+  const hours = diffHours(range.start, range.end);
+  if (hours <= 0) {
+    return null;
+  }
+  return hours;
+};
+
+const updateRequestHoursField = (options: { force?: boolean } = {}) => {
+  const { force = false } = options;
+  if (force) {
+    delete dom.requestHours.dataset.manual;
+  }
+  if (dom.requestHours.dataset.manual === 'true' && !force) {
+    return;
+  }
+
+  const hours = calculateRequestHoursFromInputs();
+  if (hours !== null) {
+    dom.requestHours.value = formatHours(hours);
+    dom.requestHours.dataset.calculated = 'true';
+    delete dom.requestHours.dataset.manual;
+  } else if (force || dom.requestHours.dataset.calculated === 'true') {
+    dom.requestHours.value = '';
+    delete dom.requestHours.dataset.calculated;
+  }
 };
 
 let heroAvatarImg: HTMLImageElement | null = null;
@@ -1341,10 +1421,17 @@ const renderRequests = () => {
     .map((request) => {
       const start = new Date(request.startDate);
       const end = request.endDate ? new Date(request.endDate) : start;
-      const rangeLabel = start.getTime() === end.getTime()
-        ? formatDateLong(start)
-        : `${formatDateLong(start)} – ${formatDateLong(end)}`;
-      const hoursLabel = request.hours ? `${request.hours}h` : '—';
+      const sameMoment = start.getTime() === end.getTime();
+      const sameDay = start.toDateString() === end.toDateString();
+      let rangeLabel: string;
+      if (sameMoment) {
+        rangeLabel = formatDateTimeLong(start);
+      } else if (sameDay) {
+        rangeLabel = `${formatDateLong(start)} • ${formatTimeOfDay(start)} – ${formatTimeOfDay(end)}`;
+      } else {
+        rangeLabel = `${formatDateTimeLong(start)} – ${formatDateTimeLong(end)}`;
+      }
+      const hoursLabel = request.hours ? `${formatHours(request.hours)}h` : '—';
       return `
         <li class="list__item">
           <div class="list__headline">${escapeHtml(requestLabel(request.type))}</div>
@@ -1639,13 +1726,10 @@ const handlePresence = async () => {
 const handleRequestSubmit = async (event: SubmitEvent) => {
   event.preventDefault();
   const type = dom.requestType.value as RequestType;
-  const hours = Number(dom.requestHours.value) || 0;
-  if (hours <= 0) {
-    showToast('Enter a positive number of hours.', 'warning');
-    return;
-  }
   const startDateValue = dom.requestStartDate.value;
+  const startTimeValue = dom.requestStartTime.value;
   const endDateValue = dom.requestEndDate.value;
+  const endTimeValue = dom.requestEndTime.value;
   const reason = dom.requestReason.value.trim();
   if (!reason) {
     showToast('Share a short reason for the request.', 'warning');
@@ -1655,9 +1739,45 @@ const handleRequestSubmit = async (event: SubmitEvent) => {
     showToast('Choose a start date for the request.', 'warning');
     return;
   }
-  if (endDateValue && endDateValue < startDateValue) {
-    showToast('End date cannot be before start date.', 'warning');
+  if (!startTimeValue) {
+    showToast('Choose a start time for the request.', 'warning');
     return;
+  }
+  if (!endDateValue) {
+    showToast('Choose an end date for the request.', 'warning');
+    return;
+  }
+  if (!endTimeValue) {
+    showToast('Choose an end time for the request.', 'warning');
+    return;
+  }
+  const start = parseDateTimeInput(startDateValue, startTimeValue);
+  const end = parseDateTimeInput(endDateValue, endTimeValue);
+  if (!start || !end) {
+    showToast('Enter valid start and end date/times.', 'warning');
+    return;
+  }
+  const autoHours = diffHours(start, end);
+  if (autoHours <= 0) {
+    showToast('End time must be after the start time.', 'warning');
+    return;
+  }
+  let hours = autoHours;
+  const manualOverride = dom.requestHours.dataset.manual === 'true';
+  if (manualOverride) {
+    const manualValue = Number(dom.requestHours.value);
+    if (!Number.isFinite(manualValue) || manualValue <= 0) {
+      showToast('Enter a positive number of hours.', 'warning');
+      return;
+    }
+    if (manualValue > 1000) {
+      showToast('Hours must be 1000 or less.', 'warning');
+      return;
+    }
+    hours = Math.round(manualValue * 100) / 100;
+  } else {
+    dom.requestHours.value = formatHours(autoHours);
+    dom.requestHours.dataset.calculated = 'true';
   }
   if (!appContext.email || !appContext.deviceId) {
     showToast('Update Settings with your work email before submitting requests.', 'warning');
@@ -1673,8 +1793,8 @@ const handleRequestSubmit = async (event: SubmitEvent) => {
       '/api/time-requests',
       {
         type,
-        startDate: startDateValue,
-        endDate: endDateValue || undefined,
+        startDate: start.toISOString(),
+        endDate: end.toISOString(),
         hours,
         reason,
         email: appContext.email,
@@ -1691,8 +1811,8 @@ const handleRequestSubmit = async (event: SubmitEvent) => {
     id: `req-${Date.now()}`,
     type,
     status: 'pending',
-    startDate: new Date(startDateValue).toISOString(),
-    endDate: endDateValue ? new Date(endDateValue).toISOString() : null,
+    startDate: start.toISOString(),
+    endDate: end.toISOString(),
     hours,
     reason,
     submittedAt: submittedAt.toISOString()
@@ -1708,7 +1828,10 @@ const handleRequestSubmit = async (event: SubmitEvent) => {
   }
 
   dom.requestForm.reset();
-  dom.requestHours.value = '1';
+  dom.requestHours.value = '';
+  delete dom.requestHours.dataset.calculated;
+  delete dom.requestHours.dataset.manual;
+  updateRequestHoursField({ force: true });
   showToast('Request submitted.', 'success');
   pushActivity(`Submitted ${requestLabel(type)}`, 'request');
   renderRequests();
@@ -1908,6 +2031,36 @@ const initialize = () => {
   dom.breakToggle.addEventListener('click', handleBreakToggle);
   dom.lunchToggle.addEventListener('click', handleLunchToggle);
   dom.requestType.addEventListener('change', updateRequestHint);
+  const clearManualRequestHours = () => {
+    delete dom.requestHours.dataset.manual;
+  };
+
+  dom.requestStartDate.addEventListener('change', () => {
+    if (!dom.requestEndDate.value || dom.requestEndDate.value < dom.requestStartDate.value) {
+      dom.requestEndDate.value = dom.requestStartDate.value;
+    }
+    clearManualRequestHours();
+    updateRequestHoursField({ force: true });
+  });
+  dom.requestStartTime.addEventListener('input', () => {
+    if (!dom.requestEndTime.value) {
+      dom.requestEndTime.value = dom.requestStartTime.value;
+    }
+    clearManualRequestHours();
+    updateRequestHoursField({ force: true });
+  });
+  dom.requestEndDate.addEventListener('change', () => {
+    clearManualRequestHours();
+    updateRequestHoursField({ force: true });
+  });
+  dom.requestEndTime.addEventListener('input', () => {
+    clearManualRequestHours();
+    updateRequestHoursField({ force: true });
+  });
+  dom.requestHours.addEventListener('input', () => {
+    dom.requestHours.dataset.manual = 'true';
+    delete dom.requestHours.dataset.calculated;
+  });
   dom.requestForm.addEventListener('submit', handleRequestSubmit);
   dom.timesheetView.addEventListener('change', handleTimesheetChange);
   dom.downloadButton.addEventListener('click', handleDownload);
@@ -1917,6 +2070,7 @@ const initialize = () => {
   window.setInterval(renderHero, 30_000);
   window.addEventListener('focus', renderHero);
 
+  updateRequestHoursField();
   updateRequestHint();
   void hydrateFromServer();
 };

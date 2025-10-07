@@ -645,7 +645,7 @@
                 </label>
                 <label>
                   Hours
-                  <input id="request-hours" type="number" min="0" max="24" step="0.25" value="1" />
+                  <input id="request-hours" type="number" min="0" step="0.25" />
                 </label>
               </div>
               <div class="form-row">
@@ -654,8 +654,18 @@
                   <input id="request-start-date" type="date" required />
                 </label>
                 <label>
-                  End Date (optional)
-                  <input id="request-end-date" type="date" />
+                  Start Time
+                  <input id="request-start-time" type="time" required />
+                </label>
+              </div>
+              <div class="form-row">
+                <label>
+                  End Date
+                  <input id="request-end-date" type="date" required />
+                </label>
+                <label>
+                  End Time
+                  <input id="request-end-time" type="time" required />
                 </label>
               </div>
               <label>
