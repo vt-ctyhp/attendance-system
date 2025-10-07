@@ -21,6 +21,7 @@ const payroll_1 = require("../services/payroll/payroll");
 const attendance_1 = require("../services/payroll/attendance");
 const bonuses_1 = require("../services/payroll/bonuses");
 const timeRequestPolicy_1 = require("../services/timeRequestPolicy");
+const shiftPlanner_1 = require("../services/shiftPlanner");
 const DASHBOARD_TIME_ZONE = process.env.DASHBOARD_TIME_ZONE ?? 'America/Los_Angeles';
 const ISO_DATE_TIME = "yyyy-MM-dd'T'HH:mm:ssXXX";
 const ISO_DATE = 'yyyy-MM-dd';
@@ -2084,6 +2085,7 @@ const renderNav = (active) => {
         link('/dashboard/timesheets', 'Timesheets', 'timesheets'),
         link('/dashboard/requests', 'Requests', 'requests'),
         link('/dashboard/balances', 'Balances', 'balances'),
+        link('/dashboard/shifts', 'Shifts', 'shifts'),
         link('/dashboard/payroll', 'Payroll', 'payroll'),
         link('/dashboard/payroll/holidays', 'Holiday Calendar', 'payroll-holidays', { child: true }),
         link('/dashboard/settings', 'Settings', 'settings')
@@ -2370,6 +2372,234 @@ exports.dashboardRouter.get('/today', async (req, res) => {
   `;
     res.type('html').send(html);
 });
+exports.dashboardRouter.get('/shifts', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const parseLookahead = (value) => {
+        if (typeof value !== 'string')
+            return NaN;
+        const parsed = Number.parseInt(value, 10);
+        return Number.isFinite(parsed) ? parsed : NaN;
+    };
+    const requestedDays = parseLookahead(req.query.days);
+    const lookaheadDays = Number.isFinite(requestedDays)
+        ? Math.min(Math.max(requestedDays, 1), 60)
+        : 14;
+    const generationSummary = await (0, shiftPlanner_1.ensureUpcomingShiftsForAllUsers)(lookaheadDays);
+    const now = new Date();
+    const windowStart = (0, timesheets_1.timesheetDayStart)(now);
+    const windowEnd = (0, timesheets_1.timesheetDayEnd)((0, date_fns_1.addDays)(now, lookaheadDays));
+    const assignments = await prisma_1.prisma.shiftAssignment.findMany({
+        where: {
+            startsAt: { gte: windowStart },
+            endsAt: { lte: windowEnd }
+        },
+        include: {
+            user: { select: { id: true, name: true, email: true } }
+        },
+        orderBy: [{ startsAt: 'asc' }]
+    });
+    const formatDuration = (start, end) => {
+        const minutes = Math.max(0, (0, date_fns_1.differenceInMinutes)(end, start));
+        if (minutes < 60) {
+            return `${minutes} min`;
+        }
+        const hours = Math.floor(minutes / 60);
+        const remaining = minutes % 60;
+        return remaining === 0 ? `${hours} hr${hours === 1 ? '' : 's'}` : `${hours} hr ${remaining} min`;
+    };
+    const shiftRows = assignments.length
+        ? assignments
+            .map((assignment) => {
+            const employeeName = assignment.user?.name ?? `User ${assignment.userId}`;
+            const email = assignment.user?.email ?? '';
+            const dateLabel = formatFullDate(assignment.startsAt);
+            const startTime = formatTimeOfDay(assignment.startsAt);
+            const endTime = formatTimeOfDay(assignment.endsAt);
+            const duration = formatDuration(assignment.startsAt, assignment.endsAt);
+            const label = assignment.label ?? '';
+            return `
+              <tr>
+                <td>
+                  ${escapeHtml(employeeName)}
+                  <div class="meta">${escapeHtml(email)}</div>
+                </td>
+                <td>${escapeHtml(dateLabel)}</td>
+                <td>${escapeHtml(startTime)}</td>
+                <td>${escapeHtml(endTime)}</td>
+                <td>${escapeHtml(duration)}</td>
+                <td>${escapeHtml(label || '—')}</td>
+              </tr>
+            `;
+        })
+            .join('\n')
+        : `<tr><td colspan="6" class="empty">No shifts scheduled for the next ${lookaheadDays} day${lookaheadDays === 1 ? '' : 's'}.</td></tr>`;
+    const summaryCard = `
+      <section class="card card--summary">
+        <div class="card__header">
+          <div>
+            <h2 class="card__title">Latest Shift Generation</h2>
+            <p class="card__subtitle">Window: next ${lookaheadDays} day${lookaheadDays === 1 ? '' : 's'}.</p>
+          </div>
+        </div>
+        <div class="card__body">
+          <dl class="summary-grid">
+            <div>
+              <dt>Employees Processed</dt>
+              <dd>${generationSummary.usersProcessed}</dd>
+            </div>
+            <div>
+              <dt>Shifts Created</dt>
+              <dd>${generationSummary.created}</dd>
+            </div>
+            <div>
+              <dt>Shifts Skipped</dt>
+              <dd>${generationSummary.skipped}</dd>
+            </div>
+          </dl>
+        </div>
+      </section>
+    `;
+    const html = `
+      <!doctype html>
+      <html lang="en">
+        <head>
+          <meta charset="utf-8" />
+          <title>Upcoming Shifts</title>
+          <style>${baseStyles}</style>
+        </head>
+        <body class="dashboard dashboard--shifts">
+          ${renderNav('shifts')}
+          <main class="page-shell">
+            <header class="page-header">
+              <div class="page-header__content">
+                <p class="page-header__eyebrow">Scheduling</p>
+                <h1 class="page-header__title">Upcoming Shifts</h1>
+                <p class="page-header__subtitle">Review and regenerate shift assignments derived from employee schedule templates.</p>
+              </div>
+              <div class="page-header__meta">
+                <form method="get" action="/dashboard/shifts" class="filters">
+                  <label>
+                    <span>Look ahead (days)</span>
+                    <input type="number" name="days" value="${lookaheadDays}" min="1" max="60" />
+                  </label>
+                  <button type="submit" class="button-secondary">Update</button>
+                </form>
+              </div>
+            </header>
+            ${summaryCard}
+            <section class="card">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Generate Upcoming Shifts</h2>
+                  <p class="card__subtitle">Run the generator to populate the next two weeks of shift assignments immediately.</p>
+                </div>
+              </div>
+              <div class="card__body">
+                <form data-async="true" data-kind="shift-rebuild" data-success-message="Upcoming shifts refreshed." class="stack-form">
+                  <p class="meta">The generator respects each employee&apos;s saved schedule pattern and skips existing shifts.</p>
+                  <p class="form-error" data-error></p>
+                  <button type="submit" class="button-secondary">Generate Upcoming Shifts</button>
+                </form>
+              </div>
+            </section>
+            <section class="card card--table">
+              <div class="card__header">
+                <div>
+                  <h2 class="card__title">Upcoming Shift Schedule</h2>
+                  <p class="card__subtitle">Showing assignments between ${escapeHtml(formatFullDate(windowStart))} and ${escapeHtml(formatFullDate(windowEnd))} (${escapeHtml(DASHBOARD_TIME_ZONE)}).</p>
+                </div>
+              </div>
+              <div class="card__body">
+                <div class="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Employee</th>
+                        <th>Date</th>
+                        <th>Start</th>
+                        <th>End</th>
+                        <th>Duration</th>
+                        <th>Label</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${shiftRows}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+          </main>
+          <script>
+            (() => {
+              const reloadWithBanner = (message, error) => {
+                const url = new URL(window.location.href);
+                if (message) {
+                  url.searchParams.set('message', message);
+                  url.searchParams.delete('error');
+                } else if (error) {
+                  url.searchParams.set('error', error);
+                  url.searchParams.delete('message');
+                } else {
+                  url.searchParams.delete('message');
+                  url.searchParams.delete('error');
+                }
+                window.location.href = url.toString();
+              };
+
+              const setError = (target, text) => {
+                const el = typeof target === 'string' ? document.getElementById(target) : target;
+                if (el) {
+                  el.textContent = text;
+                }
+              };
+
+              const form = document.querySelector('form[data-kind="shift-rebuild"]');
+              if (form) {
+                form.addEventListener('submit', async (event) => {
+                  event.preventDefault();
+                  const errorEl = form.querySelector('[data-error]');
+                  if (errorEl) errorEl.textContent = '';
+                  const submitter = event.submitter instanceof HTMLButtonElement ? event.submitter : null;
+                  if (submitter) submitter.disabled = true;
+                  try {
+                    const response = await fetch('/api/payroll/shifts/rebuild', {
+                      method: 'POST',
+                      credentials: 'same-origin'
+                    });
+                    if (!response.ok) {
+                      let message = 'Unable to generate shifts.';
+                      try {
+                        const data = await response.json();
+                        if (data && typeof data.error === 'string') message = data.error;
+                        else if (data && typeof data.message === 'string') message = data.message;
+                      } catch (err) {}
+                      throw new Error(message);
+                    }
+                    let message = form.getAttribute('data-success-message') || 'Upcoming shifts refreshed.';
+                    try {
+                      const data = await response.json();
+                      if (data?.summary && typeof data.summary.created === 'number') {
+                        const created = data.summary.created;
+                        const skipped = typeof data.summary.skipped === 'number' ? data.summary.skipped : 0;
+                        const plural = created === 1 ? '' : 's';
+                        message = 'Generated ' + created + ' shift' + plural + ' (' + skipped + ' skipped).';
+                      }
+                    } catch (err) {}
+                    reloadWithBanner(message);
+                  } catch (error) {
+                    const message = error instanceof Error ? error.message : 'Unable to generate shifts.';
+                    setError(errorEl, message);
+                    if (submitter) submitter.disabled = false;
+                  }
+                });
+              }
+            })();
+          </script>
+        </body>
+      </html>
+    `;
+    res.type('html').send(html);
+}));
 exports.dashboardRouter.get('/weekly', async (req, res) => {
     const today = zonedStartOfDay(new Date());
     const baseStart = typeof req.query.start === 'string' ? parseDateParam(req.query.start) : (0, date_fns_1.subDays)(today, 6);
@@ -5018,16 +5248,7 @@ exports.dashboardRouter.get('/payroll', async (req, res) => {
                     </form>
                   </li>
                   <li>
-                    <strong>3. Generate upcoming shifts</strong>
-                    <span>Create shift assignments from each employee&apos;s saved schedule pattern for the next two weeks.</span>
-                    <form data-async="true" data-kind="shift-rebuild" data-success-message="Upcoming shifts refreshed." class="stack-form">
-                      <p class="meta">Use this after updating compensation schedules to feed the roster and overview pages immediately.</p>
-                      <p class="form-error" data-error></p>
-                      <button type="submit" class="button-secondary">Generate Shifts</button>
-                    </form>
-                  </li>
-                  <li>
-                    <strong>4. Final checks</strong>
+                    <strong>3. Final checks</strong>
                     <span>Verify supporting data before approving or paying the period.</span>
                     <div class="step-actions">
                       <a href="#attendance-facts" class="button button-secondary">Attendance facts</a>
