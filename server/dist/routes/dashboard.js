@@ -5018,7 +5018,16 @@ exports.dashboardRouter.get('/payroll', async (req, res) => {
                     </form>
                   </li>
                   <li>
-                    <strong>3. Final checks</strong>
+                    <strong>3. Generate upcoming shifts</strong>
+                    <span>Create shift assignments from each employee&apos;s saved schedule pattern for the next two weeks.</span>
+                    <form data-async="true" data-kind="shift-rebuild" data-success-message="Upcoming shifts refreshed." class="stack-form">
+                      <p class="meta">Use this after updating compensation schedules to feed the roster and overview pages immediately.</p>
+                      <p class="form-error" data-error></p>
+                      <button type="submit" class="button-secondary">Generate Shifts</button>
+                    </form>
+                  </li>
+                  <li>
+                    <strong>4. Final checks</strong>
                     <span>Verify supporting data before approving or paying the period.</span>
                     <div class="step-actions">
                       <a href="#attendance-facts" class="button button-secondary">Attendance facts</a>
@@ -5480,6 +5489,34 @@ exports.dashboardRouter.get('/payroll', async (req, res) => {
                       throw new Error(message);
                     }
                     reloadWithBanner(form.getAttribute('data-success-message') || 'Attendance recalculation started.');
+                    return;
+                  }
+
+                  if (kind === 'shift-rebuild') {
+                    const response = await fetch('/api/payroll/shifts/rebuild', {
+                      method: 'POST',
+                      credentials: 'same-origin'
+                    });
+                    if (!response.ok) {
+                      let message = 'Unable to generate shifts.';
+                      try {
+                        const data = await response.json();
+                        if (data && typeof data.error === 'string') message = data.error;
+                        else if (data && typeof data.message === 'string') message = data.message;
+                      } catch (err) {}
+                      throw new Error(message);
+                    }
+                    let message = form.getAttribute('data-success-message') || 'Upcoming shifts refreshed.';
+                    try {
+                      const data = await response.json();
+                      if (data?.summary && typeof data.summary.created === 'number') {
+                        const created = data.summary.created;
+                        const skipped = typeof data.summary.skipped === 'number' ? data.summary.skipped : 0;
+                        const plural = created === 1 ? '' : 's';
+                        message = 'Generated ' + created + ' shift' + plural + ' (' + skipped + ' skipped).';
+                      }
+                    } catch (err) {}
+                    reloadWithBanner(message);
                     return;
                   }
 

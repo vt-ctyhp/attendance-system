@@ -4,6 +4,7 @@ exports.__private__ = exports.getUserSchedule = void 0;
 const date_fns_1 = require("date-fns");
 const date_fns_tz_1 = require("date-fns-tz");
 const prisma_1 = require("../prisma");
+const shiftPlanner_1 = require("./shiftPlanner");
 const timesheets_1 = require("./timesheets");
 const DEFAULT_SCHEDULE_TEMPLATES = [
     { label: 'Mon – Fri', start: '09:00', end: '17:30' },
@@ -147,6 +148,7 @@ const loadScheduleSources = async (userId, windowStart, windowEnd) => {
 const getUserSchedule = async ({ userId, sessionStatus, reference = new Date(), limit = DEFAULT_UPCOMING_LIMIT, lookaheadDays = DEFAULT_LOOKAHEAD_DAYS }) => {
     const windowStart = (0, timesheets_1.timesheetDayStart)(reference);
     const windowEnd = (0, timesheets_1.timesheetDayEnd)((0, date_fns_1.addDays)(reference, lookaheadDays));
+    await (0, shiftPlanner_1.ensureUpcomingShiftsForUser)({ userId, windowStart, windowEnd });
     const entries = await loadScheduleSources(userId, windowStart, windowEnd);
     return {
         defaults: DEFAULT_SCHEDULE_TEMPLATES.slice(),

@@ -25,6 +25,7 @@ import {
   recalcPayrollForPayDate
 } from '../services/payroll/payroll';
 import { PAYROLL_TIME_ZONE } from '../services/payroll/constants';
+import { ensureUpcomingShiftsForAllUsers } from '../services/shiftPlanner';
 
 const payrollRouter = Router();
 
@@ -227,6 +228,15 @@ payrollRouter.get(
     const payDate = parsePayDate(payDateRaw);
     const period = await getPayrollPeriod(payDate);
     res.json({ period });
+  })
+);
+
+payrollRouter.post(
+  '/shifts/rebuild',
+  requireAdminOrManager,
+  asyncHandler(async (_req: AuthenticatedRequest, res) => {
+    const summary = await ensureUpcomingShiftsForAllUsers();
+    res.status(202).json({ success: true, summary });
   })
 );
 

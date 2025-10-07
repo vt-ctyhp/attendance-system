@@ -1,6 +1,7 @@
 import { addDays } from 'date-fns';
 import { formatInTimeZone } from 'date-fns-tz';
 import { prisma } from '../prisma';
+import { ensureUpcomingShiftsForUser } from './shiftPlanner';
 
 type DbShift = {
   id: number;
@@ -233,6 +234,8 @@ export const getUserSchedule = async ({
 }: BuildOptions) => {
   const windowStart = timesheetDayStart(reference);
   const windowEnd = timesheetDayEnd(addDays(reference, lookaheadDays));
+
+  await ensureUpcomingShiftsForUser({ userId, windowStart, windowEnd });
 
   const entries = await loadScheduleSources(userId, windowStart, windowEnd);
 

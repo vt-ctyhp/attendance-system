@@ -12,6 +12,7 @@ const attendance_1 = require("../services/payroll/attendance");
 const bonuses_1 = require("../services/payroll/bonuses");
 const payroll_1 = require("../services/payroll/payroll");
 const constants_1 = require("../services/payroll/constants");
+const shiftPlanner_1 = require("../services/shiftPlanner");
 const payrollRouter = (0, express_1.Router)();
 exports.payrollRouter = payrollRouter;
 const allowAnonDashboard = process.env.DASHBOARD_ALLOW_ANON === 'true';
@@ -155,6 +156,10 @@ payrollRouter.get('/payruns/:payDate', requireAdmin, (0, asyncHandler_1.asyncHan
     const payDate = parsePayDate(payDateRaw);
     const period = await (0, payroll_1.getPayrollPeriod)(payDate);
     res.json({ period });
+}));
+payrollRouter.post('/shifts/rebuild', requireAdminOrManager, (0, asyncHandler_1.asyncHandler)(async (_req, res) => {
+    const summary = await (0, shiftPlanner_1.ensureUpcomingShiftsForAllUsers)();
+    res.status(202).json({ success: true, summary });
 }));
 payrollRouter.post('/payruns/:payDate/approve', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     const { payDate: payDateRaw } = (0, validation_1.parseWithSchema)(dateParamSchema, req.params, 'Invalid pay date');
