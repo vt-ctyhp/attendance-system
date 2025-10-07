@@ -1254,7 +1254,13 @@ const dom = {
   requestHint: document.getElementById('request-hint')!,
   scheduleList: document.getElementById('schedule-list')!,
   activityList: document.getElementById('activity-list')!,
-  makeupProgress: document.getElementById('makeup-progress')!
+  makeupProgress: document.getElementById('makeup-progress')!,
+  settingsOpen: document.getElementById('settings-open') as HTMLButtonElement | null,
+  settingsModal: document.getElementById('settings-modal') as HTMLDivElement | null,
+  settingsClose: document.getElementById('settings-close') as HTMLButtonElement | null,
+  settingsForm: document.getElementById('settings-form') as HTMLFormElement | null,
+  settingsServerUrl: document.getElementById('settings-server-url') as HTMLInputElement | null,
+  settingsWorkEmail: document.getElementById('settings-work-email') as HTMLInputElement | null
 };
 
 const resolveRequestRange = () => {
@@ -1269,6 +1275,104 @@ const resolveRequestRange = () => {
     return null;
   }
   return { start, end };
+};
+
+const applySettingsToForm = (settings: AppSettings) => {
+  if (!dom.settingsServerUrl || !dom.settingsWorkEmail) {
+    return;
+  }
+  dom.settingsServerUrl.value = settings.serverBaseUrl ?? '';
+  dom.settingsWorkEmail.value = settings.workEmail ?? '';
+};
+
+const setSettingsModalVisible = (visible: boolean) => {
+  if (!dom.settingsModal) {
+    return;
+  }
+  if (visible) {
+    dom.settingsModal.dataset.visible = 'true';
+    dom.settingsModal.removeAttribute('aria-hidden');
+    dom.settingsServerUrl?.focus();
+  } else {
+    dom.settingsModal.dataset.visible = 'false';
+    dom.settingsModal.setAttribute('aria-hidden', 'true');
+  }
+};
+
+const openSettingsModal = () => {
+  setSettingsModalVisible(true);
+};
+
+const closeSettingsModal = () => {
+  setSettingsModalVisible(false);
+};
+
+const loadSettings = async () => {
+  if (!dom.settingsForm) {
+    return;
+  }
+  try {
+    const settings = await window.attendance.getSettings();
+    applySettingsToForm(settings);
+    appContext = {
+      ...appContext,
+      baseUrl: settings.serverBaseUrl,
+      email: settings.workEmail
+    };
+  } catch (error) {
+    console.error('Failed to load settings', error);
+  }
+};
+
+const handleSettingsSubmit = async (event: SubmitEvent) => {
+  event.preventDefault();
+  if (!dom.settingsServerUrl || !dom.settingsWorkEmail) {
+    return;
+  }
+  const serverBaseUrl = dom.settingsServerUrl.value.trim();
+  const workEmailRaw = dom.settingsWorkEmail.value.trim();
+
+  if (!serverBaseUrl) {
+    showToast('Enter a server URL.', 'warning');
+    dom.settingsServerUrl.focus();
+    return;
+  }
+  if (!workEmailRaw) {
+    showToast('Enter your work email.', 'warning');
+    dom.settingsWorkEmail.focus();
+    return;
+  }
+
+  const workEmail = workEmailRaw.toLowerCase();
+
+  try {
+    const updated = await window.attendance.updateSettings({
+      serverBaseUrl,
+      workEmail
+    });
+    applySettingsToForm(updated);
+    appContext = {
+      ...appContext,
+      baseUrl: updated.serverBaseUrl,
+      email: updated.workEmail
+    };
+    showToast('Settings saved.', 'success');
+    await authenticate().catch(() => false);
+    await hydrateFromServer({ silent: true });
+    closeSettingsModal();
+  } catch (error) {
+    console.error('Failed to update settings', error);
+    showToast('Unable to save settings.', 'danger');
+  }
+};
+
+const handleSettingsKeydown = (event: KeyboardEvent) => {
+  if (event.key === 'Escape') {
+    if (dom.settingsModal?.dataset.visible === 'true') {
+      event.preventDefault();
+      closeSettingsModal();
+    }
+  }
 };
 
 const calculateRequestHoursFromInputs = (): number | null => {
@@ -2174,6 +2278,7 @@ const hydrateFromServer = async ({ silent = false }: { silent?: boolean } = {}) 
 };
 
 const initialize = () => {
+  void loadSettings();
   updateTimesheetFromToday();
   applyPresenceVisibility();
   render();
@@ -2215,6 +2320,26 @@ const initialize = () => {
   dom.requestForm.addEventListener('submit', handleRequestSubmit);
   dom.timesheetView.addEventListener('change', handleTimesheetChange);
   dom.downloadButton.addEventListener('click', handleDownload);
+  if (dom.settingsForm) {
+    dom.settingsForm.addEventListener('submit', handleSettingsSubmit);
+  }
+  if (dom.settingsOpen) {
+    dom.settingsOpen.addEventListener('click', () => {
+      void loadSettings();
+      openSettingsModal();
+    });
+  }
+  if (dom.settingsClose) {
+    dom.settingsClose.addEventListener('click', closeSettingsModal);
+  }
+  if (dom.settingsModal) {
+    dom.settingsModal.addEventListener('click', (event) => {
+      if (event.target === dom.settingsModal) {
+        closeSettingsModal();
+      }
+    });
+  }
+  window.addEventListener('keydown', handleSettingsKeydown);
 
   registerPresenceListeners();
 
