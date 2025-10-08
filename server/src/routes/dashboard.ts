@@ -7131,7 +7131,7 @@ dashboardRouter.get('/payroll/holidays', async (req, res) => {
 
   const holidayRows = holidays
     .map((holiday) => {
-      const iso = formatIsoDate(holiday.observedOn);
+      const iso = holiday.observedOn.toISOString().slice(0, 10);
       return `
         <tr>
           <td>${escapeHtml(holiday.name)}</td>
