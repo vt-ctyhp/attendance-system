@@ -5023,7 +5023,6 @@ dashboardRouter.get('/balances', async (req, res) => {
       const isSelected = selectedUser?.id === row.id;
       return `<tr${isSelected ? ' class="highlight-row"' : ''}>
         <td><a href="/dashboard/balances?userId=${row.id}">${escapeHtml(row.name)}</a></td>
-        <td>${escapeHtml(row.email)}</td>
         <td>${escapeHtml(formatHours(row.pto))} h<div class="meta">Base ${escapeHtml(formatHours(row.basePto))} h</div></td>
         <td>${escapeHtml(formatHours(row.uto))} h<div class="meta">Base ${escapeHtml(formatHours(row.baseUto))} h</div></td>
         <td>${escapeHtml(formatHours(row.makeUp))} h<div class="meta">Base ${escapeHtml(formatHours(row.baseMakeUp))} h</div></td>
@@ -5035,7 +5034,7 @@ dashboardRouter.get('/balances', async (req, res) => {
   const totalsRow = rows.length
     ? `<tfoot>
         <tr class="totals">
-          <th colspan="2">Totals</th>
+          <th>Totals</th>
           <th>${escapeHtml(formatHours(totals.pto))} h</th>
           <th>${escapeHtml(formatHours(totals.uto))} h</th>
           <th>${escapeHtml(formatHours(totals.makeUp))} h</th>
@@ -5089,11 +5088,11 @@ dashboardRouter.get('/balances', async (req, res) => {
     const currentPto = Number(balance.ptoHours);
     const currentUto = Number(balance.utoHours);
     const currentMakeUp = Number(balance.makeUpHours);
-    const accrualEnabledFlag = latestConfig?.accrualEnabled ?? false;
     const ptoAccrual = resolveAccrual((rule) => rule?.ptoHoursPerMonth ?? rule?.hoursPerMonth ?? 0);
     const utoAccrual = resolveAccrual((rule) => rule?.utoHoursPerMonth ?? 0);
     const makeUpAccrual = 0;
     const accrualSource = userRule ? 'user' : defaultRule ? 'default' : 'none';
+    const accrualStatusLabel = accrualSource === 'user' ? 'User override' : accrualSource === 'default' ? 'Default rule' : 'No rule set';
     const summaryCards = `
       <div class="summary-cards">
         <div class="summary-card">
@@ -5120,9 +5119,7 @@ dashboardRouter.get('/balances', async (req, res) => {
           <div class="summary-value">${escapeHtml(
             [`PTO ${formatHours(ptoAccrual)} h/mo`, `UTO ${formatHours(utoAccrual)} h/mo`].join(' • ')
           )}</div>
-          <div class="summary-meta">${
-            accrualSource === 'user' ? 'User override' : accrualSource === 'default' ? 'Default rule' : 'No rule set'
-          } · ${accrualEnabledFlag ? 'Accrual enabled' : 'Accrual disabled'}</div>
+          <div class="summary-meta">${accrualStatusLabel} · Accrual enabled (set monthly rate to 0 to pause)</div>
         </div>
         <div class="summary-card">
           <div class="summary-title">Last Updated</div>
@@ -5213,7 +5210,7 @@ dashboardRouter.get('/balances', async (req, res) => {
               </label>
             </div>
           </div>
-          <p class="dialog-note">Accrual is currently ${accrualEnabledFlag ? 'enabled' : 'disabled'} (${accrualSource === 'user' ? 'user override' : accrualSource === 'default' ? 'default rule' : 'no rule set'}). Make-up balances are capped monthly and do not accrue automatically.</p>
+          <p class="dialog-note">Accrual runs each month (${accrualStatusLabel}). Set monthly rates to 0 hours if an employee should not accrue. Make-up balances are capped monthly and do not accrue automatically.</p>
           <div class="dialog-grid">
             <label>
               <span>PTO Accrual (hours/mo)</span>
@@ -5251,7 +5248,7 @@ dashboardRouter.get('/balances', async (req, res) => {
         data-pto-accrual="${ptoAccrual}"
         data-uto-accrual="${utoAccrual}"
         data-makeup-cap="${makeUpCap}"
-        data-accrual-enabled="${accrualEnabledFlag ? 'true' : 'false'}"
+        data-accrual-enabled="true"
         data-accrual-source="${accrualSource}"
       >
         <div class="card__header">
@@ -5504,7 +5501,6 @@ dashboardRouter.get('/balances', async (req, res) => {
                           <thead>
                             <tr>
                               <th>User</th>
-                              <th>Email</th>
                               <th>PTO</th>
                               <th>UTO</th>
                               <th>Make-Up</th>
@@ -6205,9 +6201,7 @@ dashboardRouter.get('/payroll', async (req, res) => {
       const kpiLabel = config.kpiEligible
         ? `Eligible${config.defaultKpiBonus ? ` (${formatCurrency(config.defaultKpiBonus)})` : ''}`
         : 'Not eligible';
-      const accrualLabel = config.accrualEnabled
-        ? `Enabled${config.accrualMethod ? ` – ${escapeHtml(config.accrualMethod)}` : ''}`
-        : 'Disabled';
+      const accrualLabel = `Enabled${config.accrualMethod ? ` – ${escapeHtml(config.accrualMethod)}` : ''}`;
 
       return `
         <tr>
@@ -6794,7 +6788,6 @@ dashboardRouter.get('/payroll', async (req, res) => {
                     const quarterly = form.querySelector('input[name="quarterlyAttendanceBonus"]');
                     const kpiEligible = form.querySelector('input[name="kpiEligible"]');
                     const defaultKpi = form.querySelector('input[name="defaultKpiBonus"]');
-                    const accrualEnabledInput = form.querySelector('input[name="accrualEnabled"]');
                     const accrualMethodInput = form.querySelector('input[name="accrualMethod"]');
 
                     if (!(userSelect instanceof HTMLSelectElement) || !userSelect.value) {
@@ -6833,9 +6826,7 @@ dashboardRouter.get('/payroll', async (req, res) => {
                           ? Number.parseFloat(defaultKpi.value)
                           : null,
                       schedule: serializeSchedule(form),
-                      accrualEnabled: accrualEnabledInput instanceof HTMLInputElement
-                        ? accrualEnabledInput.checked
-                        : false,
+                      accrualEnabled: true,
                       accrualMethod:
                         accrualMethodInput instanceof HTMLInputElement && accrualMethodInput.value.trim()
                           ? accrualMethodInput.value.trim()
@@ -8571,9 +8562,7 @@ dashboardRouter.get('/employees/:employeeId', async (req, res) => {
           const kpiLabel = config.kpiEligible
             ? `Eligible${config.defaultKpiBonus ? ` (${formatCurrency(config.defaultKpiBonus)})` : ''}`
             : 'Not eligible';
-          const accrualLabel = config.accrualEnabled
-            ? `Enabled${config.accrualMethod ? ` – ${escapeHtml(config.accrualMethod)}` : ''}`
-            : 'Disabled';
+          const accrualLabel = `Enabled${config.accrualMethod ? ` – ${escapeHtml(config.accrualMethod)}` : ''}`;
           return `
             <tr>
               <td>${escapeHtml(formatFullDate(config.effectiveOn))}</td>
@@ -8648,7 +8637,7 @@ dashboardRouter.get('/employees/:employeeId', async (req, res) => {
           quarterlyAttendanceBonus: latestConfig.quarterlyAttendanceBonus,
           kpiEligible: latestConfig.kpiEligible,
           defaultKpiBonus: latestConfig.defaultKpiBonus,
-          accrualEnabled: latestConfig.accrualEnabled,
+          accrualEnabled: true,
           accrualMethod: latestConfig.accrualMethod,
           ptoBalanceHours: latestConfig.ptoBalanceHours,
           utoBalanceHours: latestConfig.utoBalanceHours,
@@ -8667,7 +8656,7 @@ dashboardRouter.get('/employees/:employeeId', async (req, res) => {
   const compensationQuarterlyValue = toNumberInput(latestConfig?.quarterlyAttendanceBonus);
   const compensationKpiChecked = latestConfig?.kpiEligible ? ' checked' : '';
   const compensationKpiValue = toNumberInput(latestConfig?.defaultKpiBonus ?? null);
-  const compensationAccrualStatus = latestConfig?.accrualEnabled ? 'Enabled' : 'Disabled';
+  const compensationAccrualStatus = latestConfig ? 'Enabled' : 'Not configured';
   const compensationAccrualMethodDisplay =
     latestConfig?.accrualMethod && latestConfig.accrualMethod.trim().length
       ? latestConfig.accrualMethod
@@ -8784,8 +8773,8 @@ dashboardRouter.get('/employees/:employeeId', async (req, res) => {
                     <div class="profile-timeoff">
                       <div>
                         <h3 class="profile-timeoff__title">Time Off Balances</h3>
-                        <p class="profile-timeoff__hint">Control accrual eligibility and baseline PTO / UTO hours used by payroll.</p>
-                        <p class="profile-timeoff__hint profile-timeoff__hint--readonly">Values shown here are read-only. Use the Balances tab to adjust hours or accrual rules.</p>
+                        <p class="profile-timeoff__hint">Control baseline PTO / UTO values used by payroll.</p>
+                        <p class="profile-timeoff__hint profile-timeoff__hint--readonly">Values shown here are read-only. Use the Balances tab to adjust accrual rates (set to 0 hours to pause accrual).</p>
                       </div>
                       <div class="profile-timeoff__fields profile-timeoff__fields--readonly">
                         <label class="profile-timeoff__readonly">
@@ -8809,7 +8798,7 @@ dashboardRouter.get('/employees/:employeeId', async (req, res) => {
                           <input type="text" value="${escapeHtml(compensationMakeUpDisplay)}" readonly />
                         </label>
                       </div>
-                      <p class="profile-timeoff__note">Time-off balances are managed from the Balances tab so the app and payroll stay in sync.</p>
+                      <p class="profile-timeoff__note">Manage balances and monthly accrual amounts from the Balances tab so the app and payroll stay in sync.</p>
                     </div>
                   </div>
                 </div>
@@ -8977,7 +8966,7 @@ dashboardRouter.get('/employees/:employeeId', async (req, res) => {
                 kpiEligible: Boolean(latest?.kpiEligible ?? false),
                 defaultKpiBonus: latest?.defaultKpiBonus ?? null,
                 schedule: latest?.schedule ? cloneSchedule(latest.schedule) : buildEmptySchedule(),
-                accrualEnabled: Boolean(latest?.accrualEnabled ?? false),
+                accrualEnabled: true,
                 accrualMethod: latest?.accrualMethod ?? null
               });
 
@@ -9029,7 +9018,7 @@ dashboardRouter.get('/employees/:employeeId', async (req, res) => {
                         payload.defaultKpiBonus = null;
                       }
 
-                      payload.accrualEnabled = Boolean(latest?.accrualEnabled ?? false);
+                      payload.accrualEnabled = true;
                       payload.accrualMethod =
                         typeof latest?.accrualMethod === 'string' && latest.accrualMethod.trim().length
                           ? latest.accrualMethod.trim()

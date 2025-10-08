@@ -74,7 +74,8 @@ payrollRouter.get('/config', requireAdminOrManager, (0, asyncHandler_1.asyncHand
 }));
 payrollRouter.post('/config', requireAdminOrManager, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     const input = (0, validation_1.parseWithSchema)(employeeConfigSchema, req.body, 'Invalid configuration payload');
-    const { schedule, accrualEnabled, accrualMethod, ...comp } = input;
+    const { schedule, accrualEnabled: _ignoredAccrualEnabled, accrualMethod, ...comp } = input;
+    const accrualEnabled = true;
     const balance = await (0, balances_1.ensureBalance)(comp.userId);
     const resolvedPtoBase = Number(balance.basePtoHours ?? balance.ptoHours ?? 0);
     const resolvedUtoBase = Number(balance.baseUtoHours ?? balance.utoHours ?? 0);
