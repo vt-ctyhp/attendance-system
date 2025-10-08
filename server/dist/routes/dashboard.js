@@ -1088,7 +1088,7 @@ const intervalOverlaps = (intervals, start, end) => intervals.some((interval) =>
 const sumIntervalsInMinutes = (intervals) => intervals.reduce((total, interval) => total + Math.max(0, Math.ceil((interval.end.getTime() - interval.start.getTime()) / MINUTE_MS)), 0);
 const resolveIdleStreak = (session, now, dayStart, exclusionIntervals) => {
     const sortedStats = session.minuteStats
-        .filter((stat) => stat.minuteStart >= dayStart && stat.minuteStart <= now && stat.active)
+        .filter((stat) => stat.minuteStart >= dayStart && stat.minuteStart <= now)
         .sort((a, b) => a.minuteStart.getTime() - b.minuteStart.getTime());
     let idleStart = null;
     for (let index = sortedStats.length - 1; index >= 0; index -= 1) {
@@ -1113,7 +1113,7 @@ const computeIdleMinutes = (sessions, dayStart, dayEnd, now, exclusionIntervals)
     let total = 0;
     for (const session of sessions) {
         for (const stat of session.minuteStats) {
-            if (!stat.idle || !stat.active) {
+            if (!stat.idle) {
                 continue;
             }
             const minuteStart = stat.minuteStart;
@@ -1627,7 +1627,9 @@ const baseStyles = `
   .totals th, .totals td { font-weight: 600; background: #e0e7ff; }
   .empty { padding: 2rem; text-align: center; color: #6b7280; background: #fff; border-radius: 6px; margin-top: 1rem; }
   .nav { display: flex; justify-content: space-between; gap: 0.75rem; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; }
-  .nav__links { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
+  .nav__links { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; position: relative; }
+  .nav__item { position: relative; display: flex; align-items: center; }
+  .nav__item--dropdown { position: relative; }
   .nav__account { display: flex; align-items: center; gap: 0.75rem; margin-left: auto; }
   .nav__account-label { font-weight: 600; color: #1f2933; }
   .nav__logout-form { margin: 0; }
@@ -1635,8 +1637,17 @@ const baseStyles = `
   .nav__logout-button:hover { background: #dc2626; }
   .nav a { color: #2563eb; text-decoration: none; font-weight: 500; padding-bottom: 0.25rem; }
   .nav a.active { border-bottom: 2px solid #2563eb; }
-  .nav__link--child { margin-left: 1.35rem; font-size: 0.92rem; position: relative; }
-  .nav__link--child::before { content: ''; position: absolute; left: -0.9rem; top: 50%; width: 6px; height: 6px; border-radius: 999px; background: currentColor; transform: translateY(-50%); opacity: 0.6; }
+  .nav__link--parent { display: inline-flex; align-items: center; gap: 0.35rem; }
+  .nav__link--parent::after { content: ''; width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 5px solid currentColor; opacity: 0.7; transform: translateY(1px); }
+  .nav__item--dropdown .nav__link--parent.active::after { opacity: 1; }
+  .nav__dropdown { display: none; position: absolute; top: calc(100% + 0.5rem); left: 0; background: #fff; border-radius: 10px; box-shadow: 0 8px 24px rgba(15,23,42,0.12); padding: 0.4rem 0; list-style: none; margin: 0; min-width: 210px; flex-direction: column; z-index: 20; }
+  .nav__item--dropdown:hover .nav__dropdown,
+  .nav__item--dropdown:focus-within .nav__dropdown { display: flex; }
+  .nav__dropdown-item { width: 100%; }
+  .nav__link--child { display: block; padding: 0.5rem 1rem; color: #1f2933; font-weight: 500; font-size: 0.92rem; border-bottom: none; }
+  .nav__link--child:hover,
+  .nav__link--child:focus { background: #f3f4f6; text-decoration: none; }
+  .nav__link--child.active { background: #2563eb; color: #fff; border-bottom: none; }
   .card { background: #fff; padding: 1.25rem; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); margin-top: 1.5rem; max-width: 100%; }
   .stack-form { display: grid; gap: 0.75rem; max-width: 360px; }
   .stack-form label { display: grid; gap: 0.25rem; font-weight: 600; color: #1f2933; }
@@ -1802,10 +1813,18 @@ const baseStyles = `
     body.dashboard { font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%); color: #0f172a; }
     body.dashboard main.page-shell { max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: clamp(1.25rem, 3vw, 2rem); }
     body.dashboard .nav { background: rgba(255,255,255,0.85); backdrop-filter: blur(12px); padding: 0.6rem 1rem; border-radius: 999px; box-shadow: 0 16px 32px rgba(15,23,42,0.08); position: sticky; top: clamp(0.75rem,2vw,1.25rem); z-index: 20; }
+    body.dashboard .nav__links { gap: 0.9rem; }
+    body.dashboard .nav__item { align-items: stretch; }
     body.dashboard .nav a { padding: 0.35rem 0.85rem; border-radius: 999px; font-weight: 600; color: #64748b; }
     body.dashboard .nav a.active { background: #2563eb; color: #fff; box-shadow: 0 12px 24px rgba(37,99,235,0.22); border-bottom: none; }
-    body.dashboard .nav__link--child { margin-left: 1.5rem; padding-left: 0.35rem; padding-right: 0.75rem; color: #475569; }
-    body.dashboard .nav__link--child.active { color: #fff; }
+    body.dashboard .nav__link--parent { padding-right: 0.95rem; }
+    body.dashboard .nav__link--parent::after { border-top-color: currentColor; }
+    body.dashboard .nav__dropdown { background: rgba(255,255,255,0.97); box-shadow: 0 22px 40px rgba(15,23,42,0.18); border-radius: 16px; min-width: 220px; padding: 0.6rem 0; }
+    body.dashboard .nav__dropdown-item { padding: 0 0.25rem; }
+    body.dashboard .nav__link--child { border-radius: 12px; color: #1e293b; padding: 0.55rem 0.9rem; }
+    body.dashboard .nav__link--child:hover,
+    body.dashboard .nav__link--child:focus { background: rgba(37,99,235,0.12); color: #1e293b; }
+    body.dashboard .nav__link--child.active { background: #2563eb; color: #fff; box-shadow: 0 10px 18px rgba(37,99,235,0.25); }
     body.dashboard .nav__account-label { color: #0f172a; }
     body.dashboard .nav__logout-button { background: #dc2626; border-radius: 999px; padding: 0.45rem 1rem; }
     body.dashboard .nav__logout-button:hover { box-shadow: 0 12px 24px rgba(220,38,38,0.25); }
@@ -2085,23 +2104,52 @@ const renderNav = (active) => {
         if (options?.child) {
             classes.push('nav__link--child');
         }
+        if (options?.className) {
+            classes.push(options.className);
+        }
         if (isActive) {
             classes.push('active');
         }
         const classAttr = classes.length ? ` class="${classes.join(' ')}"` : '';
         const ariaCurrent = isActive ? ' aria-current="page"' : '';
-        return `<a href="${href}"${classAttr}${ariaCurrent}>${label}</a>`;
+        const extraAttrs = [];
+        if (typeof options?.ariaExpanded === 'boolean') {
+            extraAttrs.push(`aria-expanded="${options.ariaExpanded}"`);
+        }
+        if (options?.ariaHaspopup) {
+            extraAttrs.push('aria-haspopup="true"');
+        }
+        const attrSuffix = extraAttrs.length ? ` ${extraAttrs.join(' ')}` : '';
+        return `<a href="${href}"${classAttr}${ariaCurrent}${attrSuffix}>${label}</a>`;
+    };
+    const wrapItem = (markup) => `<div class="nav__item">${markup}</div>`;
+    const dropdown = (href, label, key, items) => {
+        const isParentActive = key === 'payroll' ? isPayrollContext : active === key;
+        const dropdownMarkup = items
+            .map((item) => `<li class="nav__dropdown-item">${link(item.href, item.label, item.key, { child: true })}</li>`)
+            .join('');
+        const parentLink = link(href, label, key, {
+            className: 'nav__link--parent',
+            ariaExpanded: isParentActive,
+            ariaHaspopup: true
+        });
+        const classes = ['nav__item', 'nav__item--dropdown'];
+        if (isParentActive) {
+            classes.push('nav__item--active');
+        }
+        return `<div class="${classes.join(' ')}">${parentLink}<ul class="nav__dropdown">${dropdownMarkup}</ul></div>`;
     };
     const links = [
-        link('/dashboard/overview', 'Overview', 'overview'),
-        link('/dashboard/today', 'Today', 'today'),
-        link('/dashboard/timesheets', 'Timesheets', 'timesheets'),
-        link('/dashboard/requests', 'Requests', 'requests'),
-        link('/dashboard/balances', 'Balances', 'balances'),
-        link('/dashboard/shifts', 'Shifts', 'shifts'),
-        link('/dashboard/payroll', 'Payroll', 'payroll'),
-        link('/dashboard/payroll/holidays', 'Holiday Calendar', 'payroll-holidays', { child: true }),
-        link('/dashboard/settings', 'Settings', 'settings')
+        wrapItem(link('/dashboard/overview', 'Overview', 'overview')),
+        wrapItem(link('/dashboard/today', 'Today', 'today')),
+        wrapItem(link('/dashboard/timesheets', 'Timesheets', 'timesheets')),
+        wrapItem(link('/dashboard/requests', 'Requests', 'requests')),
+        wrapItem(link('/dashboard/balances', 'Balances', 'balances')),
+        wrapItem(link('/dashboard/shifts', 'Shifts', 'shifts')),
+        dropdown('/dashboard/payroll', 'Payroll', 'payroll', [
+            { href: '/dashboard/payroll/holidays', label: 'Holiday Settings', key: 'payroll-holidays' }
+        ]),
+        wrapItem(link('/dashboard/settings', 'Settings', 'settings'))
     ];
     return `<nav class="nav no-print">
     <div class="nav__links">${links.join('')}</div>
@@ -7345,6 +7393,7 @@ exports.dashboardRouter.get('/employees/:employeeId', async (req, res) => {
     })
         .join('\n');
     const latestEffectiveInput = latestConfig ? formatIsoDate(latestConfig.effectiveOn) : defaultEffectiveDate;
+    const balanceRecord = await (0, balances_1.ensureBalance)(employee.id);
     const profilePayload = {
         user: {
             id: employee.id,
@@ -7352,6 +7401,14 @@ exports.dashboardRouter.get('/employees/:employeeId', async (req, res) => {
             email: employee.email,
             role: employee.role,
             active: employee.active
+        },
+        balance: {
+            ptoHours: Number(balanceRecord.ptoHours),
+            basePtoHours: Number(balanceRecord.basePtoHours),
+            utoHours: Number(balanceRecord.utoHours),
+            baseUtoHours: Number(balanceRecord.baseUtoHours),
+            makeUpHours: Number(balanceRecord.makeUpHours),
+            baseMakeUpHours: Number(balanceRecord.baseMakeUpHours ?? 0)
         },
         latestConfig: latestConfig
             ? {
@@ -7383,8 +7440,9 @@ exports.dashboardRouter.get('/employees/:employeeId', async (req, res) => {
     const compensationAccrualMethodValue = latestConfig?.accrualMethod
         ? escapeHtml(latestConfig.accrualMethod)
         : '';
-    const compensationPtoValue = toNumberInput(latestConfig?.ptoBalanceHours ?? null);
-    const compensationUtoValue = toNumberInput(latestConfig?.utoBalanceHours ?? null);
+    const compensationPtoValue = toNumberInput(balanceRecord.basePtoHours ?? balanceRecord.ptoHours ?? null);
+    const compensationUtoValue = toNumberInput(balanceRecord.baseUtoHours ?? balanceRecord.utoHours ?? null);
+    const compensationMakeUpValue = toNumberInput(balanceRecord.baseMakeUpHours ?? balanceRecord.makeUpHours ?? null);
     const scheduleTimeZoneValue = escapeHtml(scheduleSnapshot.timeZone);
     const html = `
     <!doctype html>
@@ -7501,6 +7559,10 @@ exports.dashboardRouter.get('/employees/:employeeId', async (req, res) => {
                         <label>
                           <span>UTO Balance (hours)</span>
                           <input type="number" name="utoBalanceHours" step="0.25" value="${compensationUtoValue}" required${latestConfig?.accrualEnabled ? '' : ' disabled'} />
+                        </label>
+                        <label>
+                          <span>Make-Up Balance (hours)</span>
+                          <input type="number" name="makeupBalanceHours" step="0.25" value="${compensationMakeUpValue}" required${latestConfig?.accrualEnabled ? '' : ' disabled'} />
                         </label>
                       </div>
                       <p class="profile-timeoff__note">Need to grant or deduct hours immediately? Use the Balances tab to post adjustments so the app and payroll stay in sync.</p>
@@ -7643,6 +7705,7 @@ exports.dashboardRouter.get('/employees/:employeeId', async (req, res) => {
               };
 
               const latest = profile.latestConfig;
+              const latestBalance = profile.balance || null;
               const cloneSchedule = (schedule) => JSON.parse(JSON.stringify(schedule));
               const latestSchedule = latest?.schedule ? cloneSchedule(latest.schedule) : buildEmptySchedule();
 
@@ -7673,8 +7736,15 @@ exports.dashboardRouter.get('/employees/:employeeId', async (req, res) => {
                 schedule: latest?.schedule ? cloneSchedule(latest.schedule) : buildEmptySchedule(),
                 accrualEnabled: Boolean(latest?.accrualEnabled ?? false),
                 accrualMethod: latest?.accrualMethod ?? null,
-                ptoBalanceHours: Number(latest?.ptoBalanceHours ?? 0),
-                utoBalanceHours: Number(latest?.utoBalanceHours ?? 0)
+                ptoBalanceHours: Number(
+                  latestBalance?.basePtoHours ?? latestBalance?.ptoHours ?? latest?.ptoBalanceHours ?? 0
+                ),
+                utoBalanceHours: Number(
+                  latestBalance?.baseUtoHours ?? latestBalance?.utoHours ?? latest?.utoBalanceHours ?? 0
+                ),
+                makeupBalanceHours: Number(
+                  latestBalance?.baseMakeUpHours ?? latestBalance?.makeUpHours ?? 0
+                )
               });
 
               const toFiniteNumber = (value, fallback = 0) => {
@@ -7718,6 +7788,7 @@ exports.dashboardRouter.get('/employees/:employeeId', async (req, res) => {
                       const accrualMethodInput = form.querySelector('input[name="accrualMethod"]');
                       const ptoInput = form.querySelector('input[name="ptoBalanceHours"]');
                       const utoInput = form.querySelector('input[name="utoBalanceHours"]');
+                      const makeupInput = form.querySelector('input[name="makeupBalanceHours"]');
 
                       payload.baseSemiMonthlySalary = toFiniteNumber(baseInput?.value, 0);
                       payload.monthlyAttendanceBonus = toFiniteNumber(monthlyInput?.value, 0);
@@ -7737,6 +7808,7 @@ exports.dashboardRouter.get('/employees/:employeeId', async (req, res) => {
                           : null;
                         payload.ptoBalanceHours = toFiniteNumber(ptoInput?.value, payload.ptoBalanceHours);
                         payload.utoBalanceHours = toFiniteNumber(utoInput?.value, payload.utoBalanceHours);
+                        payload.makeupBalanceHours = toFiniteNumber(makeupInput?.value, payload.makeupBalanceHours ?? 0);
                       } else {
                         payload.accrualMethod = null;
                       }

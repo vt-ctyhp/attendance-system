@@ -168,3 +168,107 @@ export const recordLedgerEntry = async (
     }
   });
 };
+
+export const syncTimeOffBalances = async (
+  {
+    userId,
+    actorId,
+    ptoHours,
+    utoHours,
+    makeUpHours,
+    accrualEnabled
+  }: {
+    userId: number;
+    actorId?: number | null;
+    ptoHours?: number;
+    utoHours?: number;
+    makeUpHours?: number | null;
+    accrualEnabled: boolean;
+  }
+) => {
+  const roundup = (value: number) => Math.round(value * 100) / 100;
+  const reason = 'Compensation baseline sync';
+
+  await prisma.$transaction(async (tx) => {
+    const balance = await ensureBalance(userId, tx);
+    const state = {
+      ptoHours: Number(balance.ptoHours),
+      basePtoHours: Number(balance.basePtoHours),
+      utoHours: Number(balance.utoHours),
+      baseUtoHours: Number(balance.baseUtoHours),
+      makeUpHours: Number(balance.makeUpHours),
+      baseMakeUpHours: Number(balance.baseMakeUpHours ?? 0)
+    };
+
+    const updates: Prisma.PtoBalanceUpdateInput = {};
+
+    const syncBucket = async (
+      target: number | undefined | null,
+      currentKey: keyof typeof state,
+      baseKey: keyof typeof state,
+      updateCurrent: keyof Prisma.PtoBalanceUpdateInput,
+      updateBase: keyof Prisma.PtoBalanceUpdateInput,
+      type: string
+    ) => {
+      if (target === undefined || target === null) {
+        return;
+      }
+      const roundedTarget = roundup(target);
+      const currentValue = state[currentKey];
+      const diff = roundup(roundedTarget - currentValue);
+      if (Math.abs(diff) >= 0.001) {
+        updates[updateCurrent] = roundedTarget;
+        updates[updateBase] = roundedTarget;
+        state[currentKey] = roundedTarget;
+        state[baseKey] = roundedTarget;
+        await recordLedgerEntry(
+          {
+            userId,
+            deltaHours: diff,
+            reason,
+            createdById: actorId ?? undefined,
+            type
+          },
+          tx
+        );
+      } else if (state[baseKey] !== roundedTarget) {
+        updates[updateBase] = roundedTarget;
+        state[baseKey] = roundedTarget;
+      }
+    };
+
+    await syncBucket(
+      ptoHours,
+      'ptoHours',
+      'basePtoHours',
+      'ptoHours',
+      'basePtoHours',
+      accrualEnabled ? 'pto_compensation' : 'pto_compensation'
+    );
+
+    await syncBucket(
+      utoHours,
+      'utoHours',
+      'baseUtoHours',
+      'utoHours',
+      'baseUtoHours',
+      accrualEnabled ? 'uto_compensation' : 'uto_compensation'
+    );
+
+    await syncBucket(
+      makeUpHours,
+      'makeUpHours',
+      'baseMakeUpHours',
+      'makeUpHours',
+      'baseMakeUpHours',
+      accrualEnabled ? 'make_up_compensation' : 'make_up_compensation'
+    );
+
+    if (Object.keys(updates).length > 0) {
+      await tx.ptoBalance.update({
+        where: { id: balance.id },
+        data: updates
+      });
+    }
+  });
+};

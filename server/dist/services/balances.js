@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.recordLedgerEntry = exports.adjustPtoBalance = exports.getBalanceOverview = exports.recalcBalance = exports.ensureBalance = void 0;
+exports.syncTimeOffBalances = exports.recordLedgerEntry = exports.adjustPtoBalance = exports.getBalanceOverview = exports.recalcBalance = exports.ensureBalance = void 0;
 const prisma_1 = require("../prisma");
 const resolveClient = (client) => client ?? prisma_1.prisma;
 const ensureBalance = async (userId, client) => resolveClient(client).ptoBalance.upsert({
@@ -122,3 +122,54 @@ const recordLedgerEntry = async ({ userId, deltaHours, reason, createdById, type
     });
 };
 exports.recordLedgerEntry = recordLedgerEntry;
+const syncTimeOffBalances = async ({ userId, actorId, ptoHours, utoHours, makeUpHours, accrualEnabled }) => {
+    const roundup = (value) => Math.round(value * 100) / 100;
+    const reason = 'Compensation baseline sync';
+    await prisma_1.prisma.$transaction(async (tx) => {
+        const balance = await (0, exports.ensureBalance)(userId, tx);
+        const state = {
+            ptoHours: Number(balance.ptoHours),
+            basePtoHours: Number(balance.basePtoHours),
+            utoHours: Number(balance.utoHours),
+            baseUtoHours: Number(balance.baseUtoHours),
+            makeUpHours: Number(balance.makeUpHours),
+            baseMakeUpHours: Number(balance.baseMakeUpHours ?? 0)
+        };
+        const updates = {};
+        const syncBucket = async (target, currentKey, baseKey, updateCurrent, updateBase, type) => {
+            if (target === undefined || target === null) {
+                return;
+            }
+            const roundedTarget = roundup(target);
+            const currentValue = state[currentKey];
+            const diff = roundup(roundedTarget - currentValue);
+            if (Math.abs(diff) >= 0.001) {
+                updates[updateCurrent] = roundedTarget;
+                updates[updateBase] = roundedTarget;
+                state[currentKey] = roundedTarget;
+                state[baseKey] = roundedTarget;
+                await (0, exports.recordLedgerEntry)({
+                    userId,
+                    deltaHours: diff,
+                    reason,
+                    createdById: actorId ?? undefined,
+                    type
+                }, tx);
+            }
+            else if (state[baseKey] !== roundedTarget) {
+                updates[updateBase] = roundedTarget;
+                state[baseKey] = roundedTarget;
+            }
+        };
+        await syncBucket(ptoHours, 'ptoHours', 'basePtoHours', 'ptoHours', 'basePtoHours', accrualEnabled ? 'pto_compensation' : 'pto_compensation');
+        await syncBucket(utoHours, 'utoHours', 'baseUtoHours', 'utoHours', 'baseUtoHours', accrualEnabled ? 'uto_compensation' : 'uto_compensation');
+        await syncBucket(makeUpHours, 'makeUpHours', 'baseMakeUpHours', 'makeUpHours', 'baseMakeUpHours', accrualEnabled ? 'make_up_compensation' : 'make_up_compensation');
+        if (Object.keys(updates).length > 0) {
+            await tx.ptoBalance.update({
+                where: { id: balance.id },
+                data: updates
+            });
+        }
+    });
+};
+exports.syncTimeOffBalances = syncTimeOffBalances;

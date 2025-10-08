@@ -13,6 +13,7 @@ const bonuses_1 = require("../services/payroll/bonuses");
 const payroll_1 = require("../services/payroll/payroll");
 const constants_1 = require("../services/payroll/constants");
 const shiftPlanner_1 = require("../services/shiftPlanner");
+const balances_1 = require("../services/balances");
 const payrollRouter = (0, express_1.Router)();
 exports.payrollRouter = payrollRouter;
 const allowAnonDashboard = process.env.DASHBOARD_ALLOW_ANON === 'true';
@@ -65,7 +66,8 @@ const employeeConfigSchema = zod_1.z.object({
     accrualEnabled: zod_1.z.boolean(),
     accrualMethod: zod_1.z.string().max(100).optional().nullable(),
     ptoBalanceHours: zod_1.z.number().finite(),
-    utoBalanceHours: zod_1.z.number().finite()
+    utoBalanceHours: zod_1.z.number().finite(),
+    makeupBalanceHours: zod_1.z.number().finite().optional()
 });
 payrollRouter.get('/config', requireAdminOrManager, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     const querySchema = zod_1.z.object({ userId: zod_1.z.coerce.number().int().positive().optional() });
@@ -75,20 +77,19 @@ payrollRouter.get('/config', requireAdminOrManager, (0, asyncHandler_1.asyncHand
 }));
 payrollRouter.post('/config', requireAdminOrManager, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     const input = (0, validation_1.parseWithSchema)(employeeConfigSchema, req.body, 'Invalid configuration payload');
+    const { makeupBalanceHours, schedule, ...rest } = input;
     await (0, config_1.upsertEmployeeConfig)({
-        userId: input.userId,
-        effectiveOn: input.effectiveOn,
-        baseSemiMonthlySalary: input.baseSemiMonthlySalary,
-        monthlyAttendanceBonus: input.monthlyAttendanceBonus,
-        quarterlyAttendanceBonus: input.quarterlyAttendanceBonus,
-        kpiEligible: input.kpiEligible,
-        defaultKpiBonus: input.defaultKpiBonus,
-        schedule: (0, config_1.ensureSchedule)(input.schedule),
-        accrualEnabled: input.accrualEnabled,
-        accrualMethod: input.accrualMethod,
-        ptoBalanceHours: input.ptoBalanceHours,
-        utoBalanceHours: input.utoBalanceHours
+        ...rest,
+        schedule: (0, config_1.ensureSchedule)(schedule)
     }, req.user?.id);
+    await (0, balances_1.syncTimeOffBalances)({
+        userId: rest.userId,
+        actorId: req.user?.id,
+        ptoHours: rest.ptoBalanceHours,
+        utoHours: rest.utoBalanceHours,
+        makeUpHours: makeupBalanceHours,
+        accrualEnabled: rest.accrualEnabled
+    });
     res.status(201).json({ success: true });
 }));
 const holidayQuerySchema = zod_1.z.object({
