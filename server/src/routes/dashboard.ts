@@ -2548,6 +2548,7 @@ const baseStyles = `
     body.dashboard--payroll .compensation-group__title { margin: 0; font-size: 0.95rem; font-weight: 700; color: #0f172a; }
     body.dashboard--payroll .compensation-group__hint { margin: 0; font-size: 0.85rem; color: #64748b; }
     body.dashboard--payroll .compensation-group__body { display: grid; gap: 0.85rem; }
+    body.dashboard--payroll .compensation-group__body--balances { gap: 1rem; }
     body.dashboard--payroll .compensation-group__fields { display: grid; gap: 0.75rem; }
     body.dashboard--payroll .compensation-group__fields--two { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
     body.dashboard--payroll .compensation-group__fields--three { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
@@ -2580,17 +2581,9 @@ const baseStyles = `
       body.dashboard--payroll .compensation-form__footer .form-error { flex: 1; }
       body.dashboard--payroll .compensation-form__footer button { margin-left: auto; }
     }
-    body.dashboard--payroll .compensation-group--collapsible { padding: 0; }
-    body.dashboard--payroll .compensation-group--collapsible .compensation-group__header { padding: 1rem 1.25rem; display: grid; gap: 0.4rem; grid-template-columns: minmax(0, 1fr); }
-    @media (min-width: 640px) {
-      body.dashboard--payroll .compensation-group--collapsible .compensation-group__header { grid-template-columns: auto 1fr; align-items: center; column-gap: 0.85rem; }
-    }
-    body.dashboard--payroll .compensation-group--collapsible.is-open .compensation-group__header { border-bottom: 1px solid rgba(148,163,184,0.18); }
-    body.dashboard--payroll .compensation-group--collapsible .compensation-group__body { padding: 0 1.25rem 1.25rem; display: grid; gap: 0.85rem; }
-    body.dashboard--payroll .compensation-group__toggle { appearance: none; background: rgba(37,99,235,0.12); border: 1px solid rgba(37,99,235,0.22); border-radius: 12px; color: #1d4ed8; font-weight: 600; font-size: 0.95rem; padding: 0.55rem 0.85rem; display: inline-flex; align-items: center; gap: 0.4rem; cursor: pointer; width: fit-content; }
-    body.dashboard--payroll .compensation-group__toggle:focus { outline: 2px solid rgba(37,99,235,0.35); outline-offset: 2px; }
-    body.dashboard--payroll .compensation-group__chevron { transition: transform 0.2s ease; }
-    body.dashboard--payroll .compensation-group--collapsible.is-open .compensation-group__chevron { transform: rotate(180deg); }
+    body.dashboard--payroll .timeoff-fields { border: 1px dashed rgba(148,163,184,0.25); border-radius: 14px; padding: 1rem 1.1rem; background: rgba(248,250,252,0.7); display: grid; gap: 0.75rem; transition: opacity 0.2s ease; }
+    body.dashboard--payroll .timeoff-fields--disabled { opacity: 0.55; }
+    body.dashboard--payroll .timeoff-fields--disabled input { cursor: not-allowed; }
     body.dashboard--payroll .holiday-form { margin-top: 1.25rem; }
     body.dashboard--payroll .kpi-card { background: rgba(37,99,235,0.08); border-radius: 16px; padding: 1rem; display: flex; flex-direction: column; gap: 0.75rem; }
     body.dashboard--payroll .kpi-card__header { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; }
@@ -6431,58 +6424,41 @@ dashboardRouter.get('/payroll', async (req, res) => {
                           </div>
                         </div>
                       </section>
-                      <section
-                        class="compensation-group compensation-group--collapsible"
-                        data-compensation-collapsible
-                        data-default-open="false"
-                      >
-                        <div class="compensation-group__header" data-compensation-header>
-                          <button
-                            type="button"
-                            class="compensation-group__toggle"
-                            data-compensation-toggle
-                            aria-expanded="false"
-                            aria-controls="compensation-accrual"
-                          >
-                            <span>Time Off Balances</span>
-                            <span class="compensation-group__chevron" aria-hidden="true">⌄</span>
-                          </button>
+                      <section class="compensation-group compensation-group--balances">
+                        <div class="compensation-group__header">
+                          <h3 class="compensation-group__title">Time Off Balances</h3>
                           <p class="compensation-group__hint">Manage PTO accrual settings and current banked hours.</p>
                         </div>
-                        <div
-                          class="compensation-group__body"
-                          id="compensation-accrual"
-                          data-compensation-content hidden
-                        >
+                        <div class="compensation-group__body compensation-group__body--balances">
                           <label class="checkbox-field compensation-group__full">
                             <input type="checkbox" name="accrualEnabled" ${selectedConfig?.accrualEnabled ? 'checked' : ''} data-accrual-toggle />
                             <span>Accrual Enabled</span>
                           </label>
                           <div
-                            class="compensation-group__fields compensation-group__fields--stack"
-                            data-accrual-details${selectedConfig?.accrualEnabled ? '' : ' hidden'}
+                            class="compensation-group__fields compensation-group__fields--stack timeoff-fields${selectedConfig?.accrualEnabled ? '' : ' timeoff-fields--disabled'}"
+                            data-accrual-details
                           >
                             <label>
                               <span>Accrual Method</span>
                               <input type="text" name="accrualMethod" maxlength="100" value="${
                                 selectedConfig?.accrualMethod ? escapeHtml(selectedConfig.accrualMethod) : ''
-                              }" />
+                              }"${selectedConfig?.accrualEnabled ? '' : ' disabled'} />
                             </label>
                             <label>
                               <span>PTO Balance (hours)</span>
                               <input type="number" name="ptoBalanceHours" step="0.25" value="${
                                 selectedConfig ? makeNumberValue(selectedConfig.ptoBalanceHours) : ''
-                              }" required />
+                              }" required${selectedConfig?.accrualEnabled ? '' : ' disabled'} />
                             </label>
                             <label>
                               <span>UTO Balance (hours)</span>
                               <input type="number" name="utoBalanceHours" step="0.25" value="${
                                 selectedConfig ? makeNumberValue(selectedConfig.utoBalanceHours) : ''
-                              }" required />
+                              }" required${selectedConfig?.accrualEnabled ? '' : ' disabled'} />
                             </label>
                             <label>
                               <span>Makeup Hours (hours)</span>
-                              <input type="number" name="makeupBalanceHours" step="0.25" value="${makeupBalanceValue}" required />
+                              <input type="number" name="makeupBalanceHours" step="0.25" value="${makeupBalanceValue}" required${selectedConfig?.accrualEnabled ? '' : ' disabled'} />
                             </label>
                           </div>
                         </div>
@@ -6564,61 +6540,23 @@ dashboardRouter.get('/payroll', async (req, res) => {
               }
             };
 
-            document.querySelectorAll('[data-compensation-collapsible]').forEach((section) => {
-              const toggle = section.querySelector('[data-compensation-toggle]');
-              const content = section.querySelector('[data-compensation-content]');
-              const header = section.querySelector('[data-compensation-header]');
-              const accrualToggle = section.querySelector('[data-accrual-toggle]');
-              const accrualDetails = section.querySelector('[data-accrual-details]');
-              if (!(toggle instanceof HTMLButtonElement) || !(content instanceof HTMLElement)) return;
-              const syncAccrualDetails = () => {
-                if (!(accrualToggle instanceof HTMLInputElement) || !(accrualDetails instanceof HTMLElement)) return;
-                const expanded = !content.hasAttribute('hidden');
-                const enabled = accrualToggle.checked && expanded;
-                accrualDetails.toggleAttribute('hidden', !enabled);
-                accrualDetails.querySelectorAll('input').forEach((input) => {
-                  if (!(input instanceof HTMLInputElement)) return;
-                  if (input === accrualToggle) return;
-                  input.disabled = !enabled;
-                });
-              };
-              const defaultOpen = section.getAttribute('data-default-open') === 'true';
-              const applyState = (expanded) => {
-                toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-                if (expanded) {
-                  content.removeAttribute('hidden');
-                  section.classList.add('is-open');
-                } else {
-                  content.setAttribute('hidden', 'true');
-                  section.classList.remove('is-open');
-                }
-                syncAccrualDetails();
-              };
-              applyState(defaultOpen);
-              const handleToggle = () => {
-                const isExpanded = toggle.getAttribute('aria-expanded') === 'true';
-                applyState(!isExpanded);
-              };
-              toggle.addEventListener('click', (event) => {
-                event.preventDefault();
-                handleToggle();
+            const accrualToggle = document.querySelector('[data-accrual-toggle]');
+            const accrualDetails = document.querySelector('[data-accrual-details]');
+            const syncAccrualDetails = () => {
+              if (!(accrualDetails instanceof HTMLElement)) return;
+              const enabled = accrualToggle instanceof HTMLInputElement ? accrualToggle.checked : false;
+              accrualDetails.classList.toggle('timeoff-fields--disabled', !enabled);
+              accrualDetails.querySelectorAll('input').forEach((input) => {
+                if (!(input instanceof HTMLInputElement)) return;
+                input.disabled = !enabled;
               });
-              if (header instanceof HTMLElement) {
-                header.addEventListener('click', (event) => {
-                  const target = event.target instanceof Node ? event.target : null;
-                  const button = target instanceof HTMLElement
-                    ? target.closest('[data-compensation-toggle]')
-                    : target?.parentElement?.closest('[data-compensation-toggle]');
-                  if (button) return;
-                  handleToggle();
-                });
-              }
-              if (accrualToggle instanceof HTMLInputElement) {
-                accrualToggle.addEventListener('change', () => {
-                  syncAccrualDetails();
-                });
-              }
-            });
+            };
+            syncAccrualDetails();
+            if (accrualToggle instanceof HTMLInputElement) {
+              accrualToggle.addEventListener('change', () => {
+                syncAccrualDetails();
+              });
+            }
 
             document.querySelectorAll('[data-payroll-action]').forEach((button) => {
               button.addEventListener('click', async () => {
