@@ -19,7 +19,7 @@
     "seed:payroll-demo": "ts-node scripts/seedPayrollDemoMonth.ts",
     "postdeploy:schedule": "node scripts/postDeployCheck.mjs",
     "lint": "eslint .",
-    "test": "node scripts/run-tests.cjs",
+    "test": "ROLLUP_SKIP_NATIVE=true node scripts/run-tests.cjs",
     "test:makeup-cap": "node scripts/testMakeupCap.mjs",
     "test:watch": "vitest"
   },
