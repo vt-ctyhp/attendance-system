@@ -3582,9 +3582,10 @@ dashboardRouter.get(
         idleMinutes: acc.idleMinutes + entry.summary.totals.idleMinutes,
         breaks: acc.breaks + entry.summary.totals.breaks,
         lunches: acc.lunches + entry.summary.totals.lunches,
-        presence: acc.presence + entry.summary.totals.presenceMisses
+        presence: acc.presence + entry.summary.totals.presenceMisses,
+        tardyMinutes: acc.tardyMinutes + entry.summary.totals.tardyMinutes
       }),
-      { activeMinutes: 0, idleMinutes: 0, breaks: 0, lunches: 0, presence: 0 }
+      { activeMinutes: 0, idleMinutes: 0, breaks: 0, lunches: 0, presence: 0, tardyMinutes: 0 }
     );
 
     const aggregateCards = summaries.length
@@ -3612,6 +3613,10 @@ dashboardRouter.get(
               <div class="summary-title">Presence Misses</div>
               <div class="summary-value">${aggregate.presence}</div>
             </div>
+            <div class="summary-card">
+              <div class="summary-title">Tardy Minutes</div>
+              <div class="summary-value">${aggregate.tardyMinutes}</div>
+            </div>
           </div>
         `
       : '';
@@ -3633,12 +3638,13 @@ dashboardRouter.get(
                         <td>${day.breaks}</td>
                         <td>${day.lunches}</td>
                         <td>${day.presenceMisses}</td>
+                        <td>${day.tardyMinutes}</td>
                         <td>${escapeHtml(requestsText)}</td>
                       </tr>
                     `;
                   })
                   .join('\n')
-              : '<tr><td colspan="7" class="empty">No activity recorded for this range.</td></tr>';
+              : '<tr><td colspan="8" class="empty">No activity recorded for this range.</td></tr>';
 
             const employeeStatus = employee.active ? '' : ' <span class="muted">(Inactive)</span>';
 
@@ -3666,23 +3672,28 @@ dashboardRouter.get(
                     <div class="summary-value">${summary.totals.lunches}</div>
                   </div>
                   <div class="summary-card">
-                    <div class="summary-title">Presence Misses</div>
-                    <div class="summary-value">${summary.totals.presenceMisses}</div>
-                  </div>
+                  <div class="summary-title">Presence Misses</div>
+                  <div class="summary-value">${summary.totals.presenceMisses}</div>
                 </div>
-                <div class="table-scroll">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Date</th>
-                        <th>Active Hours</th>
-                        <th>Idle Hours</th>
-                        <th>Breaks</th>
-                        <th>Lunches</th>
-                        <th>Presence</th>
-                        <th>Edit Requests</th>
-                      </tr>
-                    </thead>
+                <div class="summary-card">
+                  <div class="summary-title">Tardy Minutes</div>
+                  <div class="summary-value">${summary.totals.tardyMinutes}</div>
+                </div>
+              </div>
+              <div class="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Active Hours</th>
+                      <th>Idle Hours</th>
+                      <th>Breaks</th>
+                      <th>Lunches</th>
+                      <th>Presence</th>
+                      <th>Tardy (min)</th>
+                      <th>Edit Requests</th>
+                    </tr>
+                  </thead>
                     <tbody>
                       ${dayRows}
                     </tbody>
@@ -6629,24 +6640,6 @@ dashboardRouter.get('/payroll', async (req, res) => {
               }
             };
 
-            const accrualToggle = document.querySelector('[data-accrual-toggle]');
-            const accrualDetails = document.querySelector('[data-accrual-details]');
-            const syncAccrualDetails = () => {
-              if (!(accrualDetails instanceof HTMLElement)) return;
-              const enabled = accrualToggle instanceof HTMLInputElement ? accrualToggle.checked : false;
-              accrualDetails.classList.toggle('timeoff-fields--disabled', !enabled);
-              accrualDetails.querySelectorAll('input').forEach((input) => {
-                if (!(input instanceof HTMLInputElement)) return;
-                input.disabled = !enabled;
-              });
-            };
-            syncAccrualDetails();
-            if (accrualToggle instanceof HTMLInputElement) {
-              accrualToggle.addEventListener('change', () => {
-                syncAccrualDetails();
-              });
-            }
-
             document.querySelectorAll('[data-payroll-action]').forEach((button) => {
               button.addEventListener('click', async () => {
                 if (!(button instanceof HTMLButtonElement)) return;
@@ -6801,11 +6794,8 @@ dashboardRouter.get('/payroll', async (req, res) => {
                     const quarterly = form.querySelector('input[name="quarterlyAttendanceBonus"]');
                     const kpiEligible = form.querySelector('input[name="kpiEligible"]');
                     const defaultKpi = form.querySelector('input[name="defaultKpiBonus"]');
-                    const accrualEnabled = form.querySelector('input[name="accrualEnabled"]');
-                    const accrualMethod = form.querySelector('input[name="accrualMethod"]');
-                    const ptoInput = form.querySelector('input[name="ptoBalanceHours"]');
-                    const utoInput = form.querySelector('input[name="utoBalanceHours"]');
-                    const makeupInput = form.querySelector('input[name="makeupBalanceHours"]');
+                    const accrualEnabledInput = form.querySelector('input[name="accrualEnabled"]');
+                    const accrualMethodInput = form.querySelector('input[name="accrualMethod"]');
 
                     if (!(userSelect instanceof HTMLSelectElement) || !userSelect.value) {
                       throw new Error('Select an employee.');
@@ -6815,31 +6805,22 @@ dashboardRouter.get('/payroll', async (req, res) => {
                     }
                     const toFinite = (
                       input: Element | null,
-                      label: string,
-                      options: { required?: boolean; fallback?: number } = {}
+                      label: string
                     ) => {
-                      const { required = true, fallback = 0 } = options;
                       if (!(input instanceof HTMLInputElement)) {
-                        if (required) throw new Error(label + ' is required.');
-                        return fallback;
-                      }
-                      if (input.disabled && !required) {
-                        return fallback;
+                        throw new Error(label + ' is required.');
                       }
                       const raw = input.value.trim();
                       if (!raw) {
-                        if (required) throw new Error(label + ' is required.');
-                        return fallback;
+                        throw new Error(label + ' is required.');
                       }
                       const value = Number.parseFloat(raw);
                       if (!Number.isFinite(value)) {
-                        if (!required) return fallback;
                         throw new Error(label + ' must be a number.');
                       }
                       return value;
                     };
-                    const accrualEnabledChecked =
-                      accrualEnabled instanceof HTMLInputElement ? accrualEnabled.checked : false;
+
                     const payload = {
                       userId: Number.parseInt(userSelect.value, 10),
                       effectiveOn: effective.value,
@@ -6852,19 +6833,17 @@ dashboardRouter.get('/payroll', async (req, res) => {
                           ? Number.parseFloat(defaultKpi.value)
                           : null,
                       schedule: serializeSchedule(form),
-                      accrualEnabled: accrualEnabledChecked,
+                      accrualEnabled: accrualEnabledInput instanceof HTMLInputElement
+                        ? accrualEnabledInput.checked
+                        : false,
                       accrualMethod:
-                        accrualMethod instanceof HTMLInputElement && accrualEnabledChecked
-                          ? accrualMethod.value.trim() || null
-                          : null,
-                      ptoBalanceHours: toFinite(ptoInput, 'PTO balance', { required: accrualEnabledChecked }),
-                      utoBalanceHours: toFinite(utoInput, 'UTO balance', {
-                        required: accrualEnabledChecked
-                      }),
-                      makeupBalanceHours: toFinite(makeupInput, 'Makeup balance', {
-                        required: accrualEnabledChecked
-                      })
+                        accrualMethodInput instanceof HTMLInputElement && accrualMethodInput.value.trim()
+                          ? accrualMethodInput.value.trim()
+                          : null
                     };
+                    if (!payload.kpiEligible) {
+                      payload.defaultKpiBonus = null;
+                    }
                     const response = await fetch('/api/payroll/config', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
@@ -8688,13 +8667,20 @@ dashboardRouter.get('/employees/:employeeId', async (req, res) => {
   const compensationQuarterlyValue = toNumberInput(latestConfig?.quarterlyAttendanceBonus);
   const compensationKpiChecked = latestConfig?.kpiEligible ? ' checked' : '';
   const compensationKpiValue = toNumberInput(latestConfig?.defaultKpiBonus ?? null);
-  const compensationAccrualChecked = latestConfig?.accrualEnabled ? ' checked' : '';
-  const compensationAccrualMethodValue = latestConfig?.accrualMethod
-    ? escapeHtml(latestConfig.accrualMethod)
-    : '';
-  const compensationPtoValue = toNumberInput(balanceRecord.basePtoHours ?? balanceRecord.ptoHours ?? null);
-  const compensationUtoValue = toNumberInput(balanceRecord.baseUtoHours ?? balanceRecord.utoHours ?? null);
-  const compensationMakeUpValue = toNumberInput(balanceRecord.baseMakeUpHours ?? balanceRecord.makeUpHours ?? null);
+  const compensationAccrualStatus = latestConfig?.accrualEnabled ? 'Enabled' : 'Disabled';
+  const compensationAccrualMethodDisplay =
+    latestConfig?.accrualMethod && latestConfig.accrualMethod.trim().length
+      ? latestConfig.accrualMethod
+      : '—';
+  const compensationPtoDisplay = formatHours(
+    Number(balanceRecord.basePtoHours ?? balanceRecord.ptoHours ?? 0)
+  );
+  const compensationUtoDisplay = formatHours(
+    Number(balanceRecord.baseUtoHours ?? balanceRecord.utoHours ?? 0)
+  );
+  const compensationMakeUpDisplay = formatHours(
+    Number(balanceRecord.baseMakeUpHours ?? balanceRecord.makeUpHours ?? 0)
+  );
   const scheduleTimeZoneValue = escapeHtml(scheduleSnapshot.timeZone);
 
   const html = `
@@ -8726,6 +8712,10 @@ dashboardRouter.get('/employees/:employeeId', async (req, res) => {
           body.dashboard--employee-profile .profile-timeoff__fields { display: grid; gap: 0.75rem; border: 1px dashed rgba(148,163,184,0.25); border-radius: 12px; padding: 0.9rem 1rem; background: rgba(255,255,255,0.55); transition: opacity 0.2s ease; }
           body.dashboard--employee-profile .profile-timeoff__fields.profile-timeoff__fields--disabled { opacity: 0.55; }
           body.dashboard--employee-profile .profile-timeoff__fields.profile-timeoff__fields--disabled input { cursor: not-allowed; }
+          body.dashboard--employee-profile .profile-timeoff__hint--readonly { margin-top: 0.35rem; font-size: 0.8rem; color: #475569; }
+          body.dashboard--employee-profile .profile-timeoff__fields--readonly { opacity: 0.7; pointer-events: none; }
+          body.dashboard--employee-profile .profile-timeoff__fields--readonly input { background: rgba(248,250,252,0.8); color: #475569; border-color: rgba(148,163,184,0.35); cursor: default; }
+          body.dashboard--employee-profile .profile-timeoff__readonly input { cursor: default; }
           body.dashboard--employee-profile .profile-timeoff__note { margin: 0; font-size: 0.8rem; color: #475569; }
           body.dashboard--employee-profile .profile-schedule-table { width: 100%; border-collapse: collapse; }
           body.dashboard--employee-profile .profile-schedule-table th,
@@ -8795,30 +8785,31 @@ dashboardRouter.get('/employees/:employeeId', async (req, res) => {
                       <div>
                         <h3 class="profile-timeoff__title">Time Off Balances</h3>
                         <p class="profile-timeoff__hint">Control accrual eligibility and baseline PTO / UTO hours used by payroll.</p>
+                        <p class="profile-timeoff__hint profile-timeoff__hint--readonly">Values shown here are read-only. Use the Balances tab to adjust hours or accrual rules.</p>
                       </div>
-                      <label class="checkbox-field">
-                        <input type="checkbox" name="accrualEnabled"${compensationAccrualChecked} data-profile-accrual-toggle />
-                        <span>Accrual Enabled</span>
-                      </label>
-                      <div class="profile-timeoff__fields${latestConfig?.accrualEnabled ? '' : ' profile-timeoff__fields--disabled'}" data-profile-accrual-details>
+                      <div class="profile-timeoff__fields profile-timeoff__fields--readonly">
+                        <label class="profile-timeoff__readonly">
+                          <span>Accrual Status</span>
+                          <input type="text" value="${escapeHtml(compensationAccrualStatus)}" readonly />
+                        </label>
                         <label>
                           <span>Accrual Method</span>
-                          <input type="text" name="accrualMethod" maxlength="100" value="${compensationAccrualMethodValue}"${latestConfig?.accrualEnabled ? '' : ' disabled'} />
+                          <input type="text" value="${escapeHtml(compensationAccrualMethodDisplay)}" readonly />
                         </label>
                         <label>
                           <span>PTO Balance (hours)</span>
-                          <input type="number" name="ptoBalanceHours" step="0.25" value="${compensationPtoValue}" required${latestConfig?.accrualEnabled ? '' : ' disabled'} />
+                          <input type="text" value="${escapeHtml(compensationPtoDisplay)}" readonly />
                         </label>
                         <label>
                           <span>UTO Balance (hours)</span>
-                          <input type="number" name="utoBalanceHours" step="0.25" value="${compensationUtoValue}" required${latestConfig?.accrualEnabled ? '' : ' disabled'} />
+                          <input type="text" value="${escapeHtml(compensationUtoDisplay)}" readonly />
                         </label>
                         <label>
                           <span>Make-Up Balance (hours)</span>
-                          <input type="number" name="makeupBalanceHours" step="0.25" value="${compensationMakeUpValue}" required${latestConfig?.accrualEnabled ? '' : ' disabled'} />
+                          <input type="text" value="${escapeHtml(compensationMakeUpDisplay)}" readonly />
                         </label>
                       </div>
-                      <p class="profile-timeoff__note">Need to grant or deduct hours immediately? Use the Balances tab to post adjustments so the app and payroll stay in sync.</p>
+                      <p class="profile-timeoff__note">Time-off balances are managed from the Balances tab so the app and payroll stay in sync.</p>
                     </div>
                   </div>
                 </div>
@@ -8958,7 +8949,6 @@ dashboardRouter.get('/employees/:employeeId', async (req, res) => {
               };
 
               const latest = profile.latestConfig;
-              const latestBalance = profile.balance || null;
               const cloneSchedule = (schedule) => JSON.parse(JSON.stringify(schedule));
               const latestSchedule = latest?.schedule ? cloneSchedule(latest.schedule) : buildEmptySchedule();
 
@@ -8988,16 +8978,7 @@ dashboardRouter.get('/employees/:employeeId', async (req, res) => {
                 defaultKpiBonus: latest?.defaultKpiBonus ?? null,
                 schedule: latest?.schedule ? cloneSchedule(latest.schedule) : buildEmptySchedule(),
                 accrualEnabled: Boolean(latest?.accrualEnabled ?? false),
-                accrualMethod: latest?.accrualMethod ?? null,
-                ptoBalanceHours: Number(
-                  latestBalance?.basePtoHours ?? latestBalance?.ptoHours ?? latest?.ptoBalanceHours ?? 0
-                ),
-                utoBalanceHours: Number(
-                  latestBalance?.baseUtoHours ?? latestBalance?.utoHours ?? latest?.utoBalanceHours ?? 0
-                ),
-                makeupBalanceHours: Number(
-                  latestBalance?.baseMakeUpHours ?? latestBalance?.makeUpHours ?? 0
-                )
+                accrualMethod: latest?.accrualMethod ?? null
               });
 
               const toFiniteNumber = (value, fallback = 0) => {
@@ -9037,11 +9018,6 @@ dashboardRouter.get('/employees/:employeeId', async (req, res) => {
                       const quarterlyInput = form.querySelector('input[name="quarterlyAttendanceBonus"]');
                       const kpiCheckbox = form.querySelector('input[name="kpiEligible"]');
                       const kpiBonusInput = form.querySelector('input[name="defaultKpiBonus"]');
-                      const accrualToggle = form.querySelector('[data-profile-accrual-toggle]');
-                      const accrualMethodInput = form.querySelector('input[name="accrualMethod"]');
-                      const ptoInput = form.querySelector('input[name="ptoBalanceHours"]');
-                      const utoInput = form.querySelector('input[name="utoBalanceHours"]');
-                      const makeupInput = form.querySelector('input[name="makeupBalanceHours"]');
 
                       payload.baseSemiMonthlySalary = toFiniteNumber(baseInput?.value, 0);
                       payload.monthlyAttendanceBonus = toFiniteNumber(monthlyInput?.value, 0);
@@ -9053,18 +9029,11 @@ dashboardRouter.get('/employees/:employeeId', async (req, res) => {
                         payload.defaultKpiBonus = null;
                       }
 
-                      const accrualEnabled = accrualToggle instanceof HTMLInputElement ? accrualToggle.checked : payload.accrualEnabled;
-                      payload.accrualEnabled = accrualEnabled;
-                      if (accrualEnabled) {
-                        payload.accrualMethod = accrualMethodInput instanceof HTMLInputElement && accrualMethodInput.value.trim()
-                          ? accrualMethodInput.value.trim()
+                      payload.accrualEnabled = Boolean(latest?.accrualEnabled ?? false);
+                      payload.accrualMethod =
+                        typeof latest?.accrualMethod === 'string' && latest.accrualMethod.trim().length
+                          ? latest.accrualMethod.trim()
                           : null;
-                        payload.ptoBalanceHours = toFiniteNumber(ptoInput?.value, payload.ptoBalanceHours);
-                        payload.utoBalanceHours = toFiniteNumber(utoInput?.value, payload.utoBalanceHours);
-                        payload.makeupBalanceHours = toFiniteNumber(makeupInput?.value, payload.makeupBalanceHours ?? 0);
-                      } else {
-                        payload.accrualMethod = null;
-                      }
                     } else if (kind === 'schedule') {
                       const timeZoneInput = form.querySelector('input[name="scheduleTimeZone"]');
                       const timeZone = timeZoneInput instanceof HTMLInputElement && timeZoneInput.value.trim()
@@ -9129,40 +9098,24 @@ dashboardRouter.get('/employees/:employeeId', async (req, res) => {
 
             const compensationForm = document.querySelector('[data-profile-form="compensation"]');
             if (compensationForm) {
-              const accrualToggle = compensationForm.querySelector('[data-profile-accrual-toggle]');
-              const accrualDetails = compensationForm.querySelector('[data-profile-accrual-details]');
-              const syncAccrual = () => {
-                if (!(accrualDetails instanceof HTMLElement)) return;
-                const enabled = accrualToggle instanceof HTMLInputElement ? accrualToggle.checked : false;
-                accrualDetails.classList.toggle('profile-timeoff__fields--disabled', !enabled);
-                accrualDetails.querySelectorAll('input').forEach((input) => {
-                  if (!(input instanceof HTMLInputElement)) return;
-                  input.disabled = !enabled;
-                });
-              };
-              syncAccrual();
-              if (accrualToggle instanceof HTMLInputElement) {
-                accrualToggle.addEventListener('change', syncAccrual);
-              }
-
               const kpiCheckbox = compensationForm.querySelector('input[name="kpiEligible"]');
               const kpiInput = compensationForm.querySelector('input[name="defaultKpiBonus"]');
               const syncKpi = () => {
                 if (!(kpiInput instanceof HTMLInputElement)) return;
                 const enabled = kpiCheckbox instanceof HTMLInputElement ? kpiCheckbox.checked : false;
-                  kpiInput.disabled = !enabled;
-                  if (!enabled) {
-                    kpiInput.value = '';
-                  } else if (!kpiInput.value && latest) {
-                    kpiInput.value = formatNumberForInput(latest.defaultKpiBonus ?? 0);
-                  }
-                };
-                syncKpi();
-                if (kpiCheckbox instanceof HTMLInputElement) {
-                  kpiCheckbox.addEventListener('change', syncKpi);
+                kpiInput.disabled = !enabled;
+                if (!enabled) {
+                  kpiInput.value = '';
+                } else if (!kpiInput.value && latest) {
+                  kpiInput.value = formatNumberForInput(latest.defaultKpiBonus ?? 0);
                 }
+              };
+              syncKpi();
+              if (kpiCheckbox instanceof HTMLInputElement) {
+                kpiCheckbox.addEventListener('change', syncKpi);
               }
-            })();
+            }
+          })();
           </script>
         </main>
       </body>

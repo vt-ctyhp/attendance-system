@@ -64,10 +64,7 @@ const employeeConfigSchema = zod_1.z.object({
     defaultKpiBonus: zod_1.z.number().finite().nullable().optional(),
     schedule: scheduleSchema,
     accrualEnabled: zod_1.z.boolean(),
-    accrualMethod: zod_1.z.string().max(100).optional().nullable(),
-    ptoBalanceHours: zod_1.z.number().finite(),
-    utoBalanceHours: zod_1.z.number().finite(),
-    makeupBalanceHours: zod_1.z.number().finite().optional()
+    accrualMethod: zod_1.z.string().max(100).optional().nullable()
 });
 payrollRouter.get('/config', requireAdminOrManager, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     const querySchema = zod_1.z.object({ userId: zod_1.z.coerce.number().int().positive().optional() });
@@ -77,19 +74,18 @@ payrollRouter.get('/config', requireAdminOrManager, (0, asyncHandler_1.asyncHand
 }));
 payrollRouter.post('/config', requireAdminOrManager, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     const input = (0, validation_1.parseWithSchema)(employeeConfigSchema, req.body, 'Invalid configuration payload');
-    const { makeupBalanceHours, schedule, ...rest } = input;
+    const { schedule, accrualEnabled, accrualMethod, ...comp } = input;
+    const balance = await (0, balances_1.ensureBalance)(comp.userId);
+    const resolvedPtoBase = Number(balance.basePtoHours ?? balance.ptoHours ?? 0);
+    const resolvedUtoBase = Number(balance.baseUtoHours ?? balance.utoHours ?? 0);
     await (0, config_1.upsertEmployeeConfig)({
-        ...rest,
-        schedule: (0, config_1.ensureSchedule)(schedule)
+        ...comp,
+        accrualEnabled,
+        accrualMethod,
+        schedule: (0, config_1.ensureSchedule)(schedule),
+        ptoBalanceHours: resolvedPtoBase,
+        utoBalanceHours: resolvedUtoBase
     }, req.user?.id);
-    await (0, balances_1.syncTimeOffBalances)({
-        userId: rest.userId,
-        actorId: req.user?.id,
-        ptoHours: rest.ptoBalanceHours,
-        utoHours: rest.utoBalanceHours,
-        makeUpHours: makeupBalanceHours,
-        accrualEnabled: rest.accrualEnabled
-    });
     res.status(201).json({ success: true });
 }));
 const holidayQuerySchema = zod_1.z.object({

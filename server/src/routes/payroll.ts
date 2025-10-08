@@ -26,7 +26,7 @@ import {
 } from '../services/payroll/payroll';
 import { PAYROLL_TIME_ZONE } from '../services/payroll/constants';
 import { ensureUpcomingShiftsForAllUsers } from '../services/shiftPlanner';
-import { syncTimeOffBalances } from '../services/balances';
+import { ensureBalance } from '../services/balances';
 
 const payrollRouter = Router();
 
@@ -84,10 +84,7 @@ const employeeConfigSchema = z.object({
   defaultKpiBonus: z.number().finite().nullable().optional(),
   schedule: scheduleSchema,
   accrualEnabled: z.boolean(),
-  accrualMethod: z.string().max(100).optional().nullable(),
-  ptoBalanceHours: z.number().finite(),
-  utoBalanceHours: z.number().finite(),
-  makeupBalanceHours: z.number().finite().optional()
+  accrualMethod: z.string().max(100).optional().nullable()
 });
 
 payrollRouter.get(
@@ -106,24 +103,23 @@ payrollRouter.post(
   requireAdminOrManager,
   asyncHandler(async (req: AuthenticatedRequest, res) => {
     const input = parseWithSchema(employeeConfigSchema, req.body, 'Invalid configuration payload');
-    const { makeupBalanceHours, schedule, ...rest } = input;
+    const { schedule, accrualEnabled, accrualMethod, ...comp } = input;
+
+    const balance = await ensureBalance(comp.userId);
+    const resolvedPtoBase = Number(balance.basePtoHours ?? balance.ptoHours ?? 0);
+    const resolvedUtoBase = Number(balance.baseUtoHours ?? balance.utoHours ?? 0);
 
     await upsertEmployeeConfig(
       {
-        ...rest,
-        schedule: ensureSchedule(schedule)
+        ...comp,
+        accrualEnabled,
+        accrualMethod,
+        schedule: ensureSchedule(schedule),
+        ptoBalanceHours: resolvedPtoBase,
+        utoBalanceHours: resolvedUtoBase
       },
       req.user?.id
     );
-
-    await syncTimeOffBalances({
-      userId: rest.userId,
-      actorId: req.user?.id,
-      ptoHours: rest.ptoBalanceHours,
-      utoHours: rest.utoBalanceHours,
-      makeUpHours: makeupBalanceHours,
-      accrualEnabled: rest.accrualEnabled
-    });
     res.status(201).json({ success: true });
   })
 );
