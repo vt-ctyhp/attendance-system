@@ -237,25 +237,32 @@ exports.getAppOverview = (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     if (!user) {
         throw errors_1.HttpError.notFound('User not found');
     }
-    const [latestSession] = await prisma_1.prisma.session.findMany({
-        where: { userId: user.id },
+    const sessionInclude = {
+        pauses: { orderBy: { sequence: 'asc' } },
+        events: { orderBy: { ts: 'desc' } }
+    };
+    const [activeSession] = await prisma_1.prisma.session.findMany({
+        where: { userId: user.id, status: 'active' },
         orderBy: { startedAt: 'desc' },
         take: 1,
-        include: {
-            pauses: { orderBy: { sequence: 'asc' } },
-            events: { orderBy: { ts: 'desc' } }
-        }
+        include: sessionInclude
     });
-    const balance = await prisma_1.prisma.ptoBalance.findUnique({ where: { userId: user.id } });
-    const previousCompleted = latestSession?.endedAt
-        ? latestSession
+    const fallbackSession = activeSession
+        ? null
         : await prisma_1.prisma.session.findFirst({
-            where: { userId: user.id, endedAt: { not: null } },
-            orderBy: { endedAt: 'desc' }
+            where: { userId: user.id },
+            orderBy: { startedAt: 'desc' },
+            include: sessionInclude
         });
-    const sessionStatus = resolveSessionStatus(latestSession ?? null);
+    const latestSession = activeSession ?? fallbackSession ?? null;
+    const balance = await prisma_1.prisma.ptoBalance.findUnique({ where: { userId: user.id } });
+    const previousCompleted = await prisma_1.prisma.session.findFirst({
+        where: { userId: user.id, endedAt: { not: null } },
+        orderBy: { endedAt: 'desc' }
+    });
+    const sessionStatus = resolveSessionStatus(latestSession);
     const lastClockedOutAt = previousCompleted?.endedAt ?? null;
-    const activeSessionId = !latestSession || latestSession.status !== 'active' ? null : latestSession.id;
+    const activeSessionId = activeSession?.id ?? null;
     const now = new Date();
     const todayStart = (0, timesheets_1.timesheetDayStart)(now);
     const todayEnd = (0, timesheets_1.timesheetDayEnd)(now);

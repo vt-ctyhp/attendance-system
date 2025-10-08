@@ -301,28 +301,38 @@ export const getAppOverview = asyncHandler(async (req, res) => {
     throw HttpError.notFound('User not found');
   }
 
-  const [latestSession] = await prisma.session.findMany({
-    where: { userId: user.id },
+  const sessionInclude = {
+    pauses: { orderBy: { sequence: 'asc' } },
+    events: { orderBy: { ts: 'desc' } }
+  } as const;
+
+  const [activeSession] = await prisma.session.findMany({
+    where: { userId: user.id, status: 'active' },
     orderBy: { startedAt: 'desc' },
     take: 1,
-    include: {
-      pauses: { orderBy: { sequence: 'asc' } },
-      events: { orderBy: { ts: 'desc' } }
-    }
+    include: sessionInclude
   });
+
+  const fallbackSession = activeSession
+    ? null
+    : await prisma.session.findFirst({
+        where: { userId: user.id },
+        orderBy: { startedAt: 'desc' },
+        include: sessionInclude
+      });
+
+  const latestSession = activeSession ?? fallbackSession ?? null;
 
   const balance = await prisma.ptoBalance.findUnique({ where: { userId: user.id } });
 
-  const previousCompleted = latestSession?.endedAt
-    ? latestSession
-    : await prisma.session.findFirst({
-        where: { userId: user.id, endedAt: { not: null } },
-        orderBy: { endedAt: 'desc' }
-      });
+  const previousCompleted = await prisma.session.findFirst({
+    where: { userId: user.id, endedAt: { not: null } },
+    orderBy: { endedAt: 'desc' }
+  });
 
-  const sessionStatus = resolveSessionStatus(latestSession ?? null);
+  const sessionStatus = resolveSessionStatus(latestSession);
   const lastClockedOutAt = previousCompleted?.endedAt ?? null;
-  const activeSessionId = !latestSession || latestSession.status !== 'active' ? null : latestSession.id;
+  const activeSessionId = activeSession?.id ?? null;
 
   const now = new Date();
   const todayStart = timesheetDayStart(now);
