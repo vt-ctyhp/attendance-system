@@ -16,6 +16,8 @@ const tokenService_1 = require("../services/tokenService");
 const audit_1 = require("../services/audit");
 const metrics_1 = require("../services/metrics");
 const logger_1 = require("../logger");
+const attendance_1 = require("../services/payroll/attendance");
+const attendanceTrigger_1 = require("../services/payroll/attendanceTrigger");
 const startSchema = zod_1.z.object({
     email: zod_1.z.string().email(),
     deviceId: zod_1.z.string().min(3),
@@ -195,6 +197,18 @@ const startSession = async (req, res) => {
             existing: true
         });
     }
+    const now = new Date();
+    const { start: payrollDayStart, end: payrollDayEnd } = (0, attendance_1.getPayrollDayBounds)(now);
+    const sessionsToday = await prisma_1.prisma.session.count({
+        where: {
+            userId: user.id,
+            startedAt: {
+                gte: payrollDayStart,
+                lte: payrollDayEnd
+            }
+        }
+    });
+    const shouldRecalcAttendance = sessionsToday === 0;
     const session = await prisma_1.prisma.session.create({
         data: {
             userId: user.id,
@@ -217,6 +231,17 @@ const startSession = async (req, res) => {
         }
     });
     logger_1.logger.debug({ reqId, userId: user.id, sessionId: session.id, deviceId }, 'session.start.created');
+    if (shouldRecalcAttendance) {
+        try {
+            await (0, attendanceTrigger_1.triggerAttendanceRecalcForUser)(user.id, session.startedAt, {
+                awaitCompletion: true,
+                reason: 'session_start'
+            });
+        }
+        catch (error) {
+            logger_1.logger.error({ error, userId: user.id, sessionId: session.id }, 'session.start.attendance_recalc_failed');
+        }
+    }
     return res.status(201).json({
         sessionId: session.id,
         email: user.email,

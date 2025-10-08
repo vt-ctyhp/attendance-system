@@ -4,10 +4,12 @@ exports.getUserTimesheet = exports.TIMESHEET_TIME_ZONE = exports.computeTimeshee
 const date_fns_1 = require("date-fns");
 const date_fns_tz_1 = require("date-fns-tz");
 const prisma_1 = require("../prisma");
+const constants_1 = require("./payroll/constants");
+const attendance_1 = require("./payroll/attendance");
 const ISO_DATE = 'yyyy-MM-dd';
 const ISO_LONG = "yyyy-MM-dd'T'HH:mm:ssXXX";
 const DATE_LABEL = 'MMM d, yyyy';
-const DEFAULT_TIME_ZONE = process.env.TIMESHEET_TIME_ZONE ?? process.env.DASHBOARD_TIME_ZONE ?? 'America/Los_Angeles';
+const DEFAULT_TIME_ZONE = constants_1.PAYROLL_TIME_ZONE;
 const WEEK_START = (() => {
     const raw = process.env.TIMESHEET_WEEK_START;
     if (!raw)
@@ -77,18 +79,22 @@ const buildEmptyDay = (date) => ({
     idleMinutes: 0,
     breaks: 0,
     lunches: 0,
+    tardyMinutes: 0,
     presenceMisses: 0,
     editRequests: []
 });
 const getUserTimesheet = async (userId, view, reference) => {
     const { start, end, label } = resolveRange(view, reference);
     const dayMap = new Map();
+    const dayMonthKeys = new Map();
     const startZoned = toZoned(start);
     const endZoned = toZoned(end);
     let cursor = startZoned;
     while (cursor <= endZoned) {
         const key = formatDate(cursor, ISO_DATE);
         dayMap.set(key, buildEmptyDay(cursor));
+        const monthKey = (0, attendance_1.getMonthKeyForDate)((0, exports.timesheetDayStart)(cursor));
+        dayMonthKeys.set(key, monthKey);
         cursor = (0, date_fns_1.addDays)(cursor, 1);
     }
     const sessions = await prisma_1.prisma.session.findMany({
@@ -187,6 +193,30 @@ const getUserTimesheet = async (userId, view, reference) => {
         });
     }
     const days = Array.from(dayMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+    const monthKeys = Array.from(new Set(dayMonthKeys.values()));
+    if (monthKeys.length) {
+        const facts = await prisma_1.prisma.attendanceMonthFact.findMany({
+            where: { userId, monthKey: { in: monthKeys } }
+        });
+        const tardyByDate = new Map();
+        for (const fact of facts) {
+            const snapshot = fact.snapshot;
+            if (!snapshot || !Array.isArray(snapshot.days))
+                continue;
+            for (const day of snapshot.days) {
+                if (!day || typeof day.date !== 'string')
+                    continue;
+                const tardyValue = Number(day.tardyMinutes ?? 0);
+                tardyByDate.set(day.date, Number.isFinite(tardyValue) ? tardyValue : 0);
+            }
+        }
+        for (const day of days) {
+            const tardy = tardyByDate.get(day.date);
+            if (typeof tardy === 'number') {
+                day.tardyMinutes = tardy;
+            }
+        }
+    }
     const totals = days.reduce((acc, day) => ({
         activeMinutes: acc.activeMinutes + day.activeMinutes,
         activeHours: 0,
@@ -194,8 +224,18 @@ const getUserTimesheet = async (userId, view, reference) => {
         idleHours: 0,
         breaks: acc.breaks + day.breaks,
         lunches: acc.lunches + day.lunches,
+        tardyMinutes: acc.tardyMinutes + day.tardyMinutes,
         presenceMisses: acc.presenceMisses + day.presenceMisses
-    }), { activeMinutes: 0, activeHours: 0, idleMinutes: 0, idleHours: 0, breaks: 0, lunches: 0, presenceMisses: 0 });
+    }), {
+        activeMinutes: 0,
+        activeHours: 0,
+        idleMinutes: 0,
+        idleHours: 0,
+        breaks: 0,
+        lunches: 0,
+        tardyMinutes: 0,
+        presenceMisses: 0
+    });
     totals.activeHours = minutesToHours(totals.activeMinutes);
     totals.idleHours = minutesToHours(totals.idleMinutes);
     return {

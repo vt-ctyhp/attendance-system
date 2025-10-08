@@ -12,6 +12,8 @@ const validation_1 = require("../utils/validation");
 const errors_1 = require("../errors");
 const timeRequestPolicy_1 = require("../services/timeRequestPolicy");
 const balances_1 = require("../services/balances");
+const attendanceTrigger_1 = require("../services/payroll/attendanceTrigger");
+const logger_1 = require("../logger");
 const timeRequestTypeEnum = zod_1.z.enum(types_1.TIME_REQUEST_TYPES);
 const timeRequestStatusEnum = zod_1.z.enum(types_1.TIME_REQUEST_STATUSES);
 const dateValue = zod_1.z.preprocess((value) => {
@@ -240,6 +242,14 @@ const approveTimeRequest = async (req, res) => {
         });
         return { updatedRequest, updatedBalance };
     });
+    if (result.updatedRequest.type === 'pto') {
+        try {
+            await (0, attendanceTrigger_1.triggerAttendanceRecalcForUserRange)(result.updatedRequest.userId, result.updatedRequest.startDate, result.updatedRequest.endDate, { actorId: req.user.id });
+        }
+        catch (error) {
+            logger_1.logger.error({ error, requestId: id }, 'time_request.attendance_recalc_failed');
+        }
+    }
     return res.json(result);
 };
 exports.approveTimeRequest = approveTimeRequest;

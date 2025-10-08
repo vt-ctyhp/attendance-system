@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.listAttendanceFactsForMonth = exports.recalcMonthlyAttendanceFacts = void 0;
+exports.isAttendanceMonthLocked = exports.listAttendanceFactsForMonth = exports.recalcMonthlyAttendanceFacts = exports.getPayrollDayBounds = exports.getMonthKeyForDate = void 0;
 const library_1 = require("@prisma/client/runtime/library");
 const date_fns_1 = require("date-fns");
 const date_fns_tz_1 = require("date-fns-tz");
@@ -17,6 +17,15 @@ const parseMonthKey = (monthKey) => {
     const rangeEnd = (0, date_fns_tz_1.zonedTimeToUtc)((0, date_fns_1.endOfDay)((0, date_fns_1.endOfMonth)(startZoned)), constants_1.PAYROLL_TIME_ZONE);
     return { rangeStart, rangeEnd };
 };
+const getMonthKeyForDate = (date) => (0, date_fns_tz_1.formatInTimeZone)(date, constants_1.PAYROLL_TIME_ZONE, constants_1.MONTH_KEY_FORMAT);
+exports.getMonthKeyForDate = getMonthKeyForDate;
+const getPayrollDayBounds = (date) => {
+    const zoned = (0, date_fns_tz_1.utcToZonedTime)(date, constants_1.PAYROLL_TIME_ZONE);
+    const dayStart = (0, date_fns_tz_1.zonedTimeToUtc)((0, date_fns_1.startOfDay)(zoned), constants_1.PAYROLL_TIME_ZONE);
+    const dayEnd = (0, date_fns_tz_1.zonedTimeToUtc)((0, date_fns_1.endOfDay)(zoned), constants_1.PAYROLL_TIME_ZONE);
+    return { start: dayStart, end: dayEnd };
+};
+exports.getPayrollDayBounds = getPayrollDayBounds;
 const buildDayKey = (date) => (0, date_fns_tz_1.formatInTimeZone)(date, constants_1.PAYROLL_TIME_ZONE, constants_1.DATE_KEY_FORMAT);
 const toHours = (minutes) => Math.round((minutes / 60) * 100) / 100;
 const sumDayHours = (requests, start, end) => {
@@ -150,14 +159,20 @@ const mapRequestsByUser = (requests) => {
     }
     return map;
 };
-const recalcMonthlyAttendanceFacts = async (monthKey, actorId) => {
+const recalcMonthlyAttendanceFacts = async (monthKey, actorId, userIds) => {
     const { rangeStart, rangeEnd } = parseMonthKey(monthKey);
-    const users = await prisma_1.prisma.user.findMany({ where: { active: true } });
-    const userIds = users.map((user) => user.id);
+    const where = userIds && userIds.length
+        ? { active: true, id: { in: userIds } }
+        : { active: true };
+    const users = await prisma_1.prisma.user.findMany({ where });
+    if (!users.length) {
+        return [];
+    }
+    const targetUserIds = users.map((user) => user.id);
     const [firstStarts, workedMinutesMap, requests, holidays] = await Promise.all([
-        collectFirstStarts(userIds, rangeStart, rangeEnd),
-        collectWorkedMinutes(userIds, rangeStart, rangeEnd),
-        collectApprovedRequests(userIds, rangeStart, rangeEnd),
+        collectFirstStarts(targetUserIds, rangeStart, rangeEnd),
+        collectWorkedMinutes(targetUserIds, rangeStart, rangeEnd),
+        collectApprovedRequests(targetUserIds, rangeStart, rangeEnd),
         collectHolidays(rangeStart, rangeEnd)
     ]);
     const requestsByUser = mapRequestsByUser(requests);
@@ -223,6 +238,10 @@ const recalcMonthlyAttendanceFacts = async (monthKey, actorId) => {
                     detail.tardyMinutes = tardy;
                     tardyMinutes += tardy;
                 }
+            }
+            if (detail.tardyMinutes > 0 && (detail.ptoHours > 0 || detail.holiday)) {
+                tardyMinutes -= detail.tardyMinutes;
+                detail.tardyMinutes = 0;
             }
             const deficit = Math.max(detail.expectedHours -
                 (detail.workedHours + detail.ptoHours + detail.utoHours + detail.makeUpHours), 0);
@@ -341,3 +360,12 @@ const listAttendanceFactsForMonth = async (monthKey) => {
     return { rangeStart, rangeEnd, facts };
 };
 exports.listAttendanceFactsForMonth = listAttendanceFactsForMonth;
+const isAttendanceMonthLocked = async (monthKey) => {
+    const periodKeys = [`${monthKey}-A`, `${monthKey}-B`];
+    const periods = await prisma_1.prisma.payrollPeriod.findMany({
+        where: { periodKey: { in: periodKeys } },
+        select: { periodKey: true, status: true }
+    });
+    return periods.some((period) => period.status === 'paid');
+};
+exports.isAttendanceMonthLocked = isAttendanceMonthLocked;

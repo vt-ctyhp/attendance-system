@@ -100,6 +100,7 @@ const toTimesheetPeriod = async (userId, view, reference) => {
             idleHours: roundHours(day.idleMinutes),
             breaks: day.breaks,
             lunches: day.lunches,
+            tardyMinutes: day.tardyMinutes,
             presenceMisses: day.presenceMisses
         })),
         totals: {
@@ -107,6 +108,7 @@ const toTimesheetPeriod = async (userId, view, reference) => {
             idleHours: Math.round(summary.totals.idleHours * 100) / 100,
             breaks: summary.totals.breaks,
             lunches: summary.totals.lunches,
+            tardyMinutes: summary.totals.tardyMinutes,
             presenceMisses: summary.totals.presenceMisses
         }
     };
@@ -305,13 +307,18 @@ exports.getAppOverview = (0, asyncHandler_1.asyncHandler)(async (req, res) => {
         lunchMinutes,
         breaksCount: pauses.filter((pause) => pause.type === 'break').length,
         lunchCount: pauses.filter((pause) => pause.type === 'lunch').length,
-        presenceMisses
+        presenceMisses,
+        tardyMinutes: 0
     };
     const [weekly, payPeriod, monthly] = await Promise.all([
         toTimesheetPeriod(user.id, 'weekly', now),
         toTimesheetPeriod(user.id, 'pay_period', now),
         toTimesheetPeriod(user.id, 'monthly', now)
     ]);
+    const todayEntry = weekly.days.find((day) => day.date === todaySnapshot.date);
+    if (todayEntry) {
+        todaySnapshot.tardyMinutes = todayEntry.tardyMinutes;
+    }
     const requests = await prisma_1.prisma.timeRequest.findMany({
         where: { userId: user.id },
         orderBy: { createdAt: 'desc' },
@@ -330,7 +337,7 @@ exports.getAppOverview = (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     ]);
     const idleActivities = buildIdleActivities(minuteStats, pauses, now);
     const activity = [
-        ...events.map(eventToActivity),
+        ...events.filter((event) => event.type !== 'heartbeat').map(eventToActivity),
         ...requests.map(requestToActivity),
         ...idleActivities
     ]

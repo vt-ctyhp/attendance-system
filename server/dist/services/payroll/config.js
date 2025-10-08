@@ -6,7 +6,10 @@ const date_fns_tz_1 = require("date-fns-tz");
 const library_1 = require("@prisma/client/runtime/library");
 const client_1 = require("@prisma/client");
 const prisma_1 = require("../../prisma");
+const errors_1 = require("../../errors");
 const constants_1 = require("./constants");
+const attendanceTrigger_1 = require("./attendanceTrigger");
+const attendance_1 = require("./attendance");
 const WEEKDAY_KEYS = ['0', '1', '2', '3', '4', '5', '6'];
 const DEFAULT_START = '09:00';
 const DEFAULT_END = '17:00';
@@ -141,7 +144,21 @@ const getEffectiveConfigForDate = async (userId, target) => {
 };
 exports.getEffectiveConfigForDate = getEffectiveConfigForDate;
 const upsertEmployeeConfig = async (input, actorId) => {
+    const priorConfig = await prisma_1.prisma.employeeCompConfig.findFirst({
+        where: { userId: input.userId, effectiveOn: { lte: input.effectiveOn } },
+        orderBy: { effectiveOn: 'desc' }
+    });
     const schedule = (0, exports.ensureSchedule)(input.schedule);
+    const serializedSchedule = (0, exports.serializeSchedule)(schedule);
+    let scheduleChanged = true;
+    if (priorConfig) {
+        try {
+            scheduleChanged = JSON.stringify(priorConfig.schedule) !== JSON.stringify(serializedSchedule);
+        }
+        catch (error) {
+            scheduleChanged = true;
+        }
+    }
     const data = {
         userId: input.userId,
         effectiveOn: input.effectiveOn,
@@ -152,7 +169,7 @@ const upsertEmployeeConfig = async (input, actorId) => {
         defaultKpiBonus: input.defaultKpiBonus !== undefined && input.defaultKpiBonus !== null
             ? new library_1.Decimal(input.defaultKpiBonus)
             : null,
-        schedule: (0, exports.serializeSchedule)(schedule),
+        schedule: serializedSchedule,
         accrualEnabled: input.accrualEnabled,
         accrualMethod: input.accrualMethod ?? null,
         ptoBalanceHours: new library_1.Decimal(input.ptoBalanceHours),
@@ -163,11 +180,18 @@ const upsertEmployeeConfig = async (input, actorId) => {
     }
     catch (error) {
         if (error instanceof client_1.Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-            const conflict = new Error('Configuration already exists for this effective date.');
-            conflict.name = 'EmployeeConfigConflictError';
-            throw conflict;
+            throw errors_1.HttpError.conflict('Configuration already exists for this effective date.', {
+                field: 'effectiveOn'
+            });
         }
         throw error;
+    }
+    if (scheduleChanged) {
+        const monthKeys = (0, attendanceTrigger_1.collectMonthKeysFromEffectiveDate)(input.effectiveOn);
+        await (0, attendanceTrigger_1.triggerAttendanceRecalcForMonths)(monthKeys, {
+            userIds: [input.userId],
+            actorId
+        });
     }
     if (actorId) {
         await prisma_1.prisma.payrollAuditLog.create({
@@ -222,6 +246,8 @@ const createHoliday = async (name, observedOn, actorId) => {
             }
         });
     }
+    const monthKey = (0, attendance_1.getMonthKeyForDate)(observedOn);
+    await (0, attendanceTrigger_1.triggerAttendanceRecalcForMonths)([monthKey], { actorId });
     return holiday;
 };
 exports.createHoliday = createHoliday;
@@ -237,6 +263,10 @@ const deleteHoliday = async (observedOn, actorId) => {
                 details: {}
             }
         });
+    }
+    if (deleted.count > 0) {
+        const monthKey = (0, attendance_1.getMonthKeyForDate)(observedOn);
+        await (0, attendanceTrigger_1.triggerAttendanceRecalcForMonths)([monthKey], { actorId });
     }
     return deleted.count > 0;
 };

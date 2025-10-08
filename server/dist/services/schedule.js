@@ -4,18 +4,56 @@ exports.__private__ = exports.getUserSchedule = void 0;
 const date_fns_1 = require("date-fns");
 const date_fns_tz_1 = require("date-fns-tz");
 const prisma_1 = require("../prisma");
+const config_1 = require("./payroll/config");
 const shiftPlanner_1 = require("./shiftPlanner");
 const timesheets_1 = require("./timesheets");
-const DEFAULT_SCHEDULE_TEMPLATES = [
-    { label: 'Mon – Fri', start: '09:00', end: '17:30' },
-    { label: 'Sat', start: '10:00', end: '16:00' }
-];
+const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const DEFAULT_LOOKAHEAD_DAYS = 14;
 const DEFAULT_UPCOMING_LIMIT = 6;
 const formatDate = (date, pattern) => (0, date_fns_tz_1.formatInTimeZone)(date, timesheets_1.TIMESHEET_TIME_ZONE, pattern);
 const isoDate = (date) => formatDate(date, 'yyyy-MM-dd');
 const dayLabel = (date) => formatDate(date, 'EEE, MMM d');
 const formatTime = (date) => formatDate(date, 'HH:mm');
+const buildScheduleDefaults = (schedule) => {
+    const groups = [];
+    let current = null;
+    for (let i = 0; i < WEEKDAY_LABELS.length; i += 1) {
+        const dayKey = String(i);
+        const day = schedule.days[dayKey];
+        const enabled = day?.enabled ?? false;
+        if (!enabled) {
+            if (current) {
+                groups.push(current);
+                current = null;
+            }
+            continue;
+        }
+        const start = day.start;
+        const end = day.end;
+        if (!current) {
+            current = { startIndex: i, endIndex: i, start, end };
+            continue;
+        }
+        const isConsecutive = current.endIndex === i - 1;
+        const matchesHours = current.start === start && current.end === end;
+        if (isConsecutive && matchesHours) {
+            current.endIndex = i;
+        }
+        else {
+            groups.push(current);
+            current = { startIndex: i, endIndex: i, start, end };
+        }
+    }
+    if (current) {
+        groups.push(current);
+    }
+    return groups.map(({ startIndex, endIndex, start, end }) => {
+        const label = startIndex === endIndex
+            ? WEEKDAY_LABELS[startIndex]
+            : `${WEEKDAY_LABELS[startIndex]} – ${WEEKDAY_LABELS[endIndex]}`;
+        return { label, start, end };
+    });
+};
 const KIND_LABELS = {
     shift: 'Shift',
     pto: 'PTO',
@@ -150,8 +188,13 @@ const getUserSchedule = async ({ userId, sessionStatus, reference = new Date(), 
     const windowEnd = (0, timesheets_1.timesheetDayEnd)((0, date_fns_1.addDays)(reference, lookaheadDays));
     await (0, shiftPlanner_1.ensureUpcomingShiftsForUser)({ userId, windowStart, windowEnd });
     const entries = await loadScheduleSources(userId, windowStart, windowEnd);
+    const config = await prisma_1.prisma.employeeCompConfig.findFirst({
+        where: { userId, effectiveOn: { lte: windowEnd } },
+        orderBy: { effectiveOn: 'desc' }
+    });
+    const schedule = (0, config_1.ensureSchedule)(config?.schedule);
     return {
-        defaults: DEFAULT_SCHEDULE_TEMPLATES.slice(),
+        defaults: buildScheduleDefaults(schedule),
         upcoming: buildScheduleEntries(entries, sessionStatus, reference, limit)
     };
 };
