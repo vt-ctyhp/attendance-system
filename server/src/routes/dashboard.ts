@@ -6783,6 +6783,9 @@ const renderSettingsPage = ({ enabled, employees, logs, message, error }: Settin
                   <input type="hidden" name="active" value="${nextValue}" />
                   <button type="submit">${toggleLabel}</button>
                 </form>
+                <form method="post" action="/dashboard/settings/employees/${employee.id}/delete" class="inline-form" onsubmit="return confirm('Are you sure you want to DELETE this employee and all their data? You can choose to deactivate instead.');">
+                  <button type="submit" class="danger">Delete</button>
+                </form>
               </td>
             </tr>
           `;
@@ -9046,6 +9049,43 @@ dashboardRouter.post(
 
     await prisma.user.update({ where: { id }, data: { active: nextActive } });
     res.redirect('/dashboard/settings');
+  })
+);
+
+dashboardRouter.post(
+  '/settings/employees/:id/delete',
+  asyncHandler(async (req, res) => {
+    const id = Number.parseInt(req.params.id, 10);
+    if (!Number.isFinite(id) || id <= 0) {
+      throw HttpError.badRequest('Invalid employee id');
+    }
+
+    const employee = await prisma.user.findUnique({ where: { id } });
+    if (!employee || employee.role !== 'employee') {
+      throw HttpError.notFound('Employee not found');
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.event.deleteMany({ where: { session: { userId: id } } });
+      await tx.minuteStat.deleteMany({ where: { session: { userId: id } } });
+      await tx.sessionPause.deleteMany({ where: { session: { userId: id } } });
+      await tx.presencePrompt.deleteMany({ where: { session: { userId: id } } });
+      await tx.session.deleteMany({ where: { userId: id } });
+      await tx.timeRequest.deleteMany({ where: { userId: id } });
+      await tx.timesheetEditRequest.deleteMany({ where: { userId: id } });
+      await tx.shiftAssignment.deleteMany({ where: { userId: id } });
+      await tx.attendanceMonthFact.deleteMany({ where: { userId: id } });
+      await tx.payrollLine.deleteMany({ where: { userId: id } });
+      await tx.bonusCandidate.deleteMany({ where: { userId: id } });
+      await tx.balanceLedger.deleteMany({ where: { userId: id } });
+      await tx.accrualRule.deleteMany({ where: { userId: id } });
+      await tx.refreshToken.deleteMany({ where: { userId: id } });
+      await tx.ptoBalance.deleteMany({ where: { userId: id } });
+      await tx.employeeCompConfig.deleteMany({ where: { userId: id } });
+      await tx.user.delete({ where: { id } });
+    });
+
+    res.redirect('/dashboard/settings?message=' + encodeURIComponent('Employee deleted.'));
   })
 );
 
