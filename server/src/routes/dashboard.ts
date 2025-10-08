@@ -6941,6 +6941,10 @@ const addEmployeeSchema = z.object({
   email: z.string().email()
 });
 
+const updateEmployeeNameSchema = z.object({
+  name: z.string().min(1).max(200)
+});
+
 const renderSettingsPage = ({ enabled, employees, logs, message, error }: SettingsContext) => {
   const renderAlert = () => {
     if (message) {
@@ -6957,6 +6961,7 @@ const renderSettingsPage = ({ enabled, employees, logs, message, error }: Settin
         .map((employee) => {
           const toggleLabel = employee.active ? 'Deactivate' : 'Activate';
           const nextValue = employee.active ? 'false' : 'true';
+          const nameValue = escapeAttr(employee.name ?? '');
           return `
             <tr>
               <td>${escapeHtml(employee.name)}</td>
@@ -6964,6 +6969,10 @@ const renderSettingsPage = ({ enabled, employees, logs, message, error }: Settin
               <td>${employee.active ? 'Active' : 'Inactive'}</td>
               <td>${formatDateTime(employee.createdAt)}</td>
               <td>
+                <form method="post" action="/dashboard/settings/employees/${employee.id}/name" class="inline-form" style="display:flex; gap:0.5rem; align-items:center; margin-bottom:0.5rem;">
+                  <input type="text" name="name" value="${nameValue}" required maxlength="200" />
+                  <button type="submit">Update Name</button>
+                </form>
                 <form method="post" action="/dashboard/settings/employees/${employee.id}/active" class="inline-form">
                   <input type="hidden" name="active" value="${nextValue}" />
                   <button type="submit">${toggleLabel}</button>
@@ -9126,5 +9135,37 @@ dashboardRouter.post(
 
     await prisma.user.update({ where: { id }, data: { active: nextActive } });
     res.redirect('/dashboard/settings');
+  })
+);
+
+dashboardRouter.post(
+  '/settings/employees/:id/name',
+  asyncHandler(async (req, res) => {
+    const id = Number.parseInt(req.params.id, 10);
+    if (!Number.isFinite(id) || id <= 0) {
+      throw HttpError.badRequest('Invalid employee id');
+    }
+
+    const parsed = updateEmployeeNameSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.redirect('/dashboard/settings?error=' + encodeURIComponent('Provide a name between 1 and 200 characters.'));
+    }
+
+    const name = parsed.data.name.trim();
+    if (!name) {
+      return res.redirect('/dashboard/settings?error=' + encodeURIComponent('Name is required.'));
+    }
+
+    const employee = await prisma.user.findUnique({ where: { id } });
+    if (!employee || employee.role !== 'employee') {
+      throw HttpError.notFound('Employee not found');
+    }
+
+    if (employee.name === name) {
+      return res.redirect('/dashboard/settings?message=' + encodeURIComponent('Employee name unchanged.'));
+    }
+
+    await prisma.user.update({ where: { id }, data: { name } });
+    res.redirect('/dashboard/settings?message=' + encodeURIComponent('Employee name updated.'));
   })
 );
