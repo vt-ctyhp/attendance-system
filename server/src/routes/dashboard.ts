@@ -5879,49 +5879,6 @@ dashboardRouter.get('/payroll', async (req, res) => {
   const makeNumberValue = (value: number | undefined) =>
     Number.isFinite(value) ? String(value) : '';
 
-  const scheduleTemplate = (() => {
-    const baseSchedule = selectedConfig ? ensureSchedule(selectedConfig.schedule) : ensureSchedule({});
-    let enabledDays = Object.entries(baseSchedule.days)
-      .filter(([, entry]) => entry.enabled)
-      .map(([day]) => day);
-    if (!selectedConfig && enabledDays.length === 0) {
-      enabledDays = ['1', '2', '3', '4', '5'];
-    }
-    const templateReference = enabledDays.includes('1')
-      ? baseSchedule.days['1']
-      : enabledDays.length
-        ? baseSchedule.days[enabledDays[0] as keyof typeof baseSchedule.days]
-        : baseSchedule.days['1'];
-    return {
-      start: templateReference.start,
-      end: templateReference.end,
-      hours: templateReference.expectedHours,
-      breakMinutes: templateReference.breakMinutes,
-      timeZone: baseSchedule.timeZone,
-      enabledDays
-    };
-  })();
-
-  const scheduleCheckboxes = ['0', '1', '2', '3', '4', '5', '6']
-    .map((dayKey) => {
-      const label = weekdayLabels[Number(dayKey)];
-      const isChecked = scheduleTemplate.enabledDays.includes(dayKey);
-      return `
-        <label class="schedule-option">
-          <input type="checkbox" name="scheduleDay" value="${dayKey}" data-day="${dayKey}"${isChecked ? ' checked' : ''} />
-          <span>${escapeHtml(label)}</span>
-        </label>
-      `;
-    })
-    .join('');
-
-  const makeupBalanceValue = (() => {
-    if (!selectedConfig) return '';
-    const configAny = selectedConfig as Record<string, unknown>;
-    const value = configAny.makeupBalanceHours;
-    return typeof value === 'number' ? makeNumberValue(value) : '';
-  })();
-
   const latestConfigRows = employees.length
     ? employees.map((employee) => {
       const profileUrl = `/dashboard/employees/${employee.id}`;
@@ -6309,167 +6266,15 @@ dashboardRouter.get('/payroll', async (req, res) => {
             </section>
           </div>
           <div class="cards-grid cards-grid--payroll">
-            <section class="card" id="update-compensation">
+            <section class="card card--message">
               <div class="card__header">
                 <div>
                   <h2 class="card__title">Update Compensation</h2>
-                  <p class="card__subtitle">Submit adjustments to salaries, bonuses, and accrual baselines.</p>
+                  <p class="card__subtitle">Manage salaries, schedules, accrual settings, and time-off balances from the employee profile.</p>
                 </div>
               </div>
               <div class="card__body">
-                <form data-async="true" data-kind="compensation" data-success-message="Compensation saved." class="compensation-form" data-default-timezone="${escapeHtml(scheduleTemplate.timeZone)}">
-                  <div class="compensation-form__columns">
-                    <div class="compensation-form__column">
-                      <section class="compensation-group">
-                        <div class="compensation-group__header">
-                          <h3 class="compensation-group__title">Employee & Timing</h3>
-                          <p class="compensation-group__hint">Choose who this update applies to and when it starts.</p>
-                        </div>
-                        <div class="compensation-group__body">
-                          <div class="compensation-group__fields compensation-group__fields--two">
-                            <label>
-                              <span>Employee</span>
-                              <select name="userId" required>
-                                ${employeeOptions}
-                              </select>
-                            </label>
-                            <label>
-                              <span>Effective On</span>
-                              <input type="date" name="effectiveOn" value="${
-                                selectedConfig ? formatIsoDate(selectedConfig.effectiveOn) : wizardDefaultPayDate
-                              }" required />
-                            </label>
-                          </div>
-                        </div>
-                      </section>
-                      <section class="compensation-group">
-                        <div class="compensation-group__header">
-                          <h3 class="compensation-group__title">Schedule Template</h3>
-                          <p class="compensation-group__hint">Set default working hours and days for payroll calculations.</p>
-                        </div>
-                        <div class="compensation-group__body">
-                          <div class="compensation-group__fields compensation-group__fields--three">
-                            <label>
-                              <span>Start</span>
-                              <input type="time" name="scheduleStart" value="${scheduleTemplate.start}" required />
-                            </label>
-                            <label>
-                              <span>End</span>
-                              <input type="time" name="scheduleEnd" value="${scheduleTemplate.end}" required />
-                            </label>
-                            <label>
-                              <span>Expected Hours</span>
-                              <input type="number" name="scheduleHours" step="0.25" min="0" value="${
-                                makeNumberValue(scheduleTemplate.hours)
-                              }" required />
-                            </label>
-                          </div>
-                          <div class="schedule-days">${scheduleCheckboxes}</div>
-                        </div>
-                      </section>
-                    </div>
-                    <div class="compensation-form__column">
-                      <section class="compensation-group">
-                        <div class="compensation-group__header">
-                          <h3 class="compensation-group__title">Compensation</h3>
-                          <p class="compensation-group__hint">Base pay, attendance incentives, and KPI bonus defaults.</p>
-                        </div>
-                        <div class="compensation-group__body">
-                          <div class="compensation-subgroup">
-                            <h4 class="compensation-subgroup__title">Core Pay</h4>
-                            <div class="compensation-group__fields compensation-group__fields--stack">
-                              <label>
-                                <span>Semi-Monthly Base</span>
-                                <input type="number" name="baseSemiMonthlySalary" step="0.01" min="0" value="${
-                                  selectedConfig ? makeNumberValue(selectedConfig.baseSemiMonthlySalary) : ''
-                                }" required />
-                              </label>
-                            </div>
-                          </div>
-                          <div class="compensation-subgroup">
-                            <h4 class="compensation-subgroup__title">Attendance Bonuses</h4>
-                            <div class="compensation-subgroup__fields">
-                              <div class="compensation-group__fields compensation-group__fields--stack">
-                                <label>
-                                  <span>Monthly Attendance Bonus</span>
-                                  <input type="number" name="monthlyAttendanceBonus" step="0.01" min="0" value="${
-                                    selectedConfig ? makeNumberValue(selectedConfig.monthlyAttendanceBonus) : ''
-                                  }" required />
-                                </label>
-                                <label>
-                                  <span>Quarterly Attendance Bonus</span>
-                                  <input type="number" name="quarterlyAttendanceBonus" step="0.01" min="0" value="${
-                                    selectedConfig ? makeNumberValue(selectedConfig.quarterlyAttendanceBonus) : ''
-                                  }" required />
-                                </label>
-                              </div>
-                            </div>
-                          </div>
-                          <div class="compensation-subgroup">
-                            <h4 class="compensation-subgroup__title">KPI Bonus</h4>
-                            <div class="compensation-group__fields compensation-group__fields--two">
-                              <label class="checkbox-field compensation-group__full">
-                                <input type="checkbox" name="kpiEligible" ${selectedConfig?.kpiEligible ? 'checked' : ''} />
-                                <span>KPI Eligible</span>
-                              </label>
-                              <label>
-                                <span>Default KPI Bonus</span>
-                                <input type="number" name="defaultKpiBonus" step="0.01" min="0" value="${
-                                  selectedConfig && selectedConfig.defaultKpiBonus !== null
-                                    ? makeNumberValue(selectedConfig.defaultKpiBonus)
-                                    : ''
-                                }" />
-                              </label>
-                            </div>
-                          </div>
-                        </div>
-                      </section>
-                      <section class="compensation-group compensation-group--balances">
-                        <div class="compensation-group__header">
-                          <h3 class="compensation-group__title">Time Off Balances</h3>
-                          <p class="compensation-group__hint">Manage PTO accrual settings and current banked hours.</p>
-                        </div>
-                        <div class="compensation-group__body compensation-group__body--balances">
-                          <label class="checkbox-field compensation-group__full">
-                            <input type="checkbox" name="accrualEnabled" ${selectedConfig?.accrualEnabled ? 'checked' : ''} data-accrual-toggle />
-                            <span>Accrual Enabled</span>
-                          </label>
-                          <div
-                            class="compensation-group__fields compensation-group__fields--stack timeoff-fields${selectedConfig?.accrualEnabled ? '' : ' timeoff-fields--disabled'}"
-                            data-accrual-details
-                          >
-                            <label>
-                              <span>Accrual Method</span>
-                              <input type="text" name="accrualMethod" maxlength="100" value="${
-                                selectedConfig?.accrualMethod ? escapeHtml(selectedConfig.accrualMethod) : ''
-                              }"${selectedConfig?.accrualEnabled ? '' : ' disabled'} />
-                            </label>
-                            <label>
-                              <span>PTO Balance (hours)</span>
-                              <input type="number" name="ptoBalanceHours" step="0.25" value="${
-                                selectedConfig ? makeNumberValue(selectedConfig.ptoBalanceHours) : ''
-                              }" required${selectedConfig?.accrualEnabled ? '' : ' disabled'} />
-                            </label>
-                            <label>
-                              <span>UTO Balance (hours)</span>
-                              <input type="number" name="utoBalanceHours" step="0.25" value="${
-                                selectedConfig ? makeNumberValue(selectedConfig.utoBalanceHours) : ''
-                              }" required${selectedConfig?.accrualEnabled ? '' : ' disabled'} />
-                            </label>
-                            <label>
-                              <span>Makeup Hours (hours)</span>
-                              <input type="number" name="makeupBalanceHours" step="0.25" value="${makeupBalanceValue}" required${selectedConfig?.accrualEnabled ? '' : ' disabled'} />
-                            </label>
-                          </div>
-                        </div>
-                      </section>
-                    </div>
-                  </div>
-                  <div class="compensation-form__footer">
-                    <p class="form-error" data-error></p>
-                    <button type="submit" class="button">Save Configuration</button>
-                  </div>
-                </form>
+                <p>Select an employee below and click <strong>View profile</strong> to record a new compensation version or adjust accrual settings.</p>
               </div>
             </section>
           </div>
@@ -8587,6 +8392,12 @@ dashboardRouter.get('/employees/:employeeId', async (req, res) => {
   const compensationQuarterlyValue = toNumberInput(latestConfig?.quarterlyAttendanceBonus);
   const compensationKpiChecked = latestConfig?.kpiEligible ? ' checked' : '';
   const compensationKpiValue = toNumberInput(latestConfig?.defaultKpiBonus ?? null);
+  const compensationAccrualChecked = latestConfig?.accrualEnabled ? ' checked' : '';
+  const compensationAccrualMethodValue = latestConfig?.accrualMethod
+    ? escapeHtml(latestConfig.accrualMethod)
+    : '';
+  const compensationPtoValue = toNumberInput(latestConfig?.ptoBalanceHours ?? null);
+  const compensationUtoValue = toNumberInput(latestConfig?.utoBalanceHours ?? null);
   const scheduleTimeZoneValue = escapeHtml(scheduleSnapshot.timeZone);
 
   const html = `
@@ -8607,6 +8418,18 @@ dashboardRouter.get('/employees/:employeeId', async (req, res) => {
           body.dashboard--employee-profile .profile-form label span { font-weight: 600; }
           body.dashboard--employee-profile .profile-form__footer { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; justify-content: flex-end; }
           body.dashboard--employee-profile .profile-form__footer .form-error { flex: 1; margin: 0; min-height: 1rem; color: #dc2626; font-size: 0.9rem; }
+          body.dashboard--employee-profile .profile-compensation-layout { display: grid; gap: 1.2rem; }
+          @media (min-width: 960px) {
+            body.dashboard--employee-profile .profile-compensation-layout { grid-template-columns: minmax(0, 1fr) minmax(260px, 0.85fr); align-items: start; }
+          }
+          body.dashboard--employee-profile .profile-compensation-column { display: grid; gap: 1rem; }
+          body.dashboard--employee-profile .profile-timeoff { border: 1px solid rgba(148,163,184,0.26); border-radius: 16px; background: rgba(248,250,252,0.8); padding: 1rem 1.25rem; display: grid; gap: 0.85rem; box-shadow: inset 0 1px 0 rgba(255,255,255,0.6); }
+          body.dashboard--employee-profile .profile-timeoff__title { margin: 0; font-size: 0.95rem; font-weight: 700; color: #0f172a; }
+          body.dashboard--employee-profile .profile-timeoff__hint { margin: 0; font-size: 0.85rem; color: #64748b; }
+          body.dashboard--employee-profile .profile-timeoff__fields { display: grid; gap: 0.75rem; border: 1px dashed rgba(148,163,184,0.25); border-radius: 12px; padding: 0.9rem 1rem; background: rgba(255,255,255,0.55); transition: opacity 0.2s ease; }
+          body.dashboard--employee-profile .profile-timeoff__fields.profile-timeoff__fields--disabled { opacity: 0.55; }
+          body.dashboard--employee-profile .profile-timeoff__fields.profile-timeoff__fields--disabled input { cursor: not-allowed; }
+          body.dashboard--employee-profile .profile-timeoff__note { margin: 0; font-size: 0.8rem; color: #475569; }
           body.dashboard--employee-profile .profile-schedule-table { width: 100%; border-collapse: collapse; }
           body.dashboard--employee-profile .profile-schedule-table th,
           body.dashboard--employee-profile .profile-schedule-table td { padding: 0.5rem 0.75rem; border-bottom: 1px solid rgba(148,163,184,0.18); text-align: left; }
@@ -8641,31 +8464,62 @@ dashboardRouter.get('/employees/:employeeId', async (req, res) => {
             </div>
             <div class="card__body">
               <form class="profile-form" data-profile-form="compensation">
-                <div class="profile-form__grid">
-                  <label>
-                    <span>Effective On</span>
-                    <input type="date" name="effectiveOn" value="${latestEffectiveInput}" required />
-                  </label>
-                  <label>
-                    <span>Semi-Monthly Base</span>
-                    <input type="number" name="baseSemiMonthlySalary" min="0" step="0.01" value="${compensationBaseValue}" required />
-                  </label>
-                  <label>
-                    <span>Monthly Attendance Bonus</span>
-                    <input type="number" name="monthlyAttendanceBonus" min="0" step="0.01" value="${compensationMonthlyValue}" required />
-                  </label>
-                  <label>
-                    <span>Quarterly Attendance Bonus</span>
-                    <input type="number" name="quarterlyAttendanceBonus" min="0" step="0.01" value="${compensationQuarterlyValue}" required />
-                  </label>
-                  <label class="checkbox-field">
-                    <input type="checkbox" name="kpiEligible"${compensationKpiChecked} />
-                    <span>KPI Eligible</span>
-                  </label>
-                  <label>
-                    <span>Default KPI Bonus</span>
-                    <input type="number" name="defaultKpiBonus" min="0" step="0.01" value="${compensationKpiValue}" />
-                  </label>
+                <div class="profile-compensation-layout">
+                  <div class="profile-compensation-column">
+                    <div class="profile-form__grid">
+                      <label>
+                        <span>Effective On</span>
+                        <input type="date" name="effectiveOn" value="${latestEffectiveInput}" required />
+                      </label>
+                      <label>
+                        <span>Semi-Monthly Base</span>
+                        <input type="number" name="baseSemiMonthlySalary" min="0" step="0.01" value="${compensationBaseValue}" required />
+                      </label>
+                      <label>
+                        <span>Monthly Attendance Bonus</span>
+                        <input type="number" name="monthlyAttendanceBonus" min="0" step="0.01" value="${compensationMonthlyValue}" required />
+                      </label>
+                      <label>
+                        <span>Quarterly Attendance Bonus</span>
+                        <input type="number" name="quarterlyAttendanceBonus" min="0" step="0.01" value="${compensationQuarterlyValue}" required />
+                      </label>
+                      <label class="checkbox-field">
+                        <input type="checkbox" name="kpiEligible"${compensationKpiChecked} />
+                        <span>KPI Eligible</span>
+                      </label>
+                      <label>
+                        <span>Default KPI Bonus</span>
+                        <input type="number" name="defaultKpiBonus" min="0" step="0.01" value="${compensationKpiValue}" />
+                      </label>
+                    </div>
+                  </div>
+                  <div class="profile-compensation-column">
+                    <div class="profile-timeoff">
+                      <div>
+                        <h3 class="profile-timeoff__title">Time Off Balances</h3>
+                        <p class="profile-timeoff__hint">Control accrual eligibility and baseline PTO / UTO hours used by payroll.</p>
+                      </div>
+                      <label class="checkbox-field">
+                        <input type="checkbox" name="accrualEnabled"${compensationAccrualChecked} data-profile-accrual-toggle />
+                        <span>Accrual Enabled</span>
+                      </label>
+                      <div class="profile-timeoff__fields${latestConfig?.accrualEnabled ? '' : ' profile-timeoff__fields--disabled'}" data-profile-accrual-details>
+                        <label>
+                          <span>Accrual Method</span>
+                          <input type="text" name="accrualMethod" maxlength="100" value="${compensationAccrualMethodValue}"${latestConfig?.accrualEnabled ? '' : ' disabled'} />
+                        </label>
+                        <label>
+                          <span>PTO Balance (hours)</span>
+                          <input type="number" name="ptoBalanceHours" step="0.25" value="${compensationPtoValue}" required${latestConfig?.accrualEnabled ? '' : ' disabled'} />
+                        </label>
+                        <label>
+                          <span>UTO Balance (hours)</span>
+                          <input type="number" name="utoBalanceHours" step="0.25" value="${compensationUtoValue}" required${latestConfig?.accrualEnabled ? '' : ' disabled'} />
+                        </label>
+                      </div>
+                      <p class="profile-timeoff__note">Need to grant or deduct hours immediately? Use the Balances tab to post adjustments so the app and payroll stay in sync.</p>
+                    </div>
+                  </div>
                 </div>
                 <div class="profile-form__footer">
                   <p class="form-error" data-error></p>
@@ -8874,6 +8728,10 @@ dashboardRouter.get('/employees/:employeeId', async (req, res) => {
                       const quarterlyInput = form.querySelector('input[name="quarterlyAttendanceBonus"]');
                       const kpiCheckbox = form.querySelector('input[name="kpiEligible"]');
                       const kpiBonusInput = form.querySelector('input[name="defaultKpiBonus"]');
+                      const accrualToggle = form.querySelector('[data-profile-accrual-toggle]');
+                      const accrualMethodInput = form.querySelector('input[name="accrualMethod"]');
+                      const ptoInput = form.querySelector('input[name="ptoBalanceHours"]');
+                      const utoInput = form.querySelector('input[name="utoBalanceHours"]');
 
                       payload.baseSemiMonthlySalary = toFiniteNumber(baseInput?.value, 0);
                       payload.monthlyAttendanceBonus = toFiniteNumber(monthlyInput?.value, 0);
@@ -8883,6 +8741,18 @@ dashboardRouter.get('/employees/:employeeId', async (req, res) => {
                         payload.defaultKpiBonus = toFiniteNumber(kpiBonusInput?.value, 0);
                       } else {
                         payload.defaultKpiBonus = null;
+                      }
+
+                      const accrualEnabled = accrualToggle instanceof HTMLInputElement ? accrualToggle.checked : payload.accrualEnabled;
+                      payload.accrualEnabled = accrualEnabled;
+                      if (accrualEnabled) {
+                        payload.accrualMethod = accrualMethodInput instanceof HTMLInputElement && accrualMethodInput.value.trim()
+                          ? accrualMethodInput.value.trim()
+                          : null;
+                        payload.ptoBalanceHours = toFiniteNumber(ptoInput?.value, payload.ptoBalanceHours);
+                        payload.utoBalanceHours = toFiniteNumber(utoInput?.value, payload.utoBalanceHours);
+                      } else {
+                        payload.accrualMethod = null;
                       }
                     } else if (kind === 'schedule') {
                       const timeZoneInput = form.querySelector('input[name="scheduleTimeZone"]');
@@ -8943,16 +8813,32 @@ dashboardRouter.get('/employees/:employeeId', async (req, res) => {
                     }
                     if (submitter) submitter.disabled = false;
                   }
-                });
               });
+            });
 
-              const compensationForm = document.querySelector('[data-profile-form="compensation"]');
-              if (compensationForm) {
-                const kpiCheckbox = compensationForm.querySelector('input[name="kpiEligible"]');
-                const kpiInput = compensationForm.querySelector('input[name="defaultKpiBonus"]');
-                const syncKpi = () => {
-                  if (!(kpiInput instanceof HTMLInputElement)) return;
-                  const enabled = kpiCheckbox instanceof HTMLInputElement ? kpiCheckbox.checked : false;
+            const compensationForm = document.querySelector('[data-profile-form="compensation"]');
+            if (compensationForm) {
+              const accrualToggle = compensationForm.querySelector('[data-profile-accrual-toggle]');
+              const accrualDetails = compensationForm.querySelector('[data-profile-accrual-details]');
+              const syncAccrual = () => {
+                if (!(accrualDetails instanceof HTMLElement)) return;
+                const enabled = accrualToggle instanceof HTMLInputElement ? accrualToggle.checked : false;
+                accrualDetails.classList.toggle('profile-timeoff__fields--disabled', !enabled);
+                accrualDetails.querySelectorAll('input').forEach((input) => {
+                  if (!(input instanceof HTMLInputElement)) return;
+                  input.disabled = !enabled;
+                });
+              };
+              syncAccrual();
+              if (accrualToggle instanceof HTMLInputElement) {
+                accrualToggle.addEventListener('change', syncAccrual);
+              }
+
+              const kpiCheckbox = compensationForm.querySelector('input[name="kpiEligible"]');
+              const kpiInput = compensationForm.querySelector('input[name="defaultKpiBonus"]');
+              const syncKpi = () => {
+                if (!(kpiInput instanceof HTMLInputElement)) return;
+                const enabled = kpiCheckbox instanceof HTMLInputElement ? kpiCheckbox.checked : false;
                   kpiInput.disabled = !enabled;
                   if (!enabled) {
                     kpiInput.value = '';
