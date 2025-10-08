@@ -1,5 +1,6 @@
 import { format, isBefore, startOfMonth } from 'date-fns';
 import { prisma } from '../prisma';
+import { Prisma } from '@prisma/client';
 import { ensureBalance } from './balances';
 import { logger } from '../logger';
 
@@ -53,20 +54,89 @@ export const applyMonthlyAccrual = async (referenceDate: Date, userId?: number):
       continue;
     }
 
-    const hours = rule.hoursPerMonth;
+    const ptoHours = rule.ptoHoursPerMonth ?? rule.hoursPerMonth ?? 0;
+    const utoHours = rule.utoHoursPerMonth ?? 0;
+    const makeUpHours = 0;
+
+    const data: Prisma.PtoBalanceUpdateInput = {
+      lastAccrualMonth: month
+    };
+
+    if (ptoHours) {
+      data.basePtoHours = { increment: ptoHours };
+      data.ptoHours = { increment: ptoHours };
+    }
+    if (utoHours) {
+      data.baseUtoHours = { increment: utoHours };
+      data.utoHours = { increment: utoHours };
+    }
     await prisma.ptoBalance.update({
       where: { id: balance.id },
-      data: {
-        basePtoHours: balance.basePtoHours + hours,
-        ptoHours: balance.ptoHours + hours,
-        lastAccrualMonth: month
-      }
+      data
     });
 
-    results.push({ userId: user.id, applied: true, hoursApplied: hours });
+    results.push({ userId: user.id, applied: true, hoursApplied: ptoHours });
   }
 
   return results;
+};
+
+export const setUserAccrualRule = async ({
+  userId,
+  ptoHoursPerMonth,
+  utoHoursPerMonth,
+  actorId
+}: {
+  userId: number;
+  ptoHoursPerMonth?: number | null;
+  utoHoursPerMonth?: number | null;
+  actorId?: number;
+}) => {
+  const payloadProvided = [ptoHoursPerMonth, utoHoursPerMonth].some(
+    (value) => value !== undefined
+  );
+
+  if (!payloadProvided) {
+    return null;
+  }
+
+  const normalize = (value: number | null | undefined) =>
+    value !== null && value !== undefined ? Math.max(0, Math.round(value * 100) / 100) : null;
+
+  const pto = normalize(ptoHoursPerMonth);
+  const uto = normalize(utoHoursPerMonth);
+
+  const nullRequested = [pto, uto].every((value) => value === null);
+  if (nullRequested) {
+    try {
+      await prisma.accrualRule.delete({ where: { userId } });
+      logger.info({ userId, actorId }, 'accrual.rule.removed');
+    } catch (error) {
+      // ignore missing custom rule
+    }
+    return null;
+  }
+
+  const rule = await prisma.accrualRule.upsert({
+    where: { userId },
+    update: {
+      hoursPerMonth: pto ?? 0,
+      ptoHoursPerMonth: pto ?? 0,
+      utoHoursPerMonth: uto ?? 0,
+      updatedAt: new Date()
+    },
+    create: {
+      userId,
+      isDefault: false,
+      startDate: new Date(),
+      hoursPerMonth: pto ?? 0,
+      ptoHoursPerMonth: pto ?? 0,
+      utoHoursPerMonth: uto ?? 0
+    }
+  });
+
+  logger.info({ userId, actorId, pto, uto }, 'accrual.rule.updated');
+  return rule;
 };
 
 export const applyAccrualsForAllUsers = async () => {

@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.applyAccrualsForAllUsers = exports.applyMonthlyAccrual = void 0;
+exports.applyAccrualsForAllUsers = exports.setUserAccrualRule = exports.applyMonthlyAccrual = void 0;
 const date_fns_1 = require("date-fns");
 const prisma_1 = require("../prisma");
 const balances_1 = require("./balances");
@@ -40,20 +40,69 @@ const applyMonthlyAccrual = async (referenceDate, userId) => {
             results.push({ userId: user.id, applied: false, reason: 'already_applied' });
             continue;
         }
-        const hours = rule.hoursPerMonth;
+        const ptoHours = rule.ptoHoursPerMonth ?? rule.hoursPerMonth ?? 0;
+        const utoHours = rule.utoHoursPerMonth ?? 0;
+        const makeUpHours = 0;
+        const data = {
+            lastAccrualMonth: month
+        };
+        if (ptoHours) {
+            data.basePtoHours = { increment: ptoHours };
+            data.ptoHours = { increment: ptoHours };
+        }
+        if (utoHours) {
+            data.baseUtoHours = { increment: utoHours };
+            data.utoHours = { increment: utoHours };
+        }
         await prisma_1.prisma.ptoBalance.update({
             where: { id: balance.id },
-            data: {
-                basePtoHours: balance.basePtoHours + hours,
-                ptoHours: balance.ptoHours + hours,
-                lastAccrualMonth: month
-            }
+            data
         });
-        results.push({ userId: user.id, applied: true, hoursApplied: hours });
+        results.push({ userId: user.id, applied: true, hoursApplied: ptoHours });
     }
     return results;
 };
 exports.applyMonthlyAccrual = applyMonthlyAccrual;
+const setUserAccrualRule = async ({ userId, ptoHoursPerMonth, utoHoursPerMonth, actorId }) => {
+    const payloadProvided = [ptoHoursPerMonth, utoHoursPerMonth].some((value) => value !== undefined);
+    if (!payloadProvided) {
+        return null;
+    }
+    const normalize = (value) => value !== null && value !== undefined ? Math.max(0, Math.round(value * 100) / 100) : null;
+    const pto = normalize(ptoHoursPerMonth);
+    const uto = normalize(utoHoursPerMonth);
+    const nullRequested = [pto, uto].every((value) => value === null);
+    if (nullRequested) {
+        try {
+            await prisma_1.prisma.accrualRule.delete({ where: { userId } });
+            logger_1.logger.info({ userId, actorId }, 'accrual.rule.removed');
+        }
+        catch (error) {
+            // ignore missing custom rule
+        }
+        return null;
+    }
+    const rule = await prisma_1.prisma.accrualRule.upsert({
+        where: { userId },
+        update: {
+            hoursPerMonth: pto ?? 0,
+            ptoHoursPerMonth: pto ?? 0,
+            utoHoursPerMonth: uto ?? 0,
+            updatedAt: new Date()
+        },
+        create: {
+            userId,
+            isDefault: false,
+            startDate: new Date(),
+            hoursPerMonth: pto ?? 0,
+            ptoHoursPerMonth: pto ?? 0,
+            utoHoursPerMonth: uto ?? 0
+        }
+    });
+    logger_1.logger.info({ userId, actorId, pto, uto }, 'accrual.rule.updated');
+    return rule;
+};
+exports.setUserAccrualRule = setUserAccrualRule;
 const applyAccrualsForAllUsers = async () => {
     const now = new Date();
     const results = await (0, exports.applyMonthlyAccrual)(now);

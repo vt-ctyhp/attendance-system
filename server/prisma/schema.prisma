@@ -277,7 +277,10 @@ model AccrualRule {
   userId        Int?     @unique
   user          User?    @relation(fields: [userId], references: [id])
   isDefault     Boolean  @default(false)
-  hoursPerMonth Float
+  hoursPerMonth Float    @default(0)
+  ptoHoursPerMonth     Float    @default(0)
+  utoHoursPerMonth     Float    @default(0)
+  makeUpHoursPerMonth  Float    @default(0)
   startDate     DateTime?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt

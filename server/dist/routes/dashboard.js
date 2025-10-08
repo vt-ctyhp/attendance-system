@@ -1630,6 +1630,7 @@ const baseStyles = `
   .nav__links { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; position: relative; }
   .nav__item { position: relative; display: flex; align-items: center; }
   .nav__item--dropdown { position: relative; }
+  .nav__item--dropdown::after { content: ''; position: absolute; left: -0.6rem; right: -0.6rem; top: 100%; height: 0.75rem; }
   .nav__account { display: flex; align-items: center; gap: 0.75rem; margin-left: auto; }
   .nav__account-label { font-weight: 600; color: #1f2933; }
   .nav__logout-form { margin: 0; }
@@ -1640,7 +1641,7 @@ const baseStyles = `
   .nav__link--parent { display: inline-flex; align-items: center; gap: 0.35rem; }
   .nav__link--parent::after { content: ''; width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 5px solid currentColor; opacity: 0.7; transform: translateY(1px); }
   .nav__item--dropdown .nav__link--parent.active::after { opacity: 1; }
-  .nav__dropdown { display: none; position: absolute; top: calc(100% + 0.5rem); left: 0; background: #fff; border-radius: 10px; box-shadow: 0 8px 24px rgba(15,23,42,0.12); padding: 0.4rem 0; list-style: none; margin: 0; min-width: 210px; flex-direction: column; z-index: 20; }
+  .nav__dropdown { display: none; position: absolute; top: calc(100% + 0.15rem); left: 0; background: #fff; border-radius: 10px; box-shadow: 0 8px 24px rgba(15,23,42,0.12); padding: 0.4rem 0; list-style: none; margin: 0; min-width: 210px; flex-direction: column; z-index: 20; }
   .nav__item--dropdown:hover .nav__dropdown,
   .nav__item--dropdown:focus-within .nav__dropdown { display: flex; }
   .nav__dropdown-item { width: 100%; }
@@ -1772,10 +1773,15 @@ const baseStyles = `
   dialog { border: none; border-radius: 8px; padding: 1.5rem; max-width: 420px; width: min(420px, 100%); }
   dialog:not([open]) { display: none; }
   dialog::backdrop { background: rgba(15, 23, 42, 0.4); }
-  #adjust-form label { display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.85rem; font-weight: 500; color: #374151; margin-top: 1rem; }
-  #adjust-form input[type="number"], #adjust-form textarea { padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 4px; font-size: 0.95rem; }
-  #adjust-form textarea { resize: vertical; min-height: 120px; }
+  #edit-balances-form label { display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.85rem; font-weight: 500; color: #374151; }
+  #edit-balances-form input[type="number"], #edit-balances-form textarea { padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 4px; font-size: 0.95rem; }
+  #edit-balances-form textarea { resize: vertical; min-height: 120px; }
+  #edit-balances-form .dialog-section { margin-top: 1rem; display: grid; gap: 0.6rem; }
+  #edit-balances-form .dialog-section:first-of-type { margin-top: 0.5rem; }
+  #edit-balances-form .dialog-section h4 { margin: 0; font-size: 0.8rem; letter-spacing: 0.08em; text-transform: uppercase; color: #475569; }
+  #edit-balances-form .dialog-grid { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
   .dialog-meta { font-size: 0.85rem; color: #4b5563; margin-top: 0.5rem; }
+  .dialog-note { font-size: 0.82rem; color: #475569; margin-top: 1rem; }
   .dialog-error { color: #b91c1c; font-size: 0.85rem; min-height: 1.25rem; margin-top: 0.75rem; }
   .dialog-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1.5rem; }
   .ledger-table td:nth-child(2),
@@ -1819,7 +1825,8 @@ const baseStyles = `
     body.dashboard .nav a.active { background: #2563eb; color: #fff; box-shadow: 0 12px 24px rgba(37,99,235,0.22); border-bottom: none; }
     body.dashboard .nav__link--parent { padding-right: 0.95rem; }
     body.dashboard .nav__link--parent::after { border-top-color: currentColor; }
-    body.dashboard .nav__dropdown { background: rgba(255,255,255,0.97); box-shadow: 0 22px 40px rgba(15,23,42,0.18); border-radius: 16px; min-width: 220px; padding: 0.6rem 0; }
+    body.dashboard .nav__item--dropdown::after { left: -0.75rem; right: -0.75rem; height: 0.85rem; }
+    body.dashboard .nav__dropdown { background: rgba(255,255,255,0.97); box-shadow: 0 22px 40px rgba(15,23,42,0.18); border-radius: 16px; min-width: 220px; padding: 0.6rem 0; top: calc(100% + 0.2rem); }
     body.dashboard .nav__dropdown-item { padding: 0 0.25rem; }
     body.dashboard .nav__link--child { border-radius: 12px; color: #1e293b; padding: 0.55rem 0.9rem; }
     body.dashboard .nav__link--child:hover,
@@ -2098,9 +2105,10 @@ const formatRangeLabel = (start, end) => end && end.getTime() !== start.getTime(
 const renderTimezoneNote = (start, end) => `<p class="tz-note">All times shown in ${escapeHtml(DASHBOARD_TIME_ZONE)} (${escapeHtml(formatRangeLabel(start, end))})</p>`;
 const renderNav = (active) => {
     const isPayrollContext = active === 'payroll' || active === 'payroll-holidays';
+    const isTimeOffContext = active === 'balances' || active === 'requests';
     const link = (href, label, key, options) => {
         const classes = ['nav__link'];
-        const isActive = key === 'payroll' ? isPayrollContext : active === key;
+        const isActive = key === 'payroll' ? isPayrollContext : key === 'time-off' ? isTimeOffContext : active === key;
         if (options?.child) {
             classes.push('nav__link--child');
         }
@@ -2124,7 +2132,7 @@ const renderNav = (active) => {
     };
     const wrapItem = (markup) => `<div class="nav__item">${markup}</div>`;
     const dropdown = (href, label, key, items) => {
-        const isParentActive = key === 'payroll' ? isPayrollContext : active === key;
+        const isParentActive = key === 'payroll' ? isPayrollContext : key === 'time-off' ? isTimeOffContext : active === key;
         const dropdownMarkup = items
             .map((item) => `<li class="nav__dropdown-item">${link(item.href, item.label, item.key, { child: true })}</li>`)
             .join('');
@@ -2143,8 +2151,10 @@ const renderNav = (active) => {
         wrapItem(link('/dashboard/overview', 'Overview', 'overview')),
         wrapItem(link('/dashboard/today', 'Today', 'today')),
         wrapItem(link('/dashboard/timesheets', 'Timesheets', 'timesheets')),
-        wrapItem(link('/dashboard/requests', 'Requests', 'requests')),
-        wrapItem(link('/dashboard/balances', 'Balances', 'balances')),
+        dropdown('/dashboard/balances', 'Time Off', 'time-off', [
+            { href: '/dashboard/balances', label: 'Balances', key: 'balances' },
+            { href: '/dashboard/requests', label: 'Requests', key: 'requests' }
+        ]),
         wrapItem(link('/dashboard/shifts', 'Shifts', 'shifts')),
         dropdown('/dashboard/payroll', 'Payroll', 'payroll', [
             { href: '/dashboard/payroll/holidays', label: 'Holiday Settings', key: 'payroll-holidays' }
@@ -4259,22 +4269,60 @@ exports.dashboardRouter.get('/balances', async (req, res) => {
     if (selectedUser) {
         const overview = await (0, balances_1.getBalanceOverview)(selectedUser.id, { limit: 200 });
         const { balance, ledger } = overview;
+        const makeUpCap = await (0, timeRequestPolicy_1.getMakeupCapHoursPerMonth)();
+        const latestConfig = await prisma_1.prisma.employeeCompConfig.findFirst({
+            where: { userId: selectedUser.id },
+            orderBy: { effectiveOn: 'desc' }
+        });
+        const userRule = await prisma_1.prisma.accrualRule.findUnique({ where: { userId: selectedUser.id } });
+        const defaultRule = await prisma_1.prisma.accrualRule.findFirst({ where: { isDefault: true } });
+        const resolveAccrual = (selector) => {
+            if (userRule) {
+                const value = selector(userRule);
+                if (value !== undefined && value !== null) {
+                    return Number(value);
+                }
+            }
+            if (defaultRule) {
+                const value = selector(defaultRule);
+                if (value !== undefined && value !== null) {
+                    return Number(value);
+                }
+            }
+            return 0;
+        };
+        const basePto = Number(balance.basePtoHours);
+        const baseUto = Number(balance.baseUtoHours);
+        const baseMakeUp = Number(balance.baseMakeUpHours ?? 0);
+        const currentPto = Number(balance.ptoHours);
+        const currentUto = Number(balance.utoHours);
+        const currentMakeUp = Number(balance.makeUpHours);
+        const accrualEnabledFlag = latestConfig?.accrualEnabled ?? false;
+        const ptoAccrual = resolveAccrual((rule) => rule?.ptoHoursPerMonth ?? rule?.hoursPerMonth ?? 0);
+        const utoAccrual = resolveAccrual((rule) => rule?.utoHoursPerMonth ?? 0);
+        const makeUpAccrual = 0;
+        const accrualSource = userRule ? 'user' : defaultRule ? 'default' : 'none';
         const summaryCards = `
       <div class="summary-cards">
         <div class="summary-card">
           <div class="summary-title">PTO Remaining</div>
-          <div class="summary-value"><span data-balance-current>${escapeHtml(formatHours(balance.ptoHours))}</span> h</div>
-          <div class="summary-meta">Base <span data-balance-base>${escapeHtml(formatHours(balance.basePtoHours))}</span> h</div>
+          <div class="summary-value"><span data-balance-current>${escapeHtml(formatHours(currentPto))}</span> h</div>
+          <div class="summary-meta">Baseline ${escapeHtml(formatHours(basePto))} h${ptoAccrual > 0 ? ` • Accrues ${escapeHtml(formatHours(ptoAccrual))} h/mo` : ''}</div>
         </div>
         <div class="summary-card">
           <div class="summary-title">UTO Remaining</div>
-          <div class="summary-value">${escapeHtml(formatHours(balance.utoHours))} h</div>
-          <div class="summary-meta">Base ${escapeHtml(formatHours(balance.baseUtoHours))} h</div>
+          <div class="summary-value">${escapeHtml(formatHours(currentUto))} h</div>
+          <div class="summary-meta">Baseline ${escapeHtml(formatHours(baseUto))} h${utoAccrual > 0 ? ` • Accrues ${escapeHtml(formatHours(utoAccrual))} h/mo` : ''}</div>
         </div>
         <div class="summary-card">
           <div class="summary-title">Make-Up Hours</div>
-          <div class="summary-value">${escapeHtml(formatHours(balance.makeUpHours))} h</div>
-          <div class="summary-meta">Base ${escapeHtml(formatHours(balance.baseMakeUpHours))} h</div>
+          <div class="summary-value">${escapeHtml(formatHours(currentMakeUp))} h</div>
+          <div class="summary-meta">Monthly cap ${escapeHtml(formatHours(makeUpCap))} h</div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-title">Monthly Accrual</div>
+          <div class="summary-value">${escapeHtml([`PTO ${formatHours(ptoAccrual)} h/mo`, `UTO ${formatHours(utoAccrual)} h/mo`].join(' • '))}</div>
+          <div class="summary-meta">${accrualSource === 'user' ? 'User override' : accrualSource === 'default' ? 'Default rule' : 'No rule set'} · ${accrualEnabledFlag ? 'Accrual enabled' : 'Accrual disabled'}</div>
         </div>
         <div class="summary-card">
           <div class="summary-title">Last Updated</div>
@@ -4318,42 +4366,103 @@ exports.dashboardRouter.get('/balances', async (req, res) => {
       </div>`;
         const ledgerEmpty = `<div class="empty${ledgerRows ? ' hidden' : ''}" data-ledger-empty>No ledger entries recorded yet. Adjustments and approved PTO requests will appear here.</div>`;
         const dialogHtml = `
-      <dialog id="adjust-dialog">
-        <form id="adjust-form">
-          <h3>Adjust PTO Balance</h3>
-          <p class="dialog-meta">Use positive values to grant hours, negative values to remove them.</p>
-          <label>
-            <span>Hours</span>
-            <input type="number" name="deltaHours" step="0.25" min="-1000" max="1000" required />
-          </label>
+      <dialog id="edit-balances-dialog">
+        <form id="edit-balances-form">
+          <h3>Edit Time Off Balances</h3>
+          <p class="dialog-meta">Set new totals below; adjustments are logged automatically.</p>
+          <div class="dialog-section">
+            <h4>PTO</h4>
+            <div class="dialog-grid">
+              <label>
+                <span>Base Allowance (hours)</span>
+                <input type="number" name="ptoBaseHours" step="0.25" min="0" />
+              </label>
+              <label>
+                <span>Remaining (hours)</span>
+                <input type="number" name="ptoHours" step="0.25" min="0" />
+              </label>
+            </div>
+          </div>
+          <div class="dialog-section">
+            <h4>UTO</h4>
+            <div class="dialog-grid">
+              <label>
+                <span>Base Allowance (hours)</span>
+                <input type="number" name="utoBaseHours" step="0.25" min="0" />
+              </label>
+              <label>
+                <span>Remaining (hours)</span>
+                <input type="number" name="utoHours" step="0.25" min="0" />
+              </label>
+            </div>
+          </div>
+          <div class="dialog-section">
+            <h4>Make-Up</h4>
+            <div class="dialog-grid">
+              <label>
+                <span>Remaining (hours)</span>
+                <input type="number" name="makeUpHours" step="0.25" min="0" />
+              </label>
+              <label>
+                <span>Monthly Cap (hours)</span>
+                <input type="number" name="makeUpCapHours" step="0.25" min="0" />
+              </label>
+            </div>
+          </div>
+          <p class="dialog-note">Accrual is currently ${accrualEnabledFlag ? 'enabled' : 'disabled'} (${accrualSource === 'user' ? 'user override' : accrualSource === 'default' ? 'default rule' : 'no rule set'}). Make-up balances are capped monthly and do not accrue automatically.</p>
+          <div class="dialog-grid">
+            <label>
+              <span>PTO Accrual (hours/mo)</span>
+              <input type="number" name="ptoAccrualHours" step="0.25" min="0" />
+            </label>
+            <label>
+              <span>UTO Accrual (hours/mo)</span>
+              <input type="number" name="utoAccrualHours" step="0.25" min="0" />
+            </label>
+          </div>
           <label>
             <span>Reason</span>
-            <textarea name="reason" rows="3" maxlength="500" required></textarea>
+            <textarea name="reason" rows="3" maxlength="500" placeholder="Explain this update"></textarea>
           </label>
-          <p class="dialog-error" data-adjust-error></p>
+          <p class="dialog-error" data-balance-error></p>
           <div class="dialog-actions">
-            <button type="submit">Apply</button>
-            <button type="button" class="button-secondary" data-close-adjust>Cancel</button>
+            <button type="submit">Save Changes</button>
+            <button type="button" class="button-secondary" data-close-edit>Cancel</button>
           </div>
         </form>
       </dialog>
     `;
         detailSection = `
-      <section class="card balances-detail" id="balance-detail" data-user-id="${selectedUser.id}">
+      <section
+        class="card balances-detail"
+        id="balance-detail"
+        data-user-id="${selectedUser.id}"
+        data-pto-base="${basePto}"
+        data-pto-remaining="${currentPto}"
+        data-uto-base="${baseUto}"
+        data-uto-remaining="${currentUto}"
+        data-makeup-base="${baseMakeUp}"
+        data-makeup-remaining="${currentMakeUp}"
+        data-pto-accrual="${ptoAccrual}"
+        data-uto-accrual="${utoAccrual}"
+        data-makeup-cap="${makeUpCap}"
+        data-accrual-enabled="${accrualEnabledFlag ? 'true' : 'false'}"
+        data-accrual-source="${accrualSource}"
+      >
         <div class="card__header">
           <div>
             <h2 class="card__title">${escapeHtml(selectedUser.name)}</h2>
             <p class="card__subtitle">${escapeHtml(selectedUser.email)}</p>
           </div>
           <div class="card__actions no-print balances-detail-actions">
-            <button type="button" class="button" data-open-adjust>Adjust Balance</button>
+            <button type="button" class="button" data-open-edit>Edit Balances</button>
             <a href="/dashboard/requests?type=pto" class="button button-secondary">Review PTO Requests</a>
           </div>
         </div>
         <div class="card__body">
           ${summaryCards}
           ${dialogHtml}
-          <h3>PTO Ledger</h3>
+          <h3>Balance Ledger</h3>
           <p class="meta">Entries are sorted newest first.</p>
           ${ledgerTable}
           ${ledgerEmpty}
@@ -4368,11 +4477,19 @@ exports.dashboardRouter.get('/balances', async (req, res) => {
             if (!detail) return;
             const userId = detail.dataset.userId;
             if (!userId) return;
-            const dialog = detail.querySelector('#adjust-dialog');
-            const form = detail.querySelector('#adjust-form');
-            const errorEl = detail.querySelector('[data-adjust-error]');
-            const openBtn = detail.querySelector('[data-open-adjust]');
-            const closeBtn = detail.querySelector('[data-close-adjust]');
+            const dialog = detail.querySelector('#edit-balances-dialog');
+            const form = detail.querySelector('#edit-balances-form');
+            const errorEl = detail.querySelector('[data-balance-error]');
+            const openBtn = detail.querySelector('[data-open-edit]');
+            const closeBtn = detail.querySelector('[data-close-edit]');
+
+            const datasetValue = (key) => {
+              const raw = detail.dataset[key];
+              if (raw === undefined || raw === '') return '';
+              const parsed = Number(raw);
+              return Number.isFinite(parsed) ? String(parsed) : '';
+            };
+
             const toggleDialog = (open) => {
               if (!dialog) return;
               if (typeof dialog.showModal === 'function') {
@@ -4381,48 +4498,139 @@ exports.dashboardRouter.get('/balances', async (req, res) => {
                 dialog.classList.toggle('hidden', !open);
               }
             };
+
+            const prefillForm = () => {
+              if (!form) return;
+              const ptoBaseInput = form.querySelector('input[name="ptoBaseHours"]');
+              if (ptoBaseInput instanceof HTMLInputElement) {
+                ptoBaseInput.value = datasetValue('ptoBase');
+              }
+              const ptoInput = form.querySelector('input[name="ptoHours"]');
+              if (ptoInput instanceof HTMLInputElement) {
+                ptoInput.value = datasetValue('ptoRemaining');
+              }
+              const utoBaseInput = form.querySelector('input[name="utoBaseHours"]');
+              if (utoBaseInput instanceof HTMLInputElement) {
+                utoBaseInput.value = datasetValue('utoBase');
+              }
+              const utoInput = form.querySelector('input[name="utoHours"]');
+              if (utoInput instanceof HTMLInputElement) {
+                utoInput.value = datasetValue('utoRemaining');
+              }
+              const makeUpInput = form.querySelector('input[name="makeUpHours"]');
+              if (makeUpInput instanceof HTMLInputElement) {
+                makeUpInput.value = datasetValue('makeupRemaining');
+              }
+              const ptoAccrualInput = form.querySelector('input[name="ptoAccrualHours"]');
+              if (ptoAccrualInput instanceof HTMLInputElement) {
+                ptoAccrualInput.value = datasetValue('ptoAccrual');
+              }
+              const utoAccrualInput = form.querySelector('input[name="utoAccrualHours"]');
+              if (utoAccrualInput instanceof HTMLInputElement) {
+                utoAccrualInput.value = datasetValue('utoAccrual');
+              }
+              const makeUpCapInput = form.querySelector('input[name="makeUpCapHours"]');
+              if (makeUpCapInput instanceof HTMLInputElement) {
+                makeUpCapInput.value = datasetValue('makeupCap');
+              }
+              const reasonInput = form.querySelector('textarea[name="reason"]');
+              if (reasonInput instanceof HTMLTextAreaElement) {
+                reasonInput.value = '';
+              }
+            };
+
             openBtn?.addEventListener('click', () => {
               if (errorEl) errorEl.textContent = '';
-              form?.reset();
+              prefillForm();
               toggleDialog(true);
             });
+
             closeBtn?.addEventListener('click', (event) => {
               event.preventDefault();
               toggleDialog(false);
             });
+
             dialog?.addEventListener('cancel', () => {
               if (errorEl) errorEl.textContent = '';
             });
+
             form?.addEventListener('submit', async (event) => {
               event.preventDefault();
               if (!form) return;
-              const hoursInput = form.querySelector('[name="deltaHours"]');
-              const reasonInput = form.querySelector('[name="reason"]');
-              const delta = Number(hoursInput ? hoursInput.value : '');
-              const reason = (reasonInput ? reasonInput.value : '').trim();
-              if (!Number.isFinite(delta) || delta === 0) {
-                if (errorEl) errorEl.textContent = 'Enter a non-zero number of hours.';
-                return;
-              }
-              if (!reason) {
-                if (errorEl) errorEl.textContent = 'Reason is required.';
-                return;
-              }
-              const submitButton = form.querySelector('button[type="submit"]');
-              if (submitButton) submitButton.disabled = true;
-              if (errorEl) errorEl.textContent = '';
+
+              const payload = {};
+              const parseNumeric = (input, label) => {
+                if (!(input instanceof HTMLInputElement) || input.disabled) return undefined;
+                const raw = input.value.trim();
+                if (!raw) return undefined;
+                const value = Number(raw);
+                if (!Number.isFinite(value)) {
+                  throw new Error(label + ' must be a valid number.');
+                }
+                return Math.round(value * 100) / 100;
+              };
+
               try {
-                const response = await fetch('/api/balances/' + userId + '/adjust', {
+                const ptoBaseInput = form.querySelector('input[name="ptoBaseHours"]');
+                const ptoInput = form.querySelector('input[name="ptoHours"]');
+                const utoBaseInput = form.querySelector('input[name="utoBaseHours"]');
+                const utoInput = form.querySelector('input[name="utoHours"]');
+                const makeUpInput = form.querySelector('input[name="makeUpHours"]');
+                const ptoAccrualInput = form.querySelector('input[name="ptoAccrualHours"]');
+                const utoAccrualInput = form.querySelector('input[name="utoAccrualHours"]');
+                const makeUpCapInput = form.querySelector('input[name="makeUpCapHours"]');
+                const reasonInput = form.querySelector('textarea[name="reason"]');
+
+                const ptoBaseValue = parseNumeric(ptoBaseInput, 'PTO base');
+                if (ptoBaseValue !== undefined) payload.ptoBaseHours = ptoBaseValue;
+                const ptoValue = parseNumeric(ptoInput, 'PTO balance');
+                if (ptoValue !== undefined) payload.ptoHours = ptoValue;
+                const utoBaseValue = parseNumeric(utoBaseInput, 'UTO base');
+                if (utoBaseValue !== undefined) payload.utoBaseHours = utoBaseValue;
+                const utoValue = parseNumeric(utoInput, 'UTO balance');
+                if (utoValue !== undefined) payload.utoHours = utoValue;
+                const makeUpValue = parseNumeric(makeUpInput, 'Make-Up balance');
+                if (makeUpValue !== undefined) payload.makeUpHours = makeUpValue;
+                const ptoAccrualValue = parseNumeric(ptoAccrualInput, 'PTO accrual');
+                if (ptoAccrualValue !== undefined) payload.ptoAccrualHours = ptoAccrualValue;
+                const utoAccrualValue = parseNumeric(utoAccrualInput, 'UTO accrual');
+                if (utoAccrualValue !== undefined) payload.utoAccrualHours = utoAccrualValue;
+                const makeUpCapValue = parseNumeric(makeUpCapInput, 'Make-Up monthly cap');
+                if (makeUpCapValue !== undefined) payload.makeUpCapHours = makeUpCapValue;
+                const reason = reasonInput instanceof HTMLTextAreaElement ? reasonInput.value.trim() : '';
+                if (reason) {
+                  payload.reason = reason;
+                }
+
+                if (
+                  !('ptoHours' in payload) &&
+                  !('utoHours' in payload) &&
+                  !('makeUpHours' in payload) &&
+                  !('ptoAccrualHours' in payload) &&
+                  !('utoAccrualHours' in payload) &&
+                  !('makeUpCapHours' in payload)
+                ) {
+                  throw new Error('Enter at least one value to update.');
+                }
+
+                if (errorEl) errorEl.textContent = '';
+                const submitButton = form.querySelector('button[type="submit"]');
+                if (submitButton) submitButton.disabled = true;
+
+                const response = await fetch('/api/balances/' + userId + '/set', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ deltaHours: delta, reason }),
+                  body: JSON.stringify(payload),
                   credentials: 'same-origin'
                 });
+
                 if (response.ok) {
+                  toggleDialog(false);
                   window.location.reload();
                   return;
                 }
-                let message = 'Unable to adjust balance.';
+
+                let message = 'Unable to update balances.';
                 try {
                   const data = await response.json();
                   if (data && data.message) {
@@ -4430,9 +4638,12 @@ exports.dashboardRouter.get('/balances', async (req, res) => {
                   }
                 } catch (_err) {}
                 if (errorEl) errorEl.textContent = message;
-              } catch (err) {
-                if (errorEl) errorEl.textContent = err instanceof Error ? err.message : 'Unable to adjust balance.';
-              } finally {
+                if (submitButton) submitButton.disabled = false;
+              } catch (error) {
+                if (errorEl) {
+                  errorEl.textContent = error instanceof Error ? error.message : 'Unable to update balances.';
+                }
+                const submitButton = form.querySelector('button[type="submit"]');
                 if (submitButton) submitButton.disabled = false;
               }
             });
