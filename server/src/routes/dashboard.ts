@@ -2779,28 +2779,224 @@ const baseStyles = `
   .hidden { display: none !important; }
   .highlight-row { background: #f0f9ff; }
   @media (max-width: 1024px) {
-    body { padding: clamp(1rem, 5vw, 2rem); }
+    body.dashboard .cards-grid { padding: 16px; }
+    body.dashboard .page-header { padding: 20px 16px; }
+    body.dashboard .page-controls { padding: 12px 16px; }
     .summary-cards { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
     .table-scroll table { min-width: 600px; }
   }
+  
   @media (max-width: 768px) {
-    .actions { flex-direction: column; align-items: stretch; }
-    .filters { flex-direction: column; align-items: stretch; }
-    .filters label { width: 100%; }
-    button, .button { width: fit-content; }
+    body { font-size: 13px; }
+    
+    .nav { 
+      height: auto;
+      padding: 12px 16px;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    .nav__links { 
+      width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .nav__account { 
+      width: 100%;
+      margin-left: 0;
+      justify-content: space-between;
+    }
+    
+    body.dashboard .page-header {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 16px;
+    }
+    body.dashboard .page-header__meta {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    
+    body.dashboard .page-controls {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    
+    body.dashboard .card__header {
+      flex-direction: column;
+      align-items: flex-start;
+      padding: 16px;
+    }
+    body.dashboard .card__actions {
+      width: 100%;
+    }
+    
+    .actions { 
+      flex-direction: column; 
+      align-items: stretch;
+      gap: 8px;
+    }
+    .filters { 
+      flex-direction: column; 
+      align-items: stretch;
+      gap: 12px;
+    }
+    .filters label { 
+      width: 100%;
+      min-width: 100%;
+    }
+    button, .button { width: 100%; }
+    .print-button { width: 100%; }
+    
+    .tab-bar {
+      width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .tab-bar a {
+      white-space: nowrap;
+    }
+    
     .table-scroll table { min-width: 520px; }
-    .balances-detail { padding: 1rem; }
+    .balances-detail { padding: 16px; }
+    
+    .live-roster-card__header {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    .live-roster-card__heading {
+      width: 100%;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    .live-roster-legend {
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .live-roster-refresh {
+      align-self: flex-start;
+    }
   }
+  
   @media (max-width: 640px) {
-    body { padding: clamp(0.75rem, 6vw, 1.5rem); }
-    table { margin-top: 0.75rem; }
-    th, td { padding: 0.6rem; }
-    .table-scroll table { min-width: 420px; }
+    body { padding: 0; }
+    
+    .nav {
+      padding: 12px;
+      border-radius: 0;
+    }
+    .nav a {
+      padding: 16px 12px;
+      font-size: 13px;
+    }
+    
+    body.dashboard .page-header { 
+      padding: 16px 12px;
+      border-radius: 0;
+    }
+    body.dashboard .page-header__title {
+      font-size: 18px;
+    }
+    
+    body.dashboard .page-controls {
+      padding: 12px;
+    }
+    
+    body.dashboard .cards-grid {
+      padding: 12px;
+    }
+    
+    body.dashboard .card {
+      border-radius: 0;
+      border-left: none;
+      border-right: none;
+    }
+    body.dashboard .card__header {
+      padding: 12px;
+    }
+    
+    table { margin-top: 0; }
+    th, td { 
+      padding: 8px 12px;
+      font-size: 12px;
+    }
+    th {
+      font-size: 11px;
+    }
+    .table-scroll table { min-width: 480px; }
+    
+    .live-roster-card__header {
+      padding: 12px;
+    }
+    .live-roster-table thead th {
+      padding: 8px 12px;
+      font-size: 11px;
+    }
+    .live-roster-table tbody td {
+      padding: 8px 12px;
+    }
+    .roster-cell {
+      font-size: 12px;
+    }
+    .roster-avatar {
+      width: 28px;
+      height: 28px;
+      font-size: 12px;
+    }
+    
+    .summary-cards {
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+    
+    input[type="date"], 
+    input[type="month"], 
+    input[type="text"], 
+    input[type="number"], 
+    select, 
+    textarea {
+      font-size: 16px; /* Prevents iOS zoom */
+    }
   }
+  
+  @media (max-width: 480px) {
+    .nav__links {
+      flex-wrap: nowrap;
+    }
+    .nav a {
+      font-size: 12px;
+      padding: 16px 10px;
+    }
+    
+    body.dashboard .page-header__title {
+      font-size: 16px;
+    }
+    body.dashboard .page-header__subtitle {
+      font-size: 12px;
+    }
+    
+    .live-roster-legend__item {
+      font-size: 11px;
+    }
+    .live-roster-legend__dot {
+      width: 6px;
+      height: 6px;
+    }
+  }
+  
   @media print {
-    body { margin: 0.5in; background: #fff; color: #111827; }
+    body { margin: 0.5in; background: #fff; color: #111827; padding: 0; }
+    .nav { position: static; }
     table { box-shadow: none; }
     .no-print { display: none !important; }
+    body.dashboard .card { 
+      border: 1px solid #E5E7EB;
+      page-break-inside: avoid;
+    }
   }
 
   /* Dashboard overview page layout */
