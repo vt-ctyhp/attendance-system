@@ -1805,17 +1805,18 @@ const fetchTodayRosterData = async (referenceDate: Date, sessions: SessionRecord
   });
 
   if (!users.length) {
+    const emptyTotals: TodayRosterTotals = {
+      totalIdleMinutes: 0,
+      breakCount: 0,
+      totalBreakMinutes: 0,
+      lunchCount: 0,
+      totalLunchMinutes: 0,
+      presenceMisses: 0,
+      tardyMinutes: 0
+    };
     return {
       rows: [],
-      totals: {
-        totalIdleMinutes: 0,
-        breakCount: 0,
-        totalBreakMinutes: 0,
-        lunchCount: 0,
-        totalLunchMinutes: 0,
-        presenceMisses: 0,
-        tardyMinutes: 0
-      },
+      totals: emptyTotals,
       hasComputedNotice: false
     };
   }
