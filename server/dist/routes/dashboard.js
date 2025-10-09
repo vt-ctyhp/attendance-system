@@ -1175,7 +1175,7 @@ const resolveTimeAwayStatus = (requests, dayStart) => {
     const label = selection.key === 'pto' ? 'PTO' : selection.key === 'uto' ? 'UTO' : 'Make up Hours';
     return { key: selection.key, label, since };
 };
-const buildRosterRow = (user, sessions, requests, badges, dayStart, dayEnd, now, tardyMinutes) => {
+const buildRosterRow = (user, sessions, requests, badges, dayStart, dayEnd, now, scheduleInfo) => {
     const sortedSessions = sessions
         .filter((session) => session.userId === user.id)
         .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime());
@@ -1303,6 +1303,11 @@ const buildRosterRow = (user, sessions, requests, badges, dayStart, dayEnd, now,
             }
         }
     }
+    const scheduleStart = scheduleInfo && scheduleInfo.enabled ? scheduleInfo.start : null;
+    let tardyMinutes = 0;
+    if (scheduleStart && firstLogin) {
+        tardyMinutes = computeRosterTardyMinutes(scheduleStart, firstLogin);
+    }
     return {
         userId: user.id,
         name: user.name,
@@ -1368,42 +1373,31 @@ const fetchTodayRosterData = async (referenceDate, sessions) => {
         requestsByUser.set(request.userId, bucket);
     }
     const badgeMap = await collectRequestBadges(userIds, dayStart, dayEnd);
-    const dayIso = (0, date_fns_tz_1.formatInTimeZone)(dayStart, DASHBOARD_TIME_ZONE, 'yyyy-MM-dd');
-    const monthKey = (0, date_fns_tz_1.formatInTimeZone)(dayStart, DASHBOARD_TIME_ZONE, 'yyyy-MM');
-    const tardyMinutesByUser = new Map();
+    const scheduleByUser = new Map();
     if (userIds.length) {
-        const monthFacts = await prisma_1.prisma.attendanceMonthFact.findMany({
+        const configs = await prisma_1.prisma.employeeCompConfig.findMany({
             where: {
                 userId: { in: userIds },
-                monthKey
+                effectiveOn: { lte: dayStart }
             },
-            select: { userId: true, snapshot: true }
+            orderBy: [{ userId: 'asc' }, { effectiveOn: 'desc' }]
         });
-        for (const fact of monthFacts) {
-            const snapshot = (fact.snapshot ?? {});
-            if (!Array.isArray(snapshot.days))
+        const weekday = (0, date_fns_tz_1.utcToZonedTime)(dayStart, constants_1.PAYROLL_TIME_ZONE).getDay();
+        for (const config of configs) {
+            if (scheduleByUser.has(config.userId)) {
                 continue;
-            for (const rawDay of snapshot.days) {
-                if (!rawDay || typeof rawDay !== 'object')
-                    continue;
-                const day = rawDay;
-                if (typeof day.date === 'string' && day.date === dayIso) {
-                    const tardy = Number(day.tardyMinutes ?? 0);
-                    if (Number.isFinite(tardy) && tardy > 0) {
-                        tardyMinutesByUser.set(fact.userId, Math.max(0, Math.round(tardy)));
-                    }
-                    else {
-                        tardyMinutesByUser.set(fact.userId, 0);
-                    }
-                    break;
-                }
             }
-            if (!tardyMinutesByUser.has(fact.userId)) {
-                tardyMinutesByUser.set(fact.userId, 0);
+            const normalized = (0, config_1.ensureSchedule)(config.schedule);
+            const daySchedule = normalized.days[String(weekday)];
+            if (daySchedule) {
+                scheduleByUser.set(config.userId, { start: daySchedule.start, enabled: daySchedule.enabled });
+            }
+            else {
+                scheduleByUser.set(config.userId, null);
             }
         }
     }
-    const rows = users.map((user) => buildRosterRow(user, relevantSessions, requestsByUser.get(user.id) ?? [], badgeMap.get(user.id) ?? [], dayStart, dayEnd, now, tardyMinutesByUser.get(user.id) ?? 0));
+    const rows = users.map((user) => buildRosterRow(user, relevantSessions, requestsByUser.get(user.id) ?? [], badgeMap.get(user.id) ?? [], dayStart, dayEnd, now, scheduleByUser.get(user.id) ?? null));
     const totals = rows.reduce((acc, row) => ({
         totalIdleMinutes: acc.totalIdleMinutes + row.totalIdleMinutes,
         breakCount: acc.breakCount + row.breakCount,
@@ -1485,6 +1479,18 @@ const formatRosterCount = (value) => {
         return '—';
     }
     return String(Math.max(0, Math.round(value)));
+};
+const computeRosterTardyMinutes = (scheduledStart, actualStart) => {
+    const [hours, minutes] = scheduledStart.split(':').map((value) => Number.parseInt(value, 10));
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes))
+        return 0;
+    const zoned = (0, date_fns_tz_1.utcToZonedTime)(actualStart, constants_1.PAYROLL_TIME_ZONE);
+    const scheduled = new Date(zoned);
+    scheduled.setHours(hours, minutes, 0, 0);
+    if ((0, date_fns_1.differenceInCalendarDays)(zoned, scheduled) !== 0) {
+        return 0;
+    }
+    return Math.max(0, Math.round((zoned.getTime() - scheduled.getTime()) / 60000));
 };
 const buildRosterInitials = (value) => {
     const trimmed = value.trim();
@@ -2149,7 +2155,7 @@ const baseStyles = `
 const formatRangeLabel = (start, end) => end && end.getTime() !== start.getTime() ? `${formatFullDate(start)} – ${formatFullDate(end)}` : formatFullDate(start);
 const renderTimezoneNote = (start, end) => `<p class="tz-note">All times shown in ${escapeHtml(DASHBOARD_TIME_ZONE)} (${escapeHtml(formatRangeLabel(start, end))})</p>`;
 const renderNav = (active) => {
-    const isPayrollContext = active === 'payroll' || active === 'payroll-holidays';
+    const isPayrollContext = active === 'payroll' || active === 'payroll-holidays' || active === 'payroll-employees';
     const isTimeOffContext = active === 'balances' || active === 'requests';
     const link = (href, label, key, options) => {
         const classes = ['nav__link'];
@@ -2202,6 +2208,7 @@ const renderNav = (active) => {
         ]),
         wrapItem(link('/dashboard/shifts', 'Shifts', 'shifts')),
         dropdown('/dashboard/payroll', 'Payroll', 'payroll', [
+            { href: '/dashboard/payroll/employees', label: 'Employee Profiles', key: 'payroll-employees' },
             { href: '/dashboard/payroll/holidays', label: 'Holiday Settings', key: 'payroll-holidays' }
         ]),
         wrapItem(link('/dashboard/settings', 'Settings', 'settings'))
@@ -6253,6 +6260,156 @@ const renderSettingsPage = ({ enabled, employees, logs, message, error }) => {
     </html>
   `;
 };
+exports.dashboardRouter.get('/payroll/employees', async (req, res) => {
+    const employees = await prisma_1.prisma.user.findMany({
+        orderBy: { name: 'asc' },
+        include: {
+            balance: {
+                select: {
+                    ptoHours: true,
+                    utoHours: true,
+                    makeUpHours: true,
+                    updatedAt: true
+                }
+            }
+        }
+    });
+    const wantsCsv = typeof req.query.download === 'string' && req.query.download.toLowerCase() === 'csv';
+    if (wantsCsv) {
+        const header = [
+            'Name',
+            'Email',
+            'Role',
+            'Status',
+            'PTO Hours',
+            'UTO Hours',
+            'Make-Up Hours',
+            'Balance Updated',
+            'Joined',
+            'Profile URL'
+        ];
+        const rows = employees.map((employee) => {
+            const balance = employee.balance;
+            const pto = formatHours(Number(balance?.ptoHours ?? 0));
+            const uto = formatHours(Number(balance?.utoHours ?? 0));
+            const makeUp = formatHours(Number(balance?.makeUpHours ?? 0));
+            const balanceUpdated = balance?.updatedAt ? formatCsvDateTime(balance.updatedAt) : '';
+            const joined = formatCsvDateTime(employee.createdAt);
+            const statusLabel = employee.active ? 'Active' : 'Inactive';
+            const profileUrl = `/dashboard/employees/${employee.id}`;
+            return [
+                escapeCsv(employee.name),
+                escapeCsv(employee.email),
+                escapeCsv(employee.role ?? ''),
+                escapeCsv(statusLabel),
+                escapeCsv(pto),
+                escapeCsv(uto),
+                escapeCsv(makeUp),
+                escapeCsv(balanceUpdated),
+                escapeCsv(joined),
+                escapeCsv(profileUrl)
+            ].join(',');
+        });
+        const csv = [header.join(','), ...rows].join('\n');
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', 'attachment; filename="employee-profiles.csv"');
+        return res.send(csv);
+    }
+    const totalEmployees = employees.length;
+    const activeEmployees = employees.filter((employee) => employee.active).length;
+    const tableRows = employees
+        .map((employee) => {
+        const profileUrl = `/dashboard/employees/${employee.id}`;
+        const balance = employee.balance;
+        const pto = `${formatHours(Number(balance?.ptoHours ?? 0))} h`;
+        const uto = `${formatHours(Number(balance?.utoHours ?? 0))} h`;
+        const makeUp = `${formatHours(Number(balance?.makeUpHours ?? 0))} h`;
+        const balanceUpdated = balance?.updatedAt ? formatDateTime(balance.updatedAt) : '—';
+        const statusLabel = employee.active ? 'Active' : 'Inactive';
+        const statusClass = employee.active ? 'status status--approved' : 'status status--warn';
+        return `
+        <tr>
+          <td><a href="${escapeAttr(profileUrl)}">${escapeHtml(employee.name)}</a></td>
+          <td>${escapeHtml(employee.email)}</td>
+          <td>${employee.role ? escapeHtml(employee.role) : '—'}</td>
+          <td><span class="${statusClass}">${escapeHtml(statusLabel)}</span></td>
+          <td>${escapeHtml(pto)}</td>
+          <td>${escapeHtml(uto)}</td>
+          <td>${escapeHtml(makeUp)}</td>
+          <td>${escapeHtml(balanceUpdated)}</td>
+          <td class="no-print"><a class="button button-secondary" href="${escapeAttr(profileUrl)}">Open</a></td>
+        </tr>
+      `;
+    })
+        .join('\n');
+    const tableMarkup = employees.length
+        ? `<div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Employee</th>
+              <th>Email</th>
+              <th>Role</th>
+              <th>Status</th>
+              <th>PTO</th>
+              <th>UTO</th>
+              <th>Make-Up</th>
+              <th>Balance Updated</th>
+              <th class="no-print">Profile</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRows}
+          </tbody>
+        </table>
+      </div>`
+        : '<div class="empty">No employees found.</div>';
+    const html = `
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <title>Employee Profiles – Payroll</title>
+        <style>${baseStyles}</style>
+      </head>
+      <body class="dashboard dashboard--payroll">
+        ${renderNav('payroll-employees')}
+        <main class="page-shell">
+          <header class="page-header">
+            <div class="page-header__content">
+              <p class="page-header__eyebrow">Payroll</p>
+              <h1 class="page-header__title">Employee Profiles</h1>
+              <p class="page-header__subtitle">Open an employee profile to review attendance, balances, and compensation settings.</p>
+            </div>
+            <div class="page-header__meta">
+              <span>${totalEmployees} ${totalEmployees === 1 ? 'employee' : 'employees'}</span>
+              <span>${activeEmployees} active</span>
+            </div>
+          </header>
+          <section class="card card--table">
+            <div class="card__header">
+              <div>
+                <h2 class="card__title">Roster</h2>
+                <p class="card__subtitle">Choose an employee to open their detailed profile.</p>
+              </div>
+              <div class="card__actions no-print">
+                <form method="get" action="/dashboard/payroll/employees">
+                  <input type="hidden" name="download" value="csv" />
+                  <button type="submit">Download CSV</button>
+                </form>
+                <button type="button" class="print-button" onclick="window.print()">Print</button>
+              </div>
+            </div>
+            <div class="card__body">
+              ${tableMarkup}
+            </div>
+          </section>
+        </main>
+      </body>
+    </html>
+  `;
+    res.type('html').send(html);
+});
 exports.dashboardRouter.get('/payroll/holidays', async (req, res) => {
     const toOptionalString = (value) => typeof value === 'string' && value.trim().length ? value.trim() : undefined;
     const message = toOptionalString(req.query.message);
