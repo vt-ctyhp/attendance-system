@@ -24,6 +24,8 @@ const timeRequestPolicy_1 = require("../services/timeRequestPolicy");
 const DASHBOARD_TIME_ZONE = process.env.DASHBOARD_TIME_ZONE ?? 'America/Los_Angeles';
 const ISO_DATE_TIME = "yyyy-MM-dd'T'HH:mm:ssXXX";
 const ISO_DATE = 'yyyy-MM-dd';
+const CSV_DATE_TIME = 'MMM d, yyyy h:mm a';
+const CSV_DATE = 'MMM d, yyyy';
 const DASHBOARD_COOKIE_PATH = '/';
 const DEFAULT_DASHBOARD_REDIRECT = '/dashboard/overview';
 const DASHBOARD_LOGIN_ROUTE = '/dashboard/login';
@@ -39,8 +41,10 @@ const formatFullDate = (value) => (0, date_fns_tz_1.formatInTimeZone)(value, DAS
 const formatShortDate = (value) => (0, date_fns_tz_1.formatInTimeZone)(value, DASHBOARD_TIME_ZONE, 'MMM d');
 const formatIsoDateTime = (value) => (0, date_fns_tz_1.formatInTimeZone)(value, DASHBOARD_TIME_ZONE, ISO_DATE_TIME);
 const formatIsoDate = (value) => (0, date_fns_tz_1.formatInTimeZone)(value, DASHBOARD_TIME_ZONE, ISO_DATE);
+const formatCsvDateTime = (value) => (0, date_fns_tz_1.formatInTimeZone)(value, DASHBOARD_TIME_ZONE, CSV_DATE_TIME);
+const formatCsvDate = (value) => (0, date_fns_tz_1.formatInTimeZone)(value, DASHBOARD_TIME_ZONE, CSV_DATE);
+const formatCsvDateList = (values) => values.length ? values.map((value) => formatCsvDateTime(value)).join('; ') : '';
 const formatTimeOfDay = (value) => (0, date_fns_tz_1.formatInTimeZone)(value, DASHBOARD_TIME_ZONE, 'h:mm a');
-const formatIsoDateList = (values) => values.length ? values.map((value) => formatIsoDateTime(value)).join('; ') : '';
 const minutesFormatter = (value) => `${value} min`;
 const formatOptionalDate = (value) => (value ? formatDateTime(value) : '—');
 const toDateParam = (value) => formatIsoDate(zonedStartOfDay(value));
@@ -1171,7 +1175,7 @@ const resolveTimeAwayStatus = (requests, dayStart) => {
     const label = selection.key === 'pto' ? 'PTO' : selection.key === 'uto' ? 'UTO' : 'Make up Hours';
     return { key: selection.key, label, since };
 };
-const buildRosterRow = (user, sessions, requests, badges, dayStart, dayEnd, now) => {
+const buildRosterRow = (user, sessions, requests, badges, dayStart, dayEnd, now, tardyMinutes) => {
     const sortedSessions = sessions
         .filter((session) => session.userId === user.id)
         .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime());
@@ -1316,6 +1320,7 @@ const buildRosterRow = (user, sessions, requests, badges, dayStart, dayEnd, now)
         totalLunchMinutes,
         firstLogin,
         presenceMisses,
+        tardyMinutes,
         requestBadges: badges
     };
 };
@@ -1337,7 +1342,8 @@ const fetchTodayRosterData = async (referenceDate, sessions) => {
                 totalBreakMinutes: 0,
                 lunchCount: 0,
                 totalLunchMinutes: 0,
-                presenceMisses: 0
+                presenceMisses: 0,
+                tardyMinutes: 0
             },
             hasComputedNotice: false
         };
@@ -1361,21 +1367,58 @@ const fetchTodayRosterData = async (referenceDate, sessions) => {
         requestsByUser.set(request.userId, bucket);
     }
     const badgeMap = await collectRequestBadges(userIds, dayStart, dayEnd);
-    const rows = users.map((user) => buildRosterRow(user, relevantSessions, requestsByUser.get(user.id) ?? [], badgeMap.get(user.id) ?? [], dayStart, dayEnd, now));
+    const dayIso = (0, date_fns_tz_1.formatInTimeZone)(dayStart, DASHBOARD_TIME_ZONE, 'yyyy-MM-dd');
+    const monthKey = (0, date_fns_tz_1.formatInTimeZone)(dayStart, DASHBOARD_TIME_ZONE, 'yyyy-MM');
+    const tardyMinutesByUser = new Map();
+    if (userIds.length) {
+        const monthFacts = await prisma_1.prisma.attendanceMonthFact.findMany({
+            where: {
+                userId: { in: userIds },
+                monthKey
+            },
+            select: { userId: true, snapshot: true }
+        });
+        for (const fact of monthFacts) {
+            const snapshot = (fact.snapshot ?? {});
+            if (!Array.isArray(snapshot.days))
+                continue;
+            for (const rawDay of snapshot.days) {
+                if (!rawDay || typeof rawDay !== 'object')
+                    continue;
+                const day = rawDay;
+                if (typeof day.date === 'string' && day.date === dayIso) {
+                    const tardy = Number(day.tardyMinutes ?? 0);
+                    if (Number.isFinite(tardy) && tardy > 0) {
+                        tardyMinutesByUser.set(fact.userId, Math.max(0, Math.round(tardy)));
+                    }
+                    else {
+                        tardyMinutesByUser.set(fact.userId, 0);
+                    }
+                    break;
+                }
+            }
+            if (!tardyMinutesByUser.has(fact.userId)) {
+                tardyMinutesByUser.set(fact.userId, 0);
+            }
+        }
+    }
+    const rows = users.map((user) => buildRosterRow(user, relevantSessions, requestsByUser.get(user.id) ?? [], badgeMap.get(user.id) ?? [], dayStart, dayEnd, now, tardyMinutesByUser.get(user.id) ?? 0));
     const totals = rows.reduce((acc, row) => ({
         totalIdleMinutes: acc.totalIdleMinutes + row.totalIdleMinutes,
         breakCount: acc.breakCount + row.breakCount,
         totalBreakMinutes: acc.totalBreakMinutes + row.totalBreakMinutes,
         lunchCount: acc.lunchCount + row.lunchCount,
         totalLunchMinutes: acc.totalLunchMinutes + row.totalLunchMinutes,
-        presenceMisses: acc.presenceMisses + row.presenceMisses
+        presenceMisses: acc.presenceMisses + row.presenceMisses,
+        tardyMinutes: acc.tardyMinutes + row.tardyMinutes
     }), {
         totalIdleMinutes: 0,
         breakCount: 0,
         totalBreakMinutes: 0,
         lunchCount: 0,
         totalLunchMinutes: 0,
-        presenceMisses: 0
+        presenceMisses: 0,
+        tardyMinutes: 0
     });
     return {
         rows,
@@ -1511,6 +1554,7 @@ const buildTodayRosterRowHtml = (row, dateParam) => {
     <td class="roster-cell roster-cell--numeric">${formatRosterCount(row.lunchCount)}</td>
     <td class="roster-cell roster-cell--numeric">${formatRosterMinutes(row.totalLunchMinutes)}</td>
     <td class="roster-cell roster-cell--numeric">${renderTimeCell(row.firstLogin)}</td>
+    <td class="roster-cell roster-cell--numeric">${formatRosterMinutes(row.tardyMinutes)}</td>
     <td class="roster-cell roster-cell--numeric">${formatRosterCount(row.presenceMisses)}</td>
   </tr>`;
 };
@@ -2321,7 +2365,7 @@ exports.dashboardRouter.get('/today', async (req, res) => {
         const header = [
             'Name',
             'Email',
-            'Started At ISO',
+            'Started At',
             'Active Minutes',
             'Idle Minutes',
             'Breaks',
@@ -2334,7 +2378,7 @@ exports.dashboardRouter.get('/today', async (req, res) => {
         const rows = summaries.map((summary) => [
             escapeCsv(summary.name),
             escapeCsv(summary.email),
-            escapeCsv(formatIsoDateTime(summary.startedAt)),
+            escapeCsv(formatCsvDateTime(summary.startedAt)),
             escapeCsv(summary.activeMinutes),
             escapeCsv(summary.idleMinutes),
             escapeCsv(summary.breaks),
@@ -2815,8 +2859,8 @@ exports.dashboardRouter.get('/weekly', async (req, res) => {
             'Lunches',
             'Lunch Minutes',
             'Presence Misses',
-            'Range Start ISO',
-            'Range End ISO',
+            'Range Start',
+            'Range End',
             'Timezone'
         ];
         const rows = summaries.map((summary) => [
@@ -2829,8 +2873,8 @@ exports.dashboardRouter.get('/weekly', async (req, res) => {
             escapeCsv(summary.lunches),
             escapeCsv(summary.lunchMinutes),
             escapeCsv(summary.presenceMisses),
-            escapeCsv(formatIsoDate(windowStart)),
-            escapeCsv(formatIsoDate(windowEnd)),
+            escapeCsv(formatCsvDate(windowStart)),
+            escapeCsv(formatCsvDate(windowEnd)),
             escapeCsv(DASHBOARD_TIME_ZONE)
         ].join(','));
         const csv = [header.join(','), ...rows].join('\n');
@@ -2856,8 +2900,8 @@ exports.dashboardRouter.get('/monthly', async (req, res) => {
             'Lunches',
             'Lunch Minutes',
             'Presence Misses',
-            'Range Start ISO',
-            'Range End ISO',
+            'Range Start',
+            'Range End',
             'Timezone'
         ];
         const rows = summaries.map((summary) => [
@@ -2870,8 +2914,8 @@ exports.dashboardRouter.get('/monthly', async (req, res) => {
             escapeCsv(summary.lunches),
             escapeCsv(summary.lunchMinutes),
             escapeCsv(summary.presenceMisses),
-            escapeCsv(formatIsoDate(monthStart)),
-            escapeCsv(formatIsoDate(monthEnd)),
+            escapeCsv(formatCsvDate(monthStart)),
+            escapeCsv(formatCsvDate(monthEnd)),
             escapeCsv(DASHBOARD_TIME_ZONE)
         ].join(','));
         const csv = [header.join(','), ...rows].join('\n');
@@ -3246,13 +3290,13 @@ exports.dashboardRouter.get('/requests', async (req, res) => {
     const wantsCsv = typeof req.query.download === 'string' && req.query.download.toLowerCase() === 'csv';
     if (wantsCsv) {
         const header = [
-            'Created At ISO',
+            'Created At',
             'Name',
             'Email',
             'Type',
             'Status',
-            'Start Date ISO',
-            'End Date ISO',
+            'Start Date',
+            'End Date',
             'Hours',
             'Reason',
             'Approver Name',
@@ -3260,13 +3304,13 @@ exports.dashboardRouter.get('/requests', async (req, res) => {
             'Timezone'
         ];
         const rows = requests.map((request) => [
-            escapeCsv(formatIsoDateTime(request.createdAt)),
+            escapeCsv(formatCsvDateTime(request.createdAt)),
             escapeCsv(request.user.name),
             escapeCsv(request.user.email),
             escapeCsv(request.type),
             escapeCsv(request.status),
-            escapeCsv(formatIsoDate(request.startDate)),
-            escapeCsv(formatIsoDate(request.endDate)),
+            escapeCsv(formatCsvDate(request.startDate)),
+            escapeCsv(formatCsvDate(request.endDate)),
             escapeCsv(formatHours(request.hours)),
             escapeCsv(request.reason ?? ''),
             escapeCsv(request.approver?.name ?? ''),
@@ -3544,6 +3588,7 @@ exports.dashboardRouter.get('/overview', async (req, res) => {
                       <th>Lunch Count</th>
                       <th>Total Lunch Minutes</th>
                       <th>Log In Time (h:mm AM/PM)</th>
+                      <th>Tardy Minutes</th>
                       <th>Presence Misses</th>
                     </tr>
                   </thead>
@@ -4210,7 +4255,7 @@ exports.dashboardRouter.get('/balances', async (req, res) => {
             'Base PTO',
             'Base UTO',
             'Base Make-Up',
-            'Updated At ISO',
+            'Updated At',
             'Timezone'
         ];
         const csvRows = rows.map((row) => [
@@ -4222,7 +4267,7 @@ exports.dashboardRouter.get('/balances', async (req, res) => {
             escapeCsv(formatHours(row.basePto)),
             escapeCsv(formatHours(row.baseUto)),
             escapeCsv(formatHours(row.baseMakeUp)),
-            escapeCsv(row.updatedAt ? formatIsoDateTime(row.updatedAt) : ''),
+            escapeCsv(row.updatedAt ? formatCsvDateTime(row.updatedAt) : ''),
             escapeCsv(DASHBOARD_TIME_ZONE)
         ].join(','));
         const csv = [header.join(','), ...csvRows].join('\n');
@@ -4751,11 +4796,11 @@ exports.dashboardRouter.get('/user/:userId/balances', async (req, res) => {
     const wantsCsv = typeof req.query.download === 'string' && req.query.download.toLowerCase() === 'csv';
     if (wantsCsv) {
         const header = [
-            'Created At ISO',
+            'Created At',
             'Type',
             'Status',
-            'Start Date ISO',
-            'End Date ISO',
+            'Start Date',
+            'End Date',
             'Hours',
             'Reason',
             'Approver Name',
@@ -4763,11 +4808,11 @@ exports.dashboardRouter.get('/user/:userId/balances', async (req, res) => {
             'Timezone'
         ];
         const rowsCsv = requests.map((request) => [
-            escapeCsv(formatIsoDateTime(request.createdAt)),
+            escapeCsv(formatCsvDateTime(request.createdAt)),
             escapeCsv(request.type),
             escapeCsv(request.status),
-            escapeCsv(formatIsoDate(request.startDate)),
-            escapeCsv(formatIsoDate(request.endDate)),
+            escapeCsv(formatCsvDate(request.startDate)),
+            escapeCsv(formatCsvDate(request.endDate)),
             escapeCsv(formatHours(request.hours)),
             escapeCsv(request.reason ?? ''),
             escapeCsv(request.approver?.name ?? ''),
@@ -4942,12 +4987,12 @@ exports.dashboardRouter.get('/user/:userId', async (req, res) => {
     if (wantsCsv) {
         const header = [
             'Session ID',
-            'Clock In ISO',
-            'Clock Out ISO',
-            'Break Starts ISO',
-            'Break Ends ISO',
-            'Lunch Starts ISO',
-            'Lunch Ends ISO',
+            'Clock In',
+            'Clock Out',
+            'Break Starts',
+            'Break Ends',
+            'Lunch Starts',
+            'Lunch Ends',
             'Active Minutes',
             'Idle Minutes',
             'Breaks',
@@ -4959,12 +5004,12 @@ exports.dashboardRouter.get('/user/:userId', async (req, res) => {
         ];
         const rows = details.map((detail) => [
             escapeCsv(detail.sessionId),
-            escapeCsv(formatIsoDateTime(detail.startedAt)),
-            escapeCsv(detail.endedAt ? formatIsoDateTime(detail.endedAt) : ''),
-            escapeCsv(formatIsoDateList(detail.breakStartTimes)),
-            escapeCsv(formatIsoDateList(detail.breakEndTimes)),
-            escapeCsv(formatIsoDateList(detail.lunchStartTimes)),
-            escapeCsv(formatIsoDateList(detail.lunchEndTimes)),
+            escapeCsv(formatCsvDateTime(detail.startedAt)),
+            escapeCsv(detail.endedAt ? formatCsvDateTime(detail.endedAt) : ''),
+            escapeCsv(formatCsvDateList(detail.breakStartTimes)),
+            escapeCsv(formatCsvDateList(detail.breakEndTimes)),
+            escapeCsv(formatCsvDateList(detail.lunchStartTimes)),
+            escapeCsv(formatCsvDateList(detail.lunchEndTimes)),
             escapeCsv(detail.activeMinutes),
             escapeCsv(detail.idleMinutes),
             escapeCsv(detail.breaks),
