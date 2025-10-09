@@ -7241,10 +7241,12 @@ dashboardRouter.get('/payroll/employees', async (req, res) => {
       const uto = `${formatHours(Number(balance?.utoHours ?? 0))} h`;
       const makeUp = `${formatHours(Number(balance?.makeUpHours ?? 0))} h`;
       const balanceUpdated = balance?.updatedAt ? formatDateTime(balance.updatedAt) : '—';
+      const joined = formatDateTime(employee.createdAt);
       const statusLabel = employee.active ? 'Active' : 'Inactive';
       const statusClass = employee.active ? 'status status--approved' : 'status status--warn';
+      const searchValue = `${employee.name} ${employee.email} ${employee.role ?? ''}`.toLowerCase();
       return `
-        <tr>
+        <tr data-employee-row data-search="${escapeAttr(searchValue)}">
           <td><a href="${escapeAttr(profileUrl)}">${escapeHtml(employee.name)}</a></td>
           <td>${escapeHtml(employee.email)}</td>
           <td>${employee.role ? escapeHtml(employee.role) : '—'}</td>
@@ -7253,6 +7255,7 @@ dashboardRouter.get('/payroll/employees', async (req, res) => {
           <td>${escapeHtml(uto)}</td>
           <td>${escapeHtml(makeUp)}</td>
           <td>${escapeHtml(balanceUpdated)}</td>
+          <td>${escapeHtml(joined)}</td>
           <td class="no-print"><a class="button button-secondary" href="${escapeAttr(profileUrl)}">Open</a></td>
         </tr>
       `;
@@ -7260,7 +7263,7 @@ dashboardRouter.get('/payroll/employees', async (req, res) => {
     .join('\n');
 
   const tableMarkup = employees.length
-    ? `<div class="table-scroll">
+    ? `<div class="table-scroll" data-employee-table>
         <table>
           <thead>
             <tr>
@@ -7272,6 +7275,7 @@ dashboardRouter.get('/payroll/employees', async (req, res) => {
               <th>UTO</th>
               <th>Make-Up</th>
               <th>Balance Updated</th>
+              <th>Joined</th>
               <th class="no-print">Profile</th>
             </tr>
           </thead>
@@ -7279,8 +7283,36 @@ dashboardRouter.get('/payroll/employees', async (req, res) => {
             ${tableRows}
           </tbody>
         </table>
-      </div>`
+      </div>
+      <div class="empty hidden" data-employee-empty>No employees match your search.</div>`
     : '<div class="empty">No employees found.</div>';
+
+  const filterScript = employees.length
+    ? `
+        <script>
+          (() => {
+            const input = document.querySelector('[data-employee-filter]');
+            const rows = Array.from(document.querySelectorAll('[data-employee-row]'));
+            const empty = document.querySelector('[data-employee-empty]');
+            if (!input || !rows.length || !empty) return;
+            const apply = () => {
+              const query = input.value.trim().toLowerCase();
+              let visible = 0;
+              rows.forEach((row) => {
+                const haystack = row.dataset.search ?? '';
+                const matches = !query || haystack.includes(query);
+                row.classList.toggle('hidden', !matches);
+                if (matches) {
+                  visible += 1;
+                }
+              });
+              empty.classList.toggle('hidden', visible !== 0);
+            };
+            input.addEventListener('input', apply);
+          })();
+        </script>
+      `
+    : '';
 
   const html = `
     <!doctype html>
@@ -7311,6 +7343,7 @@ dashboardRouter.get('/payroll/employees', async (req, res) => {
                 <p class="card__subtitle">Choose an employee to open their detailed profile.</p>
               </div>
               <div class="card__actions no-print">
+                <input type="search" placeholder="Search employees" aria-label="Search employees" data-employee-filter />
                 <form method="get" action="/dashboard/payroll/employees">
                   <input type="hidden" name="download" value="csv" />
                   <button type="submit">Download CSV</button>
@@ -7323,6 +7356,7 @@ dashboardRouter.get('/payroll/employees', async (req, res) => {
             </div>
           </section>
         </main>
+        ${filterScript}
       </body>
     </html>
   `;
