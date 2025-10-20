@@ -47,9 +47,18 @@ const datePreprocess = zod_1.z.preprocess((value) => {
     if (value instanceof Date)
         return value;
     if (typeof value === 'string') {
-        const parsed = new Date(value);
-        if (!Number.isNaN(parsed.getTime())) {
-            return parsed;
+        const trimmed = value.trim();
+        if (trimmed) {
+            if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+                const parsedInZone = (0, date_fns_tz_1.zonedTimeToUtc)(`${trimmed}T00:00:00`, constants_1.PAYROLL_TIME_ZONE);
+                if (!Number.isNaN(parsedInZone.getTime())) {
+                    return parsedInZone;
+                }
+            }
+            const parsed = new Date(trimmed);
+            if (!Number.isNaN(parsed.getTime())) {
+                return parsed;
+            }
         }
     }
     return value;

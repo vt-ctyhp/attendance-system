@@ -8537,6 +8537,8 @@ exports.dashboardRouter.get('/employees/:employeeId', async (req, res) => {
     const compensationUtoDisplay = formatHours(Number(balanceRecord.baseUtoHours ?? balanceRecord.utoHours ?? 0));
     const compensationMakeUpDisplay = formatHours(Number(balanceRecord.baseMakeUpHours ?? balanceRecord.makeUpHours ?? 0));
     const scheduleTimeZoneValue = escapeHtml(scheduleSnapshot.timeZone);
+    const scheduleDisabledAttr = latestConfig ? '' : ' disabled';
+    const scheduleDisabledMessage = latestConfig ? '' : 'Save compensation details before updating the schedule.';
     const html = `
     <!doctype html>
     <html lang="en">
@@ -8711,8 +8713,8 @@ exports.dashboardRouter.get('/employees/:employeeId', async (req, res) => {
                   </table>
                 </div>
                 <div class="profile-form__footer">
-                  <p class="form-error" data-error></p>
-                  <button type="submit" class="button primary">Save Schedule Version</button>
+                  <p class="form-error" data-error>${scheduleDisabledMessage}</p>
+                  <button type="submit" class="button primary"${scheduleDisabledAttr}>Save Schedule Version</button>
                 </div>
               </form>
             </div>
@@ -8859,6 +8861,10 @@ exports.dashboardRouter.get('/employees/:employeeId', async (req, res) => {
                   if (submitter) submitter.disabled = true;
 
                   try {
+                    if (kind === 'schedule' && !latest) {
+                      throw new Error('Save compensation details before updating the schedule.');
+                    }
+
                     const payload = buildBasePayload();
                     const effectiveInput = form.querySelector('input[name="effectiveOn"]');
                     if (!(effectiveInput instanceof HTMLInputElement) || !effectiveInput.value) {
