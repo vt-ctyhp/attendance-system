@@ -252,8 +252,23 @@ const createHoliday = async (name, observedOn, actorId) => {
 };
 exports.createHoliday = createHoliday;
 const deleteHoliday = async (observedOn, actorId) => {
-    const deleted = await prisma_1.prisma.holiday.deleteMany({ where: { observedOn } });
-    if (actorId && deleted.count > 0) {
+    const zonedDate = (0, date_fns_tz_1.utcToZonedTime)(observedOn, constants_1.PAYROLL_TIME_ZONE);
+    const dayStart = (0, date_fns_1.startOfDay)(zonedDate);
+    const nextDayStart = (0, date_fns_1.addDays)(dayStart, 1);
+    const startUtc = (0, date_fns_tz_1.zonedTimeToUtc)(dayStart, constants_1.PAYROLL_TIME_ZONE);
+    const nextUtc = (0, date_fns_tz_1.zonedTimeToUtc)(nextDayStart, constants_1.PAYROLL_TIME_ZONE);
+    const deleted = await prisma_1.prisma.holiday.deleteMany({
+        where: {
+            observedOn: {
+                gte: startUtc,
+                lt: nextUtc
+            }
+        }
+    });
+    if (deleted.count === 0) {
+        throw errors_1.HttpError.notFound('Holiday not found');
+    }
+    if (actorId) {
         await prisma_1.prisma.payrollAuditLog.create({
             data: {
                 actorId,
@@ -264,11 +279,9 @@ const deleteHoliday = async (observedOn, actorId) => {
             }
         });
     }
-    if (deleted.count > 0) {
-        const monthKey = (0, attendance_1.getMonthKeyForDate)(observedOn);
-        await (0, attendanceTrigger_1.triggerAttendanceRecalcForMonths)([monthKey], { actorId });
-    }
-    return deleted.count > 0;
+    const monthKey = (0, attendance_1.getMonthKeyForDate)(observedOn);
+    await (0, attendanceTrigger_1.triggerAttendanceRecalcForMonths)([monthKey], { actorId });
+    return true;
 };
 exports.deleteHoliday = deleteHoliday;
 const getAllConfigsThrough = async (userId, through) => {

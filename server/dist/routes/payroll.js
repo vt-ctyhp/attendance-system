@@ -113,10 +113,10 @@ payrollRouter.post('/holidays', requireAdmin, (0, asyncHandler_1.asyncHandler)(a
 payrollRouter.delete('/holidays/:date', requireAdmin, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     const paramsSchema = zod_1.z.object({ date: zod_1.z.string().min(1) });
     const { date } = (0, validation_1.parseWithSchema)(paramsSchema, req.params, 'Invalid holiday identifier');
-    const parsed = new Date(date);
-    if (Number.isNaN(parsed.getTime())) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
         return res.status(400).json({ error: 'Invalid date format' });
     }
+    const parsed = (0, date_fns_tz_1.zonedTimeToUtc)(`${date}T00:00:00`, constants_1.PAYROLL_TIME_ZONE);
     const removed = await (0, config_1.deleteHoliday)(parsed, req.user?.id);
     res.json({ removed });
 }));
