@@ -66,9 +66,18 @@ const scheduleSchema = z
 const datePreprocess = z.preprocess((value) => {
   if (value instanceof Date) return value;
   if (typeof value === 'string') {
-    const parsed = new Date(value);
-    if (!Number.isNaN(parsed.getTime())) {
-      return parsed;
+    const trimmed = value.trim();
+    if (trimmed) {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+        const parsedInZone = zonedTimeToUtc(`${trimmed}T00:00:00`, PAYROLL_TIME_ZONE);
+        if (!Number.isNaN(parsedInZone.getTime())) {
+          return parsedInZone;
+        }
+      }
+      const parsed = new Date(trimmed);
+      if (!Number.isNaN(parsed.getTime())) {
+        return parsed;
+      }
     }
   }
   return value;
