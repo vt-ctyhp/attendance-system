@@ -845,7 +845,32 @@ const collectAttendanceSummary = async (
         const makeUpHours = Math.round(toNumber(raw.makeUpHours) * 100) / 100;
         const tardyMinutes = Math.max(0, Math.round(toNumber(raw.tardyMinutes)));
         const notes = Array.isArray(raw.notes)
-          ? (raw.notes as unknown[]).map((note) => String(note)).filter((note) => note.trim().length)
+          ? (raw.notes as unknown[])
+              .map((note) => {
+                if (typeof note === 'string') {
+                  return note.trim();
+                }
+                if (typeof note === 'number' || typeof note === 'boolean') {
+                  return String(note);
+                }
+                if (note && typeof note === 'object') {
+                  const record = note as Record<string, unknown>;
+                  for (const key of ['text', 'note', 'message', 'value']) {
+                    const candidate = record[key];
+                    if (typeof candidate === 'string' && candidate.trim().length) {
+                      return candidate.trim();
+                    }
+                  }
+                  try {
+                    const serialized = JSON.stringify(record);
+                    return serialized === '{}' ? '' : serialized;
+                  } catch {
+                    return '';
+                  }
+                }
+                return '';
+              })
+              .filter((note) => note.length)
           : [];
         const breakCount = Math.max(0, Math.round(toNumber(raw.breakCount)));
         const breakMinutes = Math.max(0, Math.round(toNumber(raw.breakMinutes)));
