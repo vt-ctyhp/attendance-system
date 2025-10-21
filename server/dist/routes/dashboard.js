@@ -6782,7 +6782,30 @@ const addEmployeeSchema = zod_1.z.object({
 const updateEmployeeNameSchema = zod_1.z.object({
     name: zod_1.z.string().min(1).max(200)
 });
-const renderSettingsPage = ({ enabled, employees, logs, message, error }) => {
+const ADMIN_ROLES = ['admin', 'manager'];
+const isPrivilegedRole = (role) => ADMIN_ROLES.includes((role ?? ''));
+const addAdminSchema = zod_1.z
+    .object({
+    name: zod_1.z.string().min(1).max(200),
+    email: zod_1.z.string().email(),
+    role: zod_1.z.enum(ADMIN_ROLES),
+    password: zod_1.z.string().min(10).max(200),
+    confirmPassword: zod_1.z.string().min(1)
+})
+    .refine((data) => data.password === data.confirmPassword, {
+    message: 'Passwords must match',
+    path: ['confirmPassword']
+});
+const updateAdminPasswordSchema = zod_1.z
+    .object({
+    password: zod_1.z.string().min(10).max(200),
+    confirmPassword: zod_1.z.string().min(1)
+})
+    .refine((data) => data.password === data.confirmPassword, {
+    message: 'Passwords must match',
+    path: ['confirmPassword']
+});
+const renderSettingsPage = ({ enabled, employees, admins, logs, message, error }) => {
     const renderAlert = () => {
         if (message) {
             return `<div class="alert success">${escapeHtml(message)}</div>`;
@@ -6792,6 +6815,30 @@ const renderSettingsPage = ({ enabled, employees, logs, message, error }) => {
         }
         return '';
     };
+    const adminRows = admins.length
+        ? admins
+            .map((admin) => {
+            const roleLabel = isPrivilegedRole(admin.role)
+                ? `${admin.role.charAt(0).toUpperCase()}${admin.role.slice(1)}`
+                : 'Admin';
+            return `
+            <tr>
+              <td>${escapeHtml(admin.name)}</td>
+              <td>${escapeHtml(admin.email)}</td>
+              <td>${escapeHtml(roleLabel)}</td>
+              <td>${formatDateTime(admin.createdAt)}</td>
+              <td>
+                <form method="post" action="/dashboard/settings/admins/${admin.id}/password" class="inline-form" style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
+                  <input type="password" name="password" placeholder="New password" required minlength="10" autocomplete="new-password" />
+                  <input type="password" name="confirmPassword" placeholder="Confirm password" required minlength="10" autocomplete="new-password" />
+                  <button type="submit">Update Password</button>
+                </form>
+              </td>
+            </tr>
+          `;
+        })
+            .join('\n')
+        : '<tr><td colspan="5" class="empty">No admin accounts found.</td></tr>';
     const employeeRows = employees.length
         ? employees
             .map((employee) => {
@@ -6849,7 +6896,7 @@ const renderSettingsPage = ({ enabled, employees, logs, message, error }) => {
     <html lang="en">
       <head>
         <meta charset="utf-8" />
-        <title>Settings – Email Sign-In</title>
+        <title>Dashboard Settings</title>
         <style>${baseStyles}</style>
       </head>
       <body class="dashboard dashboard--settings">
@@ -6858,8 +6905,8 @@ const renderSettingsPage = ({ enabled, employees, logs, message, error }) => {
           <header class="page-header">
             <div class="page-header__content">
               <p class="page-header__eyebrow">Administration</p>
-              <h1 class="page-header__title">Email Sign-In Settings</h1>
-              <p class="page-header__subtitle">Enable, manage, and audit employee access via email-only authentication.</p>
+              <h1 class="page-header__title">Dashboard Settings</h1>
+              <p class="page-header__subtitle">Manage dashboard accounts and control the email-only sign-in feature.</p>
             </div>
           </header>
           ${renderAlert()}
@@ -6896,7 +6943,65 @@ const renderSettingsPage = ({ enabled, employees, logs, message, error }) => {
                 </form>
               </div>
             </section>
+            <section class="card card--form no-print">
+              <div class="card__header">
+                <h2 class="card__title">Add Admin</h2>
+                <p class="card__subtitle">Create dashboard access for admin or manager roles.</p>
+              </div>
+              <div class="card__body">
+                <form method="post" action="/dashboard/settings/admins" class="stack-form">
+                  <label>
+                    <span>Name</span>
+                    <input type="text" name="name" required />
+                  </label>
+                  <label>
+                    <span>Email</span>
+                    <input type="email" name="email" required />
+                  </label>
+                  <label>
+                    <span>Role</span>
+                    <select name="role" required>
+                      <option value="admin" selected>Admin</option>
+                      <option value="manager">Manager</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Password</span>
+                    <input type="password" name="password" minlength="10" required autocomplete="new-password" />
+                  </label>
+                  <label>
+                    <span>Confirm password</span>
+                    <input type="password" name="confirmPassword" minlength="10" required autocomplete="new-password" />
+                  </label>
+                  <button type="submit">Create Admin Account</button>
+                </form>
+              </div>
+            </section>
           </div>
+          <section class="card card--table">
+            <div class="card__header">
+              <h2 class="card__title">Dashboard Admins</h2>
+              <p class="card__subtitle">Manage who can sign in to the dashboard.</p>
+            </div>
+            <div class="card__body">
+              <div class="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Email</th>
+                      <th>Role</th>
+                      <th>Created</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${adminRows}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
           <section class="card card--table">
             <div class="card__header">
               <h2 class="card__title">Employee Roster</h2>
@@ -9082,12 +9187,17 @@ exports.dashboardRouter.get('/settings', async (req, res) => {
     const toOptionalString = (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined);
     const message = toOptionalString(req.query.message);
     const error = toOptionalString(req.query.error);
-    const [enabled, employees, logs] = await Promise.all([
+    const [enabled, employees, admins, logs] = await Promise.all([
         (0, featureFlags_1.isEmailSessionEnabled)(),
         prisma_1.prisma.user.findMany({
             where: { role: 'employee' },
             orderBy: { name: 'asc' },
             select: { id: true, name: true, email: true, role: true, active: true, createdAt: true }
+        }),
+        prisma_1.prisma.user.findMany({
+            where: { role: { in: [...ADMIN_ROLES] } },
+            orderBy: { name: 'asc' },
+            select: { id: true, name: true, email: true, role: true, createdAt: true }
         }),
         prisma_1.prisma.authAuditLog.findMany({
             orderBy: { createdAt: 'desc' },
@@ -9106,7 +9216,7 @@ exports.dashboardRouter.get('/settings', async (req, res) => {
             }
         })
     ]);
-    const html = renderSettingsPage({ enabled, employees, logs, message, error });
+    const html = renderSettingsPage({ enabled, employees, admins, logs, message, error });
     res.type('text/html').send(html);
 });
 exports.dashboardRouter.post('/settings/toggle-email-signin', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
@@ -9114,6 +9224,53 @@ exports.dashboardRouter.post('/settings/toggle-email-signin', (0, asyncHandler_1
     const nextEnabled = ['1', 'true', 'on', 'yes'].includes(raw);
     await (0, featureFlags_1.setEmailSessionEnabled)(nextEnabled);
     res.redirect('/dashboard/settings');
+}));
+exports.dashboardRouter.post('/settings/admins', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const parsed = addAdminSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+        return res.redirect('/dashboard/settings?error=' +
+            encodeURIComponent('Provide a name, email, role, and matching password (minimum 10 characters).'));
+    }
+    const name = parsed.data.name.trim();
+    const normalizedEmail = parsed.data.email.trim().toLowerCase();
+    const role = parsed.data.role;
+    if (!name) {
+        return res.redirect('/dashboard/settings?error=' + encodeURIComponent('Name is required.'));
+    }
+    const existing = await prisma_1.prisma.user.findUnique({ where: { email: normalizedEmail } });
+    if (existing) {
+        return res.redirect('/dashboard/settings?error=' + encodeURIComponent('An account with that email already exists.'));
+    }
+    const passwordHash = await (0, auth_1.hashPassword)(parsed.data.password);
+    await prisma_1.prisma.user.create({
+        data: {
+            name,
+            email: normalizedEmail,
+            role,
+            passwordHash,
+            active: true
+        }
+    });
+    const roleLabel = `${role.charAt(0).toUpperCase()}${role.slice(1)}`;
+    res.redirect('/dashboard/settings?message=' + encodeURIComponent(`${roleLabel} account created.`));
+}));
+exports.dashboardRouter.post('/settings/admins/:id/password', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const id = Number.parseInt(req.params.id, 10);
+    if (!Number.isFinite(id) || id <= 0) {
+        throw errors_1.HttpError.badRequest('Invalid admin id');
+    }
+    const parsed = updateAdminPasswordSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+        return res.redirect('/dashboard/settings?error=' +
+            encodeURIComponent('Passwords must match and include at least 10 characters.'));
+    }
+    const admin = await prisma_1.prisma.user.findUnique({ where: { id } });
+    if (!admin || !isPrivilegedRole(admin.role)) {
+        throw errors_1.HttpError.notFound('Admin account not found');
+    }
+    const passwordHash = await (0, auth_1.hashPassword)(parsed.data.password);
+    await prisma_1.prisma.user.update({ where: { id }, data: { passwordHash } });
+    res.redirect('/dashboard/settings?message=' + encodeURIComponent('Admin password updated.'));
 }));
 exports.dashboardRouter.post('/settings/employees', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     const parsed = addEmployeeSchema.safeParse(req.body ?? {});
@@ -9127,7 +9284,7 @@ exports.dashboardRouter.post('/settings/employees', (0, asyncHandler_1.asyncHand
     }
     const existing = await prisma_1.prisma.user.findUnique({ where: { email: normalizedEmail } });
     if (existing) {
-        return res.redirect('/dashboard/settings?error=' + encodeURIComponent('Employee already exists.'));
+        return res.redirect('/dashboard/settings?error=' + encodeURIComponent('An account with that email already exists.'));
     }
     const passwordHash = await (0, auth_1.hashPassword)((0, crypto_1.randomUUID)());
     await prisma_1.prisma.user.create({
