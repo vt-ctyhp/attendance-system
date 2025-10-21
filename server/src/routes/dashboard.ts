@@ -2532,9 +2532,9 @@ const baseStyles = `
     background: #991b1b;
   }
   
-  .meta { color: var(--text-secondary); margin-bottom: 12px; font-size: 13px; }
-  .meta--muted { color: #64748b; font-size: 12px; display: block; }
-  .meta--stacked { display: flex; flex-direction: column; gap: 0.15rem; font-size: 12px; color: var(--text-secondary); }
+  .meta { color: #334155; margin-bottom: 12px; font-size: 13px; }
+  .meta--muted { color: #475569; font-size: 12px; display: block; }
+  .meta--stacked { display: flex; flex-direction: column; gap: 0.15rem; font-size: 12px; color: #334155; }
   .meta--admin { 
     font-size: 13px; 
     color: var(--primary-strong); 
@@ -2567,7 +2567,7 @@ const baseStyles = `
     display: inline-flex; 
     gap: 4px; 
     margin: 0;
-    background: var(--bg-elevated);
+    background: rgba(15,23,42,0.05);
     padding: 4px;
     border-radius: var(--radius-sm);
   }
@@ -2575,20 +2575,20 @@ const baseStyles = `
     padding: 6px 16px; 
     border-radius: 4px; 
     background: transparent; 
-    color: var(--text-muted); 
+    color: var(--text-primary); 
     text-decoration: none; 
-    font-weight: 500;
+    font-weight: 600;
     transition: all 0.15s;
     font-size: 13px;
   }
   .tab-bar a:hover:not(.active) {
     background: var(--border-light);
-    color: var(--text-primary);
+    color: var(--primary);
   }
   .tab-bar a.active { 
     background: white; 
-    color: var(--text-primary);
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    color: var(--primary);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.12);
   }
   
   .tab-content { margin-top: 0; }
@@ -2730,7 +2730,7 @@ const baseStyles = `
   .timesheet-request-form select,
   .timesheet-request-form input[type="text"] { padding: 0.3rem 0.5rem; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 0.85rem; }
   .timesheet-request-form button { padding: 0.4rem 0.9rem; }
-  .muted { color: var(--text-muted); font-size: 0.8rem; }
+  .muted { color: #3b475c; font-size: 0.8rem; }
   .table-scroll { overflow-x: auto; max-width: 100%; }
   .table-scroll table { min-width: 720px; }
   .table-scroll .live-roster-table { min-width: 960px; }
