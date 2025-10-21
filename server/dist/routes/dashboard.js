@@ -6798,10 +6798,18 @@ const renderSettingsPage = ({ enabled, employees, logs, message, error }) => {
             const toggleLabel = employee.active ? 'Deactivate' : 'Activate';
             const nextValue = employee.active ? 'false' : 'true';
             const nameValue = escapeAttr(employee.name ?? '');
+            const roleLabel = (() => {
+                const normalized = (employee.role ?? '').trim();
+                if (!normalized) {
+                    return 'Employee';
+                }
+                return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+            })();
             return `
             <tr>
               <td>${escapeHtml(employee.name)}</td>
               <td>${escapeHtml(employee.email)}</td>
+              <td>${escapeHtml(roleLabel)}</td>
               <td>${employee.active ? 'Active' : 'Inactive'}</td>
               <td>${formatDateTime(employee.createdAt)}</td>
               <td>
@@ -6821,7 +6829,7 @@ const renderSettingsPage = ({ enabled, employees, logs, message, error }) => {
           `;
         })
             .join('\n')
-        : '<tr><td colspan="5" class="empty">No employees found.</td></tr>';
+        : '<tr><td colspan="6" class="empty">No employees found.</td></tr>';
     const auditRows = logs.length
         ? logs
             .map((log) => `
@@ -6901,6 +6909,7 @@ const renderSettingsPage = ({ enabled, employees, logs, message, error }) => {
                     <tr>
                       <th>Name</th>
                       <th>Email</th>
+                      <th>Role</th>
                       <th>Status</th>
                       <th>Created</th>
                       <th>Actions</th>
@@ -9078,7 +9087,7 @@ exports.dashboardRouter.get('/settings', async (req, res) => {
         prisma_1.prisma.user.findMany({
             where: { role: 'employee' },
             orderBy: { name: 'asc' },
-            select: { id: true, name: true, email: true, active: true, createdAt: true }
+            select: { id: true, name: true, email: true, role: true, active: true, createdAt: true }
         }),
         prisma_1.prisma.authAuditLog.findMany({
             orderBy: { createdAt: 'desc' },

@@ -7661,7 +7661,7 @@ dashboardRouter.get('/payroll', async (req, res) => {
 
 type SettingsContext = {
   enabled: boolean;
-  employees: Array<{ id: number; name: string; email: string; active: boolean; createdAt: Date }>;
+  employees: Array<{ id: number; name: string; email: string; role: string; active: boolean; createdAt: Date }>;
   logs: Array<{
     id: string;
     email: string;
@@ -7704,10 +7704,18 @@ const renderSettingsPage = ({ enabled, employees, logs, message, error }: Settin
           const toggleLabel = employee.active ? 'Deactivate' : 'Activate';
           const nextValue = employee.active ? 'false' : 'true';
           const nameValue = escapeAttr(employee.name ?? '');
+          const roleLabel = (() => {
+            const normalized = (employee.role ?? '').trim();
+            if (!normalized) {
+              return 'Employee';
+            }
+            return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+          })();
           return `
             <tr>
               <td>${escapeHtml(employee.name)}</td>
               <td>${escapeHtml(employee.email)}</td>
+              <td>${escapeHtml(roleLabel)}</td>
               <td>${employee.active ? 'Active' : 'Inactive'}</td>
               <td>${formatDateTime(employee.createdAt)}</td>
               <td>
@@ -7727,7 +7735,7 @@ const renderSettingsPage = ({ enabled, employees, logs, message, error }: Settin
           `;
         })
         .join('\n')
-    : '<tr><td colspan="5" class="empty">No employees found.</td></tr>';
+    : '<tr><td colspan="6" class="empty">No employees found.</td></tr>';
 
   const auditRows = logs.length
     ? logs
@@ -7809,6 +7817,7 @@ const renderSettingsPage = ({ enabled, employees, logs, message, error }: Settin
                     <tr>
                       <th>Name</th>
                       <th>Email</th>
+                      <th>Role</th>
                       <th>Status</th>
                       <th>Created</th>
                       <th>Actions</th>
@@ -10148,7 +10157,7 @@ dashboardRouter.get('/settings', async (req, res) => {
     prisma.user.findMany({
       where: { role: 'employee' },
       orderBy: { name: 'asc' },
-      select: { id: true, name: true, email: true, active: true, createdAt: true }
+      select: { id: true, name: true, email: true, role: true, active: true, createdAt: true }
     }),
     prisma.authAuditLog.findMany({
       orderBy: { createdAt: 'desc' },
