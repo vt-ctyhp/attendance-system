@@ -1804,10 +1804,12 @@ const baseStyles = `
     border-bottom: 2px solid transparent;
     margin-bottom: -1px;
   }
+  .nav a:visited { color: var(--text-secondary); }
   .nav a.active { 
     color: var(--primary);
     border-bottom-color: var(--primary);
   }
+  .nav a.active:visited { color: var(--primary); }
   .nav a:hover:not(.active) { 
     color: var(--text-primary);
   }
@@ -1842,9 +1844,11 @@ const baseStyles = `
     border-radius: 4px;
     transition: background 0.15s;
   }
+  .nav__link--child:visited { color: var(--text-primary); }
   .nav__link--child:hover,
   .nav__link--child:focus { background: #F3F4F6; text-decoration: none; }
   .nav__link--child.active { background: var(--primary); color: white; }
+  .nav__link--child.active:visited { color: white; }
   
   .card { 
     background: var(--bg-card); 
@@ -1960,6 +1964,9 @@ const baseStyles = `
   .print-button:hover { 
     background: var(--bg-elevated);
   }
+  .print-button:visited {
+    color: var(--text-primary);
+  }
   
   .button-secondary { 
     background: var(--bg-card);
@@ -1969,6 +1976,9 @@ const baseStyles = `
   .button-secondary:hover { 
     background: var(--bg-elevated);
   }
+  .button-secondary:visited {
+    color: var(--text-primary);
+  }
   .button-secondary--danger {
     color: #b91c1c;
     border-color: rgba(185, 28, 28, 0.35);
@@ -1977,9 +1987,15 @@ const baseStyles = `
   .button-secondary--danger:hover {
     background: rgba(254, 202, 202, 0.9);
   }
+  .button-secondary--danger:visited {
+    color: #b91c1c;
+  }
   
   .button-danger { 
     background: var(--danger); 
+    color: white;
+  }
+  .button-danger:visited {
     color: white;
   }
   .button-danger:hover { 
