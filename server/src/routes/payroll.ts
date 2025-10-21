@@ -7,6 +7,7 @@ import { parseWithSchema } from '../utils/validation';
 import {
   listEmployeeConfigs,
   upsertEmployeeConfig,
+  deleteEmployeeConfig,
   createHoliday,
   listHolidays,
   deleteHoliday,
@@ -131,6 +132,17 @@ payrollRouter.post(
       req.user?.id
     );
     res.status(201).json({ success: true });
+  })
+);
+
+payrollRouter.delete(
+  '/config/:id',
+  requireAdminOrManager,
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const paramsSchema = z.object({ id: z.coerce.number().int().positive() });
+    const { id } = parseWithSchema(paramsSchema, req.params, 'Invalid configuration id');
+    await deleteEmployeeConfig(id, req.user?.id);
+    res.status(200).json({ success: true });
   })
 );
 

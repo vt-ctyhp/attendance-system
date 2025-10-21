@@ -98,6 +98,12 @@ payrollRouter.post('/config', requireAdminOrManager, (0, asyncHandler_1.asyncHan
     }, req.user?.id);
     res.status(201).json({ success: true });
 }));
+payrollRouter.delete('/config/:id', requireAdminOrManager, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const paramsSchema = zod_1.z.object({ id: zod_1.z.coerce.number().int().positive() });
+    const { id } = (0, validation_1.parseWithSchema)(paramsSchema, req.params, 'Invalid configuration id');
+    await (0, config_1.deleteEmployeeConfig)(id, req.user?.id);
+    res.status(200).json({ success: true });
+}));
 const holidayQuerySchema = zod_1.z.object({
     from: datePreprocess.optional(),
     to: datePreprocess.optional()

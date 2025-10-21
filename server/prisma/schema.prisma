@@ -27,6 +27,7 @@ model User {
   balanceLedgerEntries BalanceLedger[] @relation("BalanceLedgerUser")
   createdBalanceLedgerEntries BalanceLedger[] @relation("BalanceLedgerCreatedBy")
   payrollConfigs EmployeeCompConfig[]
+  submittedEmployeeConfigs EmployeeCompConfig[] @relation("EmployeeConfigSubmittedBy")
   attendanceFacts AttendanceMonthFact[]
   bonusCandidates BonusCandidate[] @relation("BonusCandidateUser")
   approvedBonusCandidates BonusCandidate[] @relation("BonusCandidateApprovedBy")
@@ -123,7 +124,10 @@ model EmployeeCompConfig {
   accrualEnabled           Boolean   @default(false)
   accrualMethod            String?
   ptoBalanceHours          Decimal   @default(0) @db.Decimal(10, 2)
-  utoBalanceHours         Decimal   @default(0) @db.Decimal(10, 2)
+  utoBalanceHours          Decimal   @default(0) @db.Decimal(10, 2)
+  submittedById            Int?
+  submittedBy              User?     @relation("EmployeeConfigSubmittedBy", fields: [submittedById], references: [id], onDelete: SetNull)
+  submittedAt              DateTime  @default(now())
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
 

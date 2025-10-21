@@ -65,6 +65,7 @@ describe('Employee profile dashboard page', () => {
     expect(response.text).toContain('New Schedule Version');
     expect(response.text).toContain('Compensation History');
     expect(response.text).toContain('Schedule History');
+    expect(response.text).toContain('Submitted');
     expect(response.text).toContain('employee-profile-data');
     expect(response.text).toContain('value="America/Los_Angeles"');
     expect(response.text).toContain('Unpaid Break (min)');

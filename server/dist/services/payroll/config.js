@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.resolveActiveConfigForRange = exports.getAllConfigsThrough = exports.deleteHoliday = exports.createHoliday = exports.listHolidays = exports.deleteFutureConfigs = exports.upsertEmployeeConfig = exports.getEffectiveConfigForDate = exports.listEmployeeConfigs = exports.serializeSchedule = exports.ensureSchedule = void 0;
+exports.resolveActiveConfigForRange = exports.getAllConfigsThrough = exports.deleteHoliday = exports.createHoliday = exports.listHolidays = exports.deleteEmployeeConfig = exports.deleteFutureConfigs = exports.upsertEmployeeConfig = exports.getEffectiveConfigForDate = exports.listEmployeeConfigs = exports.serializeSchedule = exports.ensureSchedule = void 0;
 const date_fns_1 = require("date-fns");
 const date_fns_tz_1 = require("date-fns-tz");
 const library_1 = require("@prisma/client/runtime/library");
@@ -119,6 +119,11 @@ const toSnapshot = (config) => ({
     accrualMethod: config.accrualMethod,
     ptoBalanceHours: Number(config.ptoBalanceHours),
     utoBalanceHours: Number(config.utoBalanceHours),
+    submittedById: config.submittedById ?? null,
+    submittedBy: config.submittedBy
+        ? { id: config.submittedBy.id, name: config.submittedBy.name, email: config.submittedBy.email }
+        : null,
+    submittedAt: config.submittedAt,
     createdAt: config.createdAt,
     updatedAt: config.updatedAt
 });
@@ -128,7 +133,8 @@ const listEmployeeConfigs = async (userId) => {
         : undefined;
     const configs = await prisma_1.prisma.employeeCompConfig.findMany({
         where,
-        orderBy: { effectiveOn: 'desc' }
+        orderBy: { effectiveOn: 'desc' },
+        include: { submittedBy: { select: { id: true, name: true, email: true } } }
     });
     return configs.map((config) => toSnapshot(config));
 };
@@ -136,7 +142,8 @@ exports.listEmployeeConfigs = listEmployeeConfigs;
 const getEffectiveConfigForDate = async (userId, target) => {
     const config = await prisma_1.prisma.employeeCompConfig.findFirst({
         where: { userId, effectiveOn: { lte: target } },
-        orderBy: { effectiveOn: 'desc' }
+        orderBy: { effectiveOn: 'desc' },
+        include: { submittedBy: { select: { id: true, name: true, email: true } } }
     });
     if (!config)
         return null;
@@ -173,7 +180,9 @@ const upsertEmployeeConfig = async (input, actorId) => {
         accrualEnabled: input.accrualEnabled,
         accrualMethod: input.accrualMethod ?? null,
         ptoBalanceHours: new library_1.Decimal(input.ptoBalanceHours),
-        utoBalanceHours: new library_1.Decimal(input.utoBalanceHours)
+        utoBalanceHours: new library_1.Decimal(input.utoBalanceHours),
+        submittedById: actorId ?? null,
+        submittedAt: new Date()
     };
     try {
         await prisma_1.prisma.employeeCompConfig.create({ data });
@@ -216,6 +225,33 @@ const deleteFutureConfigs = async (userId, effectiveAfter) => {
     return deleted.count;
 };
 exports.deleteFutureConfigs = deleteFutureConfigs;
+const deleteEmployeeConfig = async (configId, actorId) => {
+    const existing = await prisma_1.prisma.employeeCompConfig.findUnique({
+        where: { id: configId }
+    });
+    if (!existing) {
+        throw errors_1.HttpError.notFound('Configuration not found');
+    }
+    await prisma_1.prisma.employeeCompConfig.delete({ where: { id: configId } });
+    const monthKeys = (0, attendanceTrigger_1.collectMonthKeysFromEffectiveDate)(existing.effectiveOn);
+    await (0, attendanceTrigger_1.triggerAttendanceRecalcForMonths)(monthKeys, {
+        userIds: [existing.userId],
+        actorId
+    });
+    if (actorId) {
+        await prisma_1.prisma.payrollAuditLog.create({
+            data: {
+                actorId,
+                scope: 'employee_config',
+                target: `${existing.userId}`,
+                action: 'delete',
+                details: { id: configId }
+            }
+        });
+    }
+    return toSnapshot({ ...existing, submittedBy: null });
+};
+exports.deleteEmployeeConfig = deleteEmployeeConfig;
 const listHolidays = async (from, to) => {
     const holidays = await prisma_1.prisma.holiday.findMany({
         where: {
@@ -287,7 +323,8 @@ exports.deleteHoliday = deleteHoliday;
 const getAllConfigsThrough = async (userId, through) => {
     const configs = await prisma_1.prisma.employeeCompConfig.findMany({
         where: { userId, effectiveOn: { lte: through } },
-        orderBy: { effectiveOn: 'asc' }
+        orderBy: { effectiveOn: 'asc' },
+        include: { submittedBy: { select: { id: true, name: true, email: true } } }
     });
     return configs.map((config) => toSnapshot(config));
 };

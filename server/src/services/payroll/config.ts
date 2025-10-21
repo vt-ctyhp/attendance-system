@@ -148,12 +148,17 @@ export type EmployeeCompInput = {
 
 export type EmployeeCompSnapshot = EmployeeCompInput & {
   id: number;
+  submittedById: number | null;
+  submittedBy: { id: number; name: string; email: string } | null;
+  submittedAt: Date;
   createdAt: Date;
   updatedAt: Date;
 };
 
 const toSnapshot = (
-  config: EmployeeCompConfig
+  config: EmployeeCompConfig & {
+    submittedBy?: { id: number; name: string; email: string } | null;
+  }
 ): EmployeeCompSnapshot => ({
   id: config.id,
   userId: config.userId,
@@ -169,6 +174,11 @@ const toSnapshot = (
   accrualMethod: config.accrualMethod,
   ptoBalanceHours: Number(config.ptoBalanceHours),
   utoBalanceHours: Number(config.utoBalanceHours),
+  submittedById: config.submittedById ?? null,
+  submittedBy: config.submittedBy
+    ? { id: config.submittedBy.id, name: config.submittedBy.name, email: config.submittedBy.email }
+    : null,
+  submittedAt: config.submittedAt,
   createdAt: config.createdAt,
   updatedAt: config.updatedAt
 });
@@ -179,7 +189,8 @@ export const listEmployeeConfigs = async (userId?: number) => {
     : undefined;
   const configs = await prisma.employeeCompConfig.findMany({
     where,
-    orderBy: { effectiveOn: 'desc' }
+    orderBy: { effectiveOn: 'desc' },
+    include: { submittedBy: { select: { id: true, name: true, email: true } } }
   });
   return configs.map((config) => toSnapshot(config));
 };
@@ -190,7 +201,8 @@ export const getEffectiveConfigForDate = async (
 ) => {
   const config = await prisma.employeeCompConfig.findFirst({
     where: { userId, effectiveOn: { lte: target } },
-    orderBy: { effectiveOn: 'desc' }
+    orderBy: { effectiveOn: 'desc' },
+    include: { submittedBy: { select: { id: true, name: true, email: true } } }
   });
   if (!config) return null;
   return toSnapshot(config);
@@ -229,7 +241,9 @@ export const upsertEmployeeConfig = async (input: EmployeeCompInput, actorId?: n
     accrualEnabled: input.accrualEnabled,
     accrualMethod: input.accrualMethod ?? null,
     ptoBalanceHours: new Decimal(input.ptoBalanceHours),
-    utoBalanceHours: new Decimal(input.utoBalanceHours)
+    utoBalanceHours: new Decimal(input.utoBalanceHours),
+    submittedById: actorId ?? null,
+    submittedAt: new Date()
   };
 
   try {
@@ -272,6 +286,37 @@ export const deleteFutureConfigs = async (userId: number, effectiveAfter: Date) 
     }
   });
   return deleted.count;
+};
+
+export const deleteEmployeeConfig = async (configId: number, actorId?: number) => {
+  const existing = await prisma.employeeCompConfig.findUnique({
+    where: { id: configId }
+  });
+  if (!existing) {
+    throw HttpError.notFound('Configuration not found');
+  }
+
+  await prisma.employeeCompConfig.delete({ where: { id: configId } });
+
+  const monthKeys = collectMonthKeysFromEffectiveDate(existing.effectiveOn);
+  await triggerAttendanceRecalcForMonths(monthKeys, {
+    userIds: [existing.userId],
+    actorId
+  });
+
+  if (actorId) {
+    await prisma.payrollAuditLog.create({
+      data: {
+        actorId,
+        scope: 'employee_config',
+        target: `${existing.userId}`,
+        action: 'delete',
+        details: { id: configId }
+      }
+    });
+  }
+
+  return toSnapshot({ ...existing, submittedBy: null });
 };
 
 export const listHolidays = async (from: Date, to: Date) => {
@@ -348,7 +393,8 @@ export const deleteHoliday = async (observedOn: Date, actorId?: number) => {
 export const getAllConfigsThrough = async (userId: number, through: Date) => {
   const configs = await prisma.employeeCompConfig.findMany({
     where: { userId, effectiveOn: { lte: through } },
-    orderBy: { effectiveOn: 'asc' }
+    orderBy: { effectiveOn: 'asc' },
+    include: { submittedBy: { select: { id: true, name: true, email: true } } }
   });
   return configs.map((config) => toSnapshot(config));
 };

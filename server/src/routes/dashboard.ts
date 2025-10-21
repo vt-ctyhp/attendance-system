@@ -2515,6 +2515,14 @@ const baseStyles = `
   .button-secondary:hover { 
     background: var(--bg-elevated);
   }
+  .button-secondary--danger {
+    color: #b91c1c;
+    border-color: rgba(185, 28, 28, 0.35);
+    background: rgba(254, 226, 226, 0.6);
+  }
+  .button-secondary--danger:hover {
+    background: rgba(254, 202, 202, 0.9);
+  }
   
   .button-danger { 
     background: var(--danger); 
@@ -2525,6 +2533,8 @@ const baseStyles = `
   }
   
   .meta { color: var(--text-secondary); margin-bottom: 12px; font-size: 13px; }
+  .meta--muted { color: #64748b; font-size: 12px; display: block; }
+  .meta--stacked { display: flex; flex-direction: column; gap: 0.15rem; font-size: 12px; color: var(--text-secondary); }
   .meta--admin { 
     font-size: 13px; 
     color: var(--primary-strong); 
@@ -9490,33 +9500,67 @@ dashboardRouter.get('/employees/:employeeId', async (req, res) => {
             ? `Eligible${config.defaultKpiBonus ? ` (${formatCurrency(config.defaultKpiBonus)})` : ''}`
             : 'Not eligible';
           const accrualLabel = `Enabled${config.accrualMethod ? ` – ${escapeHtml(config.accrualMethod)}` : ''}`;
+          const submittedByLabel = config.submittedBy
+            ? `${escapeHtml(config.submittedBy.name)}<br /><span class="meta meta--muted">${escapeHtml(
+                config.submittedBy.email
+              )}</span>`
+            : '—';
+          const submittedAtLabel = escapeHtml(formatDateTime(config.submittedAt));
           return `
-            <tr>
+            <tr data-config-row="${config.id}">
               <td>${escapeHtml(formatFullDate(config.effectiveOn))}</td>
               <td>${formatCurrency(config.baseSemiMonthlySalary)}</td>
               <td>${formatCurrency(config.monthlyAttendanceBonus)}</td>
               <td>${formatCurrency(config.quarterlyAttendanceBonus)}</td>
               <td>${escapeHtml(kpiLabel)}</td>
               <td>${escapeHtml(accrualLabel)}</td>
+              <td>
+                <div class="meta meta--stacked">
+                  <span>${submittedAtLabel}</span>
+                  <span>${submittedByLabel}</span>
+                </div>
+              </td>
+              <td>
+                <button type="button" class="button button-secondary button-secondary--danger" data-config-delete data-config-kind="compensation" data-config-id="${config.id}">
+                  Delete
+                </button>
+              </td>
             </tr>
           `;
         })
         .join('\n')
-    : '<tr><td colspan="6" class="empty">No compensation versions recorded yet.</td></tr>';
+    : '<tr><td colspan="8" class="empty">No compensation versions recorded yet.</td></tr>';
 
   const scheduleHistoryRows = configs.length
     ? configs
         .map((config) => {
           const summary = summarizeSchedule(config.schedule);
+          const submittedByLabel = config.submittedBy
+            ? `${escapeHtml(config.submittedBy.name)}<br /><span class="meta meta--muted">${escapeHtml(
+                config.submittedBy.email
+              )}</span>`
+            : '—';
+          const submittedAtLabel = escapeHtml(formatDateTime(config.submittedAt));
           return `
-            <tr>
+            <tr data-config-row="${config.id}">
               <td>${escapeHtml(formatFullDate(config.effectiveOn))}</td>
               <td>${summary}</td>
+              <td>
+                <div class="meta meta--stacked">
+                  <span>${submittedAtLabel}</span>
+                  <span>${submittedByLabel}</span>
+                </div>
+              </td>
+              <td>
+                <button type="button" class="button button-secondary button-secondary--danger" data-config-delete data-config-kind="schedule" data-config-id="${config.id}">
+                  Delete
+                </button>
+              </td>
             </tr>
           `;
         })
         .join('\n')
-    : '<tr><td colspan="2" class="empty">No schedule versions recorded yet.</td></tr>';
+    : '<tr><td colspan="4" class="empty">No schedule versions recorded yet.</td></tr>';
 
   const dayKeys = ['0', '1', '2', '3', '4', '5', '6'] as const;
   const scheduleDayRows = dayKeys
@@ -9568,7 +9612,11 @@ dashboardRouter.get('/employees/:employeeId', async (req, res) => {
           accrualMethod: latestConfig.accrualMethod,
           ptoBalanceHours: latestConfig.ptoBalanceHours,
           utoBalanceHours: latestConfig.utoBalanceHours,
-          schedule: scheduleSnapshot
+          schedule: scheduleSnapshot,
+          submittedAt: latestConfig.submittedAt,
+          submittedBy: latestConfig.submittedBy
+            ? { id: latestConfig.submittedBy.id, name: latestConfig.submittedBy.name, email: latestConfig.submittedBy.email }
+            : null
         }
       : null
   };
@@ -9801,6 +9849,8 @@ dashboardRouter.get('/employees/:employeeId', async (req, res) => {
                         <th>Quarterly Bonus</th>
                         <th>KPI</th>
                         <th>Accrual</th>
+                        <th>Submitted</th>
+                        <th></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -9825,6 +9875,8 @@ dashboardRouter.get('/employees/:employeeId', async (req, res) => {
                       <tr>
                         <th>Effective On</th>
                         <th>Schedule</th>
+                        <th>Submitted</th>
+                        <th></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -10037,6 +10089,44 @@ dashboardRouter.get('/employees/:employeeId', async (req, res) => {
                 kpiCheckbox.addEventListener('change', syncKpi);
               }
             }
+
+            const deleteButtons = document.querySelectorAll('[data-config-delete]');
+            deleteButtons.forEach((button) => {
+              if (!(button instanceof HTMLButtonElement)) {
+                return;
+              }
+              button.addEventListener('click', async () => {
+                const configId = Number(button.getAttribute('data-config-id') || '0');
+                const kind = button.getAttribute('data-config-kind') || 'configuration';
+                if (!Number.isFinite(configId) || configId <= 0) {
+                  return;
+                }
+                const confirmMessage =
+                  kind === 'schedule'
+                    ? 'Delete this schedule version? This cannot be undone.'
+                    : 'Delete this compensation version? This cannot be undone.';
+                if (!window.confirm(confirmMessage)) {
+                  return;
+                }
+                button.disabled = true;
+                button.textContent = 'Deleting...';
+                try {
+                  const response = await fetch('/api/payroll/config/' + configId, {
+                    method: 'DELETE',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' }
+                  });
+                  if (!response.ok) {
+                    throw new Error('Unable to delete version.');
+                  }
+                  window.location.reload();
+                } catch (error) {
+                  button.disabled = false;
+                  button.textContent = 'Delete';
+                  window.alert(error instanceof Error ? error.message : 'Unable to delete version.');
+                }
+              });
+            });
           })();
           </script>
         </main>
