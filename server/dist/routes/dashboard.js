@@ -6772,6 +6772,12 @@ exports.dashboardRouter.get('/payroll', async (req, res) => {
                 return;
               }
               attendanceReviewBody.innerHTML = '<p class="muted">Loading attendance details…</p>';
+              activeAttendanceReview = { month, userId, employeeName, fact: null };
+              if (typeof attendanceReviewDialog.showModal === 'function') {
+                attendanceReviewDialog.showModal();
+              } else {
+                attendanceReviewDialog.setAttribute('open', '');
+              }
               try {
                 const response = await fetch(
                   \`/api/payroll/attendance/\${encodeURIComponent(month)}/users/\${encodeURIComponent(userId)}\`
@@ -6786,14 +6792,14 @@ exports.dashboardRouter.get('/payroll', async (req, res) => {
                 }
                 activeAttendanceReview = { month, userId, employeeName, fact };
                 renderAttendanceReview(fact, employeeName);
-                if (typeof attendanceReviewDialog.showModal === 'function') {
-                  attendanceReviewDialog.showModal();
-                } else {
-                  attendanceReviewDialog.setAttribute('open', '');
-                }
               } catch (error) {
                 window.alert(error instanceof Error ? error.message : 'Unable to load attendance fact.');
                 activeAttendanceReview = null;
+                if (typeof attendanceReviewDialog.close === 'function') {
+                  attendanceReviewDialog.close();
+                } else {
+                  attendanceReviewDialog.removeAttribute('open');
+                }
               }
             };
 
