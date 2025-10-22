@@ -95,6 +95,36 @@ const escapeHtml = (value) => value
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+const formatAttendanceReason = (value) => {
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        return trimmed.length ? trimmed : undefined;
+    }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return undefined;
+    }
+    const { date, notes } = value;
+    const dateLabel = typeof date === 'string' && date.trim().length ? date.trim() : undefined;
+    let noteLabel;
+    if (Array.isArray(notes)) {
+        const parts = notes
+            .map((item) => String(item).trim())
+            .filter((item) => item.length);
+        if (parts.length) {
+            noteLabel = parts.join(', ');
+        }
+    }
+    else if (typeof notes === 'string') {
+        const trimmed = notes.trim();
+        if (trimmed.length) {
+            noteLabel = trimmed;
+        }
+    }
+    if (dateLabel && noteLabel) {
+        return `${dateLabel}: ${noteLabel}`;
+    }
+    return dateLabel ?? noteLabel ?? undefined;
+};
 const isDashboardRole = (role) => role === 'admin' || role === 'manager';
 const sanitizeRedirect = (value) => {
     if (typeof value !== 'string') {
@@ -6040,10 +6070,12 @@ exports.dashboardRouter.get('/payroll', async (req, res) => {
     const attendanceRows = attendanceFacts
         .map((fact) => {
         const employee = employeeLookup.get(fact.userId);
-        const reasons = Array.isArray(fact.reasons)
-            ? fact.reasons.map((reason) => String(reason)).filter((reason) => reason.trim().length)
+        const reasonNotes = Array.isArray(fact.reasons)
+            ? fact.reasons
+                .map((reason) => formatAttendanceReason(reason))
+                .filter((reason) => typeof reason === 'string' && reason.trim().length > 0)
             : [];
-        const scheduleNotes = reasons.length ? reasons.join('; ') : '—';
+        const scheduleNotes = reasonNotes.length ? reasonNotes.join('; ') : '—';
         const statusChip = fact.isPerfect
             ? '<span class="status-chip status-chip--approved">Perfect</span>'
             : '<span class="status-chip status-chip--warn">Review</span>';
