@@ -6536,7 +6536,6 @@ exports.dashboardRouter.get('/payroll', async (req, res) => {
               </div>
             </section>
           </div>
-          ${attendanceReviewDialog}
           <div class="cards-grid cards-grid--payroll">
             <section class="card card--table">
               <div class="card__header">
@@ -6605,6 +6604,8 @@ exports.dashboardRouter.get('/payroll', async (req, res) => {
             </section>
           </div>
         </main>
+
+        ${attendanceReviewDialog}
 
         <script>
           (() => {
