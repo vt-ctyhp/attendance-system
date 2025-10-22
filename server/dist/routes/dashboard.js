@@ -6,6 +6,7 @@ const crypto_1 = require("crypto");
 const date_fns_1 = require("date-fns");
 const date_fns_tz_1 = require("date-fns-tz");
 const zod_1 = require("zod");
+const client_1 = require("@prisma/client");
 const prisma_1 = require("../prisma");
 const types_1 = require("../types");
 const auth_1 = require("../auth");
@@ -345,6 +346,15 @@ const formatHoursFromMinutes = (minutes) => formatHours(minutesToHoursValue(minu
 const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 const formatCurrency = (value) => currencyFormatter.format(Number.isFinite(value) ? value : 0);
 const toNumber = (value, fallback = 0) => {
+    if (value instanceof client_1.Prisma.Decimal) {
+        return value.toNumber();
+    }
+    if (value && typeof value === 'object' && 'toNumber' in value && typeof value.toNumber === 'function') {
+        const parsed = value.toNumber();
+        if (Number.isFinite(parsed)) {
+            return parsed;
+        }
+    }
     if (typeof value === 'number' && Number.isFinite(value)) {
         return value;
     }
@@ -561,7 +571,33 @@ const collectAttendanceSummary = async (userId, periodStart, periodEnd) => {
                 const makeUpHours = Math.round(toNumber(raw.makeUpHours) * 100) / 100;
                 const tardyMinutes = Math.max(0, Math.round(toNumber(raw.tardyMinutes)));
                 const notes = Array.isArray(raw.notes)
-                    ? raw.notes.map((note) => String(note)).filter((note) => note.trim().length)
+                    ? raw.notes
+                        .map((note) => {
+                        if (typeof note === 'string') {
+                            return note.trim();
+                        }
+                        if (typeof note === 'number' || typeof note === 'boolean') {
+                            return String(note);
+                        }
+                        if (note && typeof note === 'object') {
+                            const record = note;
+                            for (const key of ['text', 'note', 'message', 'value']) {
+                                const candidate = record[key];
+                                if (typeof candidate === 'string' && candidate.trim().length) {
+                                    return candidate.trim();
+                                }
+                            }
+                            try {
+                                const serialized = JSON.stringify(record);
+                                return serialized === '{}' ? '' : serialized;
+                            }
+                            catch {
+                                return '';
+                            }
+                        }
+                        return '';
+                    })
+                        .filter((note) => note.length)
                     : [];
                 const breakCount = Math.max(0, Math.round(toNumber(raw.breakCount)));
                 const breakMinutes = Math.max(0, Math.round(toNumber(raw.breakMinutes)));

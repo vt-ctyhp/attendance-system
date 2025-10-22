@@ -13,7 +13,7 @@ import {
 } from 'date-fns';
 import { formatInTimeZone, utcToZonedTime, zonedTimeToUtc } from 'date-fns-tz';
 import { z } from 'zod';
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../prisma';
 import {
   TIME_REQUEST_STATUSES,
@@ -600,6 +600,15 @@ const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', cu
 const formatCurrency = (value: number) => currencyFormatter.format(Number.isFinite(value) ? value : 0);
 
 const toNumber = (value: unknown, fallback = 0) => {
+  if (value instanceof Prisma.Decimal) {
+    return value.toNumber();
+  }
+  if (value && typeof value === 'object' && 'toNumber' in value && typeof (value as { toNumber?: () => number }).toNumber === 'function') {
+    const parsed = (value as { toNumber(): number }).toNumber();
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value;
   }
