@@ -8,13 +8,17 @@ const prisma_1 = require("../../prisma");
 const constants_1 = require("./constants");
 const config_1 = require("./config");
 const parseMonthKey = (monthKey) => {
-    const [year, month] = monthKey.split('-').map((value) => Number.parseInt(value, 10));
-    if (!Number.isFinite(year) || !Number.isFinite(month)) {
+    const [yearRaw, monthRaw] = monthKey.split('-');
+    const year = Number.parseInt(yearRaw, 10);
+    const month = Number.parseInt(monthRaw, 10);
+    if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
         throw new Error(`Invalid month key: ${monthKey}`);
     }
-    const startZoned = (0, date_fns_tz_1.utcToZonedTime)(new Date(Date.UTC(year, month - 1, 1)), constants_1.PAYROLL_TIME_ZONE);
-    const rangeStart = (0, date_fns_tz_1.zonedTimeToUtc)((0, date_fns_1.startOfDay)(startZoned), constants_1.PAYROLL_TIME_ZONE);
-    const rangeEnd = (0, date_fns_tz_1.zonedTimeToUtc)((0, date_fns_1.endOfDay)((0, date_fns_1.endOfMonth)(startZoned)), constants_1.PAYROLL_TIME_ZONE);
+    const paddedMonth = monthRaw.padStart(2, '0');
+    const monthStartUtc = (0, date_fns_tz_1.zonedTimeToUtc)(`${yearRaw}-${paddedMonth}-01T00:00:00`, constants_1.PAYROLL_TIME_ZONE);
+    const monthStartZoned = (0, date_fns_tz_1.utcToZonedTime)(monthStartUtc, constants_1.PAYROLL_TIME_ZONE);
+    const rangeStart = (0, date_fns_tz_1.zonedTimeToUtc)((0, date_fns_1.startOfDay)(monthStartZoned), constants_1.PAYROLL_TIME_ZONE);
+    const rangeEnd = (0, date_fns_tz_1.zonedTimeToUtc)((0, date_fns_1.endOfDay)((0, date_fns_1.endOfMonth)(monthStartZoned)), constants_1.PAYROLL_TIME_ZONE);
     return { rangeStart, rangeEnd };
 };
 const getMonthKeyForDate = (date) => (0, date_fns_tz_1.formatInTimeZone)(date, constants_1.PAYROLL_TIME_ZONE, constants_1.MONTH_KEY_FORMAT);

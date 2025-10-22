@@ -51,13 +51,17 @@ export type AttendanceFactSnapshot = {
 };
 
 const parseMonthKey = (monthKey: string) => {
-  const [year, month] = monthKey.split('-').map((value) => Number.parseInt(value, 10));
-  if (!Number.isFinite(year) || !Number.isFinite(month)) {
+  const [yearRaw, monthRaw] = monthKey.split('-');
+  const year = Number.parseInt(yearRaw, 10);
+  const month = Number.parseInt(monthRaw, 10);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
     throw new Error(`Invalid month key: ${monthKey}`);
   }
-  const startZoned = utcToZonedTime(new Date(Date.UTC(year, month - 1, 1)), PAYROLL_TIME_ZONE);
-  const rangeStart = zonedTimeToUtc(startOfDay(startZoned), PAYROLL_TIME_ZONE);
-  const rangeEnd = zonedTimeToUtc(endOfDay(endOfMonth(startZoned)), PAYROLL_TIME_ZONE);
+  const paddedMonth = monthRaw.padStart(2, '0');
+  const monthStartUtc = zonedTimeToUtc(`${yearRaw}-${paddedMonth}-01T00:00:00`, PAYROLL_TIME_ZONE);
+  const monthStartZoned = utcToZonedTime(monthStartUtc, PAYROLL_TIME_ZONE);
+  const rangeStart = zonedTimeToUtc(startOfDay(monthStartZoned), PAYROLL_TIME_ZONE);
+  const rangeEnd = zonedTimeToUtc(endOfDay(endOfMonth(monthStartZoned)), PAYROLL_TIME_ZONE);
   return { rangeStart, rangeEnd };
 };
 
