@@ -1,6 +1,7 @@
 import { Router, type NextFunction, type Response } from 'express';
 import { z } from 'zod';
 import { zonedTimeToUtc } from 'date-fns-tz';
+import { Prisma } from '@prisma/client';
 import { authenticate, requireRole, type AuthenticatedRequest } from '../auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { parseWithSchema } from '../utils/validation';
@@ -14,8 +15,10 @@ import {
   ensureSchedule
 } from '../services/payroll/config';
 import {
+  getAttendanceFactForUser,
   listAttendanceFactsForMonth,
-  recalcMonthlyAttendanceFacts
+  recalcMonthlyAttendanceFacts,
+  updateAttendanceReviewStatus
 } from '../services/payroll/attendance';
 import { recalcMonthlyBonuses, listBonusesForPayDate, updateKpiBonusStatus } from '../services/payroll/bonuses';
 import {
@@ -63,6 +66,51 @@ const scheduleSchema = z
   })
   .or(z.record(scheduleDaySchema))
   .default({});
+
+const toNumber = (value: unknown, fallback = 0) => {
+  if (value instanceof Prisma.Decimal) {
+    return value.toNumber();
+  }
+  if (value && typeof value === 'object' && 'toNumber' in value && typeof (value as { toNumber?: () => number }).toNumber === 'function') {
+    const parsed = (value as { toNumber: () => number }).toNumber();
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const parsed = Number.parseFloat(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return fallback;
+};
+
+const serializeAttendanceFact = (
+  fact: NonNullable<Awaited<ReturnType<typeof getAttendanceFactForUser>>>
+) => ({
+  userId: fact.userId,
+  monthKey: fact.monthKey,
+  rangeStart: fact.rangeStart,
+  rangeEnd: fact.rangeEnd,
+  assignedHours: toNumber(fact.assignedHours),
+  workedHours: toNumber(fact.workedHours),
+  ptoHours: toNumber(fact.ptoHours),
+  utoAbsenceHours: toNumber(fact.utoAbsenceHours),
+  matchedMakeUpHours: toNumber(fact.matchedMakeUpHours),
+  tardyMinutes: fact.tardyMinutes,
+  isPerfect: fact.isPerfect,
+  reviewStatus: fact.reviewStatus,
+  reviewNotes: fact.reviewNotes,
+  reviewedAt: fact.reviewedAt,
+  reviewedBy: fact.reviewedBy,
+  reasons: fact.reasons,
+  snapshot: fact.snapshot,
+  user: fact.user
+});
 
 const datePreprocess = z.preprocess((value) => {
   if (value instanceof Date) return value;
@@ -195,6 +243,17 @@ payrollRouter.delete(
 );
 
 const monthParamSchema = z.object({ month: z.string().regex(/^\d{4}-\d{2}$/) });
+const factUserParamSchema = z.object({ userId: z.coerce.number().int().positive() });
+const attendanceReviewUpdateSchema = z.object({
+  reviewStatus: z.enum(['pending', 'resolved']),
+  reviewNotes: z
+    .string()
+    .trim()
+    .min(1, { message: 'Review notes must not be empty.' })
+    .max(500)
+    .optional()
+    .nullable()
+});
 
 payrollRouter.post(
   '/attendance/:month/recalc',
@@ -214,6 +273,44 @@ payrollRouter.get(
     const { month } = parseWithSchema(monthParamSchema, req.params, 'Invalid month');
     const data = await listAttendanceFactsForMonth(month);
     res.json(data);
+  })
+);
+
+payrollRouter.get(
+  '/attendance/:month/users/:userId',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { month } = parseWithSchema(monthParamSchema, req.params, 'Invalid month');
+    const { userId } = parseWithSchema(factUserParamSchema, req.params, 'Invalid user');
+    const fact = await getAttendanceFactForUser(month, userId);
+    if (!fact) {
+      return res.status(404).json({ error: 'Attendance fact not found.' });
+    }
+    res.json({ fact: serializeAttendanceFact(fact) });
+  })
+);
+
+payrollRouter.patch(
+  '/attendance/:month/users/:userId/review',
+  requireAdmin,
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { month } = parseWithSchema(monthParamSchema, req.params, 'Invalid month');
+    const { userId } = parseWithSchema(factUserParamSchema, req.params, 'Invalid user');
+    const { reviewStatus, reviewNotes } = parseWithSchema(
+      attendanceReviewUpdateSchema,
+      req.body ?? {},
+      'Invalid review update'
+    );
+    const normalizedNotes =
+      reviewNotes === null || reviewNotes === undefined ? null : reviewNotes.trim();
+    const fact = await updateAttendanceReviewStatus(
+      month,
+      userId,
+      reviewStatus,
+      normalizedNotes,
+      req.user!.id
+    );
+    res.json({ fact: serializeAttendanceFact(fact) });
   })
 );
 

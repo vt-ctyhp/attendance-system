@@ -19,6 +19,8 @@ import {
 } from './constants';
 import { getAllConfigsThrough, resolveActiveConfigForRange, type EmployeeCompSnapshot } from './config';
 import type { BonusCandidate, Prisma } from '@prisma/client';
+import { countPendingReviewsForMonth } from './attendance';
+import { HttpError } from '../../errors';
 
 const resolvePayPeriod = (payDate: Date) => {
   const zoned = utcToZonedTime(payDate, PAYROLL_TIME_ZONE);
@@ -285,6 +287,13 @@ export const getPayrollPeriod = async (payDate: Date) => {
 
 export const approvePayrollPeriod = async (payDate: Date, actorId: number) => {
   const { periodKey } = resolvePayPeriod(payDate);
+  const monthKey = periodKey.slice(0, 7);
+  const pendingReviews = await countPendingReviewsForMonth(monthKey);
+  if (pendingReviews > 0) {
+    throw HttpError.badRequest(
+      `Attendance review required for ${pendingReviews} employee${pendingReviews === 1 ? '' : 's'} before approving payroll.`
+    );
+  }
   const period = await prisma.payrollPeriod.update({
     where: { periodKey },
     data: { status: 'approved', approvedAt: new Date(), approvedById: actorId }
@@ -303,6 +312,13 @@ export const approvePayrollPeriod = async (payDate: Date, actorId: number) => {
 
 export const markPayrollPaid = async (payDate: Date, actorId: number) => {
   const { periodKey } = resolvePayPeriod(payDate);
+  const monthKey = periodKey.slice(0, 7);
+  const pendingReviews = await countPendingReviewsForMonth(monthKey);
+  if (pendingReviews > 0) {
+    throw HttpError.badRequest(
+      `Attendance review required for ${pendingReviews} employee${pendingReviews === 1 ? '' : 's'} before marking payroll as paid.`
+    );
+  }
   const period = await prisma.payrollPeriod.update({
     where: { periodKey },
     data: { status: 'paid', paidAt: new Date(), paidById: actorId }

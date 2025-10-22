@@ -12,7 +12,7 @@ import {
   zonedTimeToUtc
 } from 'date-fns-tz';
 import { prisma } from '../../prisma';
-import type { AttendanceMonthFact } from '@prisma/client';
+import type { AttendanceMonthFact, AttendanceReviewStatus } from '@prisma/client';
 import {
   MONTH_KEY_FORMAT,
   DATE_KEY_FORMAT,
@@ -398,6 +398,33 @@ export const recalcMonthlyAttendanceFacts = async (
       .filter((detail) => detail.notes.length > 0)
       .map((detail) => ({ date: detail.date, notes: detail.notes }));
 
+    const createReviewFields = isPerfect
+      ? {
+          reviewStatus: 'resolved' as AttendanceReviewStatus,
+          reviewNotes: null,
+          reviewedAt: null,
+          reviewedById: null
+        }
+      : {
+          reviewStatus: 'pending' as AttendanceReviewStatus,
+          reviewNotes: null,
+          reviewedAt: null,
+          reviewedById: null
+        };
+
+    const updateReviewFields = isPerfect
+      ? {
+          reviewStatus: 'resolved' as AttendanceReviewStatus,
+          reviewNotes: null,
+          reviewedAt: null,
+          reviewedById: null
+        }
+      : {
+          reviewStatus: 'pending' as AttendanceReviewStatus,
+          reviewedAt: null,
+          reviewedById: null
+        };
+
     const fact = await prisma.attendanceMonthFact.upsert({
       where: { userId_monthKey: { userId: user.id, monthKey } },
       create: {
@@ -413,7 +440,8 @@ export const recalcMonthlyAttendanceFacts = async (
         matchedMakeUpHours: new Decimal(matchedMakeUpHours),
         isPerfect,
         reasons,
-        snapshot
+        snapshot,
+        ...createReviewFields
       },
       update: {
         rangeStart,
@@ -427,7 +455,8 @@ export const recalcMonthlyAttendanceFacts = async (
         isPerfect,
         reasons,
         snapshot,
-        computedAt: new Date()
+        computedAt: new Date(),
+        ...updateReviewFields
       }
     });
 
@@ -460,10 +489,53 @@ export const listAttendanceFactsForMonth = async (monthKey: string) => {
   const { rangeStart, rangeEnd } = parseMonthKey(monthKey);
   const facts = await prisma.attendanceMonthFact.findMany({
     where: { monthKey },
-    include: { user: { select: { id: true, name: true, email: true } } },
+    include: {
+      user: { select: { id: true, name: true, email: true } },
+      reviewedBy: { select: { id: true, name: true, email: true } }
+    },
     orderBy: { userId: 'asc' }
   });
   return { rangeStart, rangeEnd, facts };
+};
+
+export const getAttendanceFactForUser = async (monthKey: string, userId: number) => {
+  return prisma.attendanceMonthFact.findUnique({
+    where: { userId_monthKey: { monthKey, userId } },
+    include: {
+      user: { select: { id: true, name: true, email: true } },
+      reviewedBy: { select: { id: true, name: true, email: true } }
+    }
+  });
+};
+
+export const updateAttendanceReviewStatus = async (
+  monthKey: string,
+  userId: number,
+  status: AttendanceReviewStatus,
+  notes: string | null,
+  reviewerId: number
+) => {
+  const resolved = status === 'resolved';
+  const updated = await prisma.attendanceMonthFact.update({
+    where: { userId_monthKey: { monthKey, userId } },
+    data: {
+      reviewStatus: status,
+      reviewNotes: notes,
+      reviewedAt: resolved ? new Date() : null,
+      reviewedById: resolved ? reviewerId : null
+    },
+    include: {
+      user: { select: { id: true, name: true, email: true } },
+      reviewedBy: { select: { id: true, name: true, email: true } }
+    }
+  });
+  return updated;
+};
+
+export const countPendingReviewsForMonth = async (monthKey: string) => {
+  return prisma.attendanceMonthFact.count({
+    where: { monthKey, reviewStatus: 'pending' }
+  });
 };
 
 export const isAttendanceMonthLocked = async (monthKey: string) => {

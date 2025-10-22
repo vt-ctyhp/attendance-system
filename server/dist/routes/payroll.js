@@ -4,6 +4,7 @@ exports.payrollRouter = void 0;
 const express_1 = require("express");
 const zod_1 = require("zod");
 const date_fns_tz_1 = require("date-fns-tz");
+const client_1 = require("@prisma/client");
 const auth_1 = require("../auth");
 const asyncHandler_1 = require("../middleware/asyncHandler");
 const validation_1 = require("../utils/validation");
@@ -43,6 +44,47 @@ const scheduleSchema = zod_1.z
 })
     .or(zod_1.z.record(scheduleDaySchema))
     .default({});
+const toNumber = (value, fallback = 0) => {
+    if (value instanceof client_1.Prisma.Decimal) {
+        return value.toNumber();
+    }
+    if (value && typeof value === 'object' && 'toNumber' in value && typeof value.toNumber === 'function') {
+        const parsed = value.toNumber();
+        if (Number.isFinite(parsed)) {
+            return parsed;
+        }
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return value;
+    }
+    if (typeof value === 'string') {
+        const parsed = Number.parseFloat(value);
+        if (Number.isFinite(parsed)) {
+            return parsed;
+        }
+    }
+    return fallback;
+};
+const serializeAttendanceFact = (fact) => ({
+    userId: fact.userId,
+    monthKey: fact.monthKey,
+    rangeStart: fact.rangeStart,
+    rangeEnd: fact.rangeEnd,
+    assignedHours: toNumber(fact.assignedHours),
+    workedHours: toNumber(fact.workedHours),
+    ptoHours: toNumber(fact.ptoHours),
+    utoAbsenceHours: toNumber(fact.utoAbsenceHours),
+    matchedMakeUpHours: toNumber(fact.matchedMakeUpHours),
+    tardyMinutes: fact.tardyMinutes,
+    isPerfect: fact.isPerfect,
+    reviewStatus: fact.reviewStatus,
+    reviewNotes: fact.reviewNotes,
+    reviewedAt: fact.reviewedAt,
+    reviewedBy: fact.reviewedBy,
+    reasons: fact.reasons,
+    snapshot: fact.snapshot,
+    user: fact.user
+});
 const datePreprocess = zod_1.z.preprocess((value) => {
     if (value instanceof Date)
         return value;
@@ -136,6 +178,17 @@ payrollRouter.delete('/holidays/:date', requireAdmin, (0, asyncHandler_1.asyncHa
     res.json({ removed });
 }));
 const monthParamSchema = zod_1.z.object({ month: zod_1.z.string().regex(/^\d{4}-\d{2}$/) });
+const factUserParamSchema = zod_1.z.object({ userId: zod_1.z.coerce.number().int().positive() });
+const attendanceReviewUpdateSchema = zod_1.z.object({
+    reviewStatus: zod_1.z.enum(['pending', 'resolved']),
+    reviewNotes: zod_1.z
+        .string()
+        .trim()
+        .min(1, { message: 'Review notes must not be empty.' })
+        .max(500)
+        .optional()
+        .nullable()
+});
 payrollRouter.post('/attendance/:month/recalc', requireAdmin, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     const { month } = (0, validation_1.parseWithSchema)(monthParamSchema, req.params, 'Invalid month');
     const facts = await (0, attendance_1.recalcMonthlyAttendanceFacts)(month, req.user?.id);
@@ -146,6 +199,23 @@ payrollRouter.get('/attendance/:month', requireAdmin, (0, asyncHandler_1.asyncHa
     const { month } = (0, validation_1.parseWithSchema)(monthParamSchema, req.params, 'Invalid month');
     const data = await (0, attendance_1.listAttendanceFactsForMonth)(month);
     res.json(data);
+}));
+payrollRouter.get('/attendance/:month/users/:userId', requireAdmin, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const { month } = (0, validation_1.parseWithSchema)(monthParamSchema, req.params, 'Invalid month');
+    const { userId } = (0, validation_1.parseWithSchema)(factUserParamSchema, req.params, 'Invalid user');
+    const fact = await (0, attendance_1.getAttendanceFactForUser)(month, userId);
+    if (!fact) {
+        return res.status(404).json({ error: 'Attendance fact not found.' });
+    }
+    res.json({ fact: serializeAttendanceFact(fact) });
+}));
+payrollRouter.patch('/attendance/:month/users/:userId/review', requireAdmin, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    const { month } = (0, validation_1.parseWithSchema)(monthParamSchema, req.params, 'Invalid month');
+    const { userId } = (0, validation_1.parseWithSchema)(factUserParamSchema, req.params, 'Invalid user');
+    const { reviewStatus, reviewNotes } = (0, validation_1.parseWithSchema)(attendanceReviewUpdateSchema, req.body ?? {}, 'Invalid review update');
+    const normalizedNotes = reviewNotes === null || reviewNotes === undefined ? null : reviewNotes.trim();
+    const fact = await (0, attendance_1.updateAttendanceReviewStatus)(month, userId, reviewStatus, normalizedNotes, req.user.id);
+    res.json({ fact: serializeAttendanceFact(fact) });
 }));
 const dateParamSchema = zod_1.z.object({ payDate: zod_1.z.string().min(1) });
 const parsePayDate = (value) => {

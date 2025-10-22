@@ -29,6 +29,7 @@ model User {
   payrollConfigs EmployeeCompConfig[]
   submittedEmployeeConfigs EmployeeCompConfig[] @relation("EmployeeConfigSubmittedBy")
   attendanceFacts AttendanceMonthFact[]
+  reviewedAttendanceFacts AttendanceMonthFact[] @relation("AttendanceReviewedBy")
   bonusCandidates BonusCandidate[] @relation("BonusCandidateUser")
   approvedBonusCandidates BonusCandidate[] @relation("BonusCandidateApprovedBy")
   payrollLines PayrollLine[]
@@ -158,16 +159,26 @@ model AttendanceMonthFact {
   assignedHours          Decimal  @db.Decimal(10, 2)
   workedHours            Decimal  @db.Decimal(10, 2)
   ptoHours               Decimal  @db.Decimal(10, 2)
-  utoAbsenceHours     Decimal  @default(0) @db.Decimal(10, 2)
+  utoAbsenceHours        Decimal  @default(0) @db.Decimal(10, 2)
   tardyMinutes           Int
   matchedMakeUpHours     Decimal  @db.Decimal(10, 2)
   isPerfect              Boolean
   reasons                Json
   snapshot               Json
   computedAt             DateTime @default(now())
+  reviewStatus           AttendanceReviewStatus @default(pending)
+  reviewNotes            String?
+  reviewedAt             DateTime?
+  reviewedById           Int?
+  reviewedBy             User?    @relation("AttendanceReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
 
   @@unique([userId, monthKey])
   @@index([monthKey])
+}
+
+enum AttendanceReviewStatus {
+  pending
+  resolved
 }
 
 model BonusCandidate {

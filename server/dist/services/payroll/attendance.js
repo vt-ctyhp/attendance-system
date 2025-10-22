@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.isAttendanceMonthLocked = exports.listAttendanceFactsForMonth = exports.recalcMonthlyAttendanceFacts = exports.getPayrollDayBounds = exports.getMonthKeyForDate = void 0;
+exports.isAttendanceMonthLocked = exports.countPendingReviewsForMonth = exports.updateAttendanceReviewStatus = exports.getAttendanceFactForUser = exports.listAttendanceFactsForMonth = exports.recalcMonthlyAttendanceFacts = exports.getPayrollDayBounds = exports.getMonthKeyForDate = void 0;
 const library_1 = require("@prisma/client/runtime/library");
 const date_fns_1 = require("date-fns");
 const date_fns_tz_1 = require("date-fns-tz");
@@ -299,6 +299,31 @@ const recalcMonthlyAttendanceFacts = async (monthKey, actorId, userIds) => {
         const reasons = dayDetails
             .filter((detail) => detail.notes.length > 0)
             .map((detail) => ({ date: detail.date, notes: detail.notes }));
+        const createReviewFields = isPerfect
+            ? {
+                reviewStatus: 'resolved',
+                reviewNotes: null,
+                reviewedAt: null,
+                reviewedById: null
+            }
+            : {
+                reviewStatus: 'pending',
+                reviewNotes: null,
+                reviewedAt: null,
+                reviewedById: null
+            };
+        const updateReviewFields = isPerfect
+            ? {
+                reviewStatus: 'resolved',
+                reviewNotes: null,
+                reviewedAt: null,
+                reviewedById: null
+            }
+            : {
+                reviewStatus: 'pending',
+                reviewedAt: null,
+                reviewedById: null
+            };
         const fact = await prisma_1.prisma.attendanceMonthFact.upsert({
             where: { userId_monthKey: { userId: user.id, monthKey } },
             create: {
@@ -314,7 +339,8 @@ const recalcMonthlyAttendanceFacts = async (monthKey, actorId, userIds) => {
                 matchedMakeUpHours: new library_1.Decimal(matchedMakeUpHours),
                 isPerfect,
                 reasons,
-                snapshot
+                snapshot,
+                ...createReviewFields
             },
             update: {
                 rangeStart,
@@ -328,7 +354,8 @@ const recalcMonthlyAttendanceFacts = async (monthKey, actorId, userIds) => {
                 isPerfect,
                 reasons,
                 snapshot,
-                computedAt: new Date()
+                computedAt: new Date(),
+                ...updateReviewFields
             }
         });
         results.push(fact);
@@ -358,12 +385,49 @@ const listAttendanceFactsForMonth = async (monthKey) => {
     const { rangeStart, rangeEnd } = parseMonthKey(monthKey);
     const facts = await prisma_1.prisma.attendanceMonthFact.findMany({
         where: { monthKey },
-        include: { user: { select: { id: true, name: true, email: true } } },
+        include: {
+            user: { select: { id: true, name: true, email: true } },
+            reviewedBy: { select: { id: true, name: true, email: true } }
+        },
         orderBy: { userId: 'asc' }
     });
     return { rangeStart, rangeEnd, facts };
 };
 exports.listAttendanceFactsForMonth = listAttendanceFactsForMonth;
+const getAttendanceFactForUser = async (monthKey, userId) => {
+    return prisma_1.prisma.attendanceMonthFact.findUnique({
+        where: { userId_monthKey: { monthKey, userId } },
+        include: {
+            user: { select: { id: true, name: true, email: true } },
+            reviewedBy: { select: { id: true, name: true, email: true } }
+        }
+    });
+};
+exports.getAttendanceFactForUser = getAttendanceFactForUser;
+const updateAttendanceReviewStatus = async (monthKey, userId, status, notes, reviewerId) => {
+    const resolved = status === 'resolved';
+    const updated = await prisma_1.prisma.attendanceMonthFact.update({
+        where: { userId_monthKey: { monthKey, userId } },
+        data: {
+            reviewStatus: status,
+            reviewNotes: notes,
+            reviewedAt: resolved ? new Date() : null,
+            reviewedById: resolved ? reviewerId : null
+        },
+        include: {
+            user: { select: { id: true, name: true, email: true } },
+            reviewedBy: { select: { id: true, name: true, email: true } }
+        }
+    });
+    return updated;
+};
+exports.updateAttendanceReviewStatus = updateAttendanceReviewStatus;
+const countPendingReviewsForMonth = async (monthKey) => {
+    return prisma_1.prisma.attendanceMonthFact.count({
+        where: { monthKey, reviewStatus: 'pending' }
+    });
+};
+exports.countPendingReviewsForMonth = countPendingReviewsForMonth;
 const isAttendanceMonthLocked = async (monthKey) => {
     const periodKeys = [`${monthKey}-A`, `${monthKey}-B`];
     const periods = await prisma_1.prisma.payrollPeriod.findMany({

@@ -2781,6 +2781,18 @@ const baseStyles = `
     body.dashboard--payroll #run-payroll .stack-form { gap: 0.25rem; }
     body.dashboard--payroll #run-payroll .stack-form .meta { margin: 0 0 0.15rem; }
     body.dashboard--payroll .step-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    body.dashboard--payroll .attendance-review-dialog { border: none; border-radius: 18px; padding: 0; width: min(640px, 90vw); box-shadow: 0 30px 60px rgba(15,23,42,0.3); }
+    body.dashboard--payroll .attendance-review-dialog::backdrop { background: rgba(15,23,42,0.4); }
+    body.dashboard--payroll .attendance-review-dialog__form { display: grid; gap: 1.25rem; padding: 1.75rem; }
+    body.dashboard--payroll .attendance-review-dialog__header { display: grid; gap: 0.3rem; }
+    body.dashboard--payroll .attendance-review-dialog__header h3 { margin: 0; font-size: 1.3rem; color: #0f172a; }
+    body.dashboard--payroll .attendance-review-dialog__subtitle { margin: 0; font-size: 0.95rem; color: #475569; }
+    body.dashboard--payroll .attendance-review-dialog__body { display: grid; gap: 1rem; max-height: min(400px, 60vh); overflow-y: auto; }
+    body.dashboard--payroll .attendance-review-dialog__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.35rem; font-size: 0.9rem; color: #475569; }
+    body.dashboard--payroll .attendance-review-dialog__actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
+    body.dashboard--payroll .attendance-review-dialog__field { display: grid; gap: 0.4rem; }
+    body.dashboard--payroll .attendance-review-dialog__field textarea { width: 100%; min-height: 96px; resize: vertical; border-radius: 10px; border: 1px solid rgba(148,163,184,0.35); padding: 0.6rem 0.75rem; font-size: 0.95rem; font-family: inherit; }
+    body.dashboard--payroll .attendance-review-dialog__field label { font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; font-weight: 600; }
     body.dashboard--payroll .status-chip { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.25rem 0.6rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; background: rgba(148,163,184,0.18); color: #334155; }
     body.dashboard--payroll .status-chip--draft { background: rgba(148,163,184,0.3); color: #334155; }
     body.dashboard--payroll .status-chip--approved { background: rgba(34,197,94,0.2); color: #047857; }
@@ -6075,10 +6087,16 @@ exports.dashboardRouter.get('/payroll', async (req, res) => {
                 .map((reason) => formatAttendanceReason(reason))
                 .filter((reason) => typeof reason === 'string' && reason.trim().length > 0)
             : [];
+        const reviewStatus = fact.reviewStatus ?? 'pending';
+        if (typeof fact.reviewNotes === 'string' && fact.reviewNotes.trim().length) {
+            reasonNotes.push(`Review note: ${fact.reviewNotes.trim()}`);
+        }
         const scheduleNotes = reasonNotes.length ? reasonNotes.join('; ') : '—';
         const statusChip = fact.isPerfect
             ? '<span class="status-chip status-chip--approved">Perfect</span>'
-            : '<span class="status-chip status-chip--warn">Review</span>';
+            : reviewStatus === 'resolved'
+                ? '<span class="status-chip status-chip--approved">Reviewed</span>'
+                : '<span class="status-chip status-chip--warn">Review</span>';
         return `
         <tr>
           <td>
@@ -6093,6 +6111,18 @@ exports.dashboardRouter.get('/payroll', async (req, res) => {
           <td>${fact.tardyMinutes}</td>
           <td>${statusChip}</td>
           <td>${escapeHtml(scheduleNotes)}</td>
+          <td>
+            <div class="button-row">
+              <button
+                type="button"
+                class="button button-secondary"
+                data-attendance-review-open
+                data-user-id="${fact.userId}"
+                data-month="${selectedFactsMonth}"
+                data-employee-name="${escapeHtml(employee?.name ?? `User ${fact.userId}`)}"
+              >${reviewStatus === 'resolved' || fact.isPerfect ? 'View' : 'Review'}</button>
+            </div>
+          </td>
         </tr>
       `;
     })
@@ -6111,6 +6141,7 @@ exports.dashboardRouter.get('/payroll', async (req, res) => {
               <th>Tardy (m)</th>
               <th>Status</th>
               <th>Notes</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -6119,6 +6150,23 @@ exports.dashboardRouter.get('/payroll', async (req, res) => {
         </table>
       </div>`
         : `<div class="empty">No attendance facts computed for ${escapeHtml(selectedFactsMonth)}.</div>`;
+    const attendanceReviewDialog = `
+    <dialog id="attendance-review-dialog" class="attendance-review-dialog">
+      <form method="dialog" class="attendance-review-dialog__form">
+        <div class="attendance-review-dialog__header">
+          <h3 id="attendance-review-title">Attendance Review</h3>
+          <p class="attendance-review-dialog__subtitle" data-attendance-review-subtitle></p>
+        </div>
+        <div class="attendance-review-dialog__body" data-attendance-review-body>
+          <p class="muted">Loading attendance details…</p>
+        </div>
+        <div class="attendance-review-dialog__actions">
+          <button type="button" class="button button-secondary" data-attendance-review-cancel>Close</button>
+          <button type="button" class="button" data-attendance-review-save>Save Review</button>
+        </div>
+      </form>
+    </dialog>
+  `;
     const attendanceRangeNote = attendanceData
         ? renderTimezoneNote(attendanceData.rangeStart, attendanceData.rangeEnd)
         : '';
@@ -6309,7 +6357,7 @@ exports.dashboardRouter.get('/payroll', async (req, res) => {
         ? (0, date_fns_tz_1.formatInTimeZone)(attendanceMonthDate, DASHBOARD_TIME_ZONE, 'MMMM yyyy')
         : selectedFactsMonth;
     const perfectCount = attendanceFacts.filter((fact) => fact.isPerfect).length;
-    const reviewCount = attendanceFacts.length - perfectCount;
+    const reviewCount = attendanceFacts.filter((fact) => !fact.isPerfect && fact.reviewStatus !== 'resolved').length;
     const attendanceInsight = attendanceFacts.length
         ? `${perfectCount} perfect · ${reviewCount} needs review`
         : 'No attendance facts yet.';
@@ -6488,6 +6536,7 @@ exports.dashboardRouter.get('/payroll', async (req, res) => {
               </div>
             </section>
           </div>
+          ${attendanceReviewDialog}
           <div class="cards-grid cards-grid--payroll">
             <section class="card card--table">
               <div class="card__header">
@@ -6580,6 +6629,245 @@ exports.dashboardRouter.get('/payroll', async (req, res) => {
                 el.textContent = text;
               }
             };
+
+            const attendanceReviewDialog = document.getElementById('attendance-review-dialog');
+            const attendanceReviewBody = attendanceReviewDialog?.querySelector('[data-attendance-review-body]');
+            const attendanceReviewSubtitle =
+              attendanceReviewDialog?.querySelector('[data-attendance-review-subtitle]');
+            const attendanceReviewSave = attendanceReviewDialog?.querySelector('[data-attendance-review-save]');
+            const attendanceReviewCancel =
+              attendanceReviewDialog?.querySelector('[data-attendance-review-cancel]');
+            let activeAttendanceReview = null;
+
+            const escapeHtmlClient = (value) =>
+              String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+
+            const formatHoursDisplay = (value) => {
+              const numberValue = Number(value);
+              if (!Number.isFinite(numberValue)) return '0 h';
+              if (Number.isInteger(numberValue)) {
+                return numberValue.toFixed(0) + ' h';
+              }
+              return (Math.round(numberValue * 100) / 100).toFixed(2) + ' h';
+            };
+
+            const renderAttendanceReview = (fact, employeeName) => {
+              if (!attendanceReviewBody) return;
+              const reasons = Array.isArray(fact.reasons) ? fact.reasons : [];
+              const reasonItems = reasons
+                .map((entry) => {
+                  if (!entry || typeof entry !== 'object') return null;
+                  const date = typeof entry.date === 'string' ? entry.date : '';
+                  const notes = Array.isArray(entry.notes)
+                    ? entry.notes.map((note) => String(note).trim()).filter((note) => note.length)
+                    : typeof entry.notes === 'string'
+                      ? [entry.notes.trim()]
+                      : [];
+                  if (!date && !notes.length) return null;
+                  const label = notes.length ? date + ': ' + notes.join(', ') : date;
+                  return '<li>' + escapeHtmlClient(label) + '</li>';
+                })
+                .filter(Boolean)
+                .join('');
+
+              const snapshot = fact.snapshot && typeof fact.snapshot === 'object' ? fact.snapshot : null;
+              const days = Array.isArray(snapshot?.days) ? snapshot.days : [];
+              const notedDays = days
+                .filter((day) => Array.isArray(day?.notes) && day.notes.length)
+                .map((day) => {
+                  const noteList = day.notes
+                    .map((note) => String(note).trim())
+                    .filter((note) => note.length)
+                    .join(', ');
+                  return '<li>' + escapeHtmlClient(day.date + ': ' + noteList) + '</li>';
+                })
+                .join('');
+
+              const monthLabel = (() => {
+                try {
+                  if (typeof fact.monthKey === 'string') {
+                    const parts = fact.monthKey.split('-').map((part) => Number.parseInt(part, 10));
+                    if (parts.length === 2 && parts.every((part) => Number.isFinite(part))) {
+                      const formatted = new Intl.DateTimeFormat(undefined, {
+                        month: 'long',
+                        year: 'numeric'
+                      }).format(new Date(Date.UTC(parts[0], parts[1] - 1, 1)));
+                      return formatted;
+                    }
+                  }
+                } catch (error) {
+                  /* ignore */
+                }
+                return typeof fact.monthKey === 'string' ? fact.monthKey : '';
+              })();
+
+              if (attendanceReviewSubtitle) {
+                attendanceReviewSubtitle.textContent = employeeName + (monthLabel ? ' • ' + monthLabel : '');
+              }
+
+              const statusOptions =
+                '<option value="pending"' +
+                (fact.reviewStatus !== 'resolved' ? ' selected' : '') +
+                '>Needs review</option>' +
+                '<option value="resolved"' +
+                (fact.reviewStatus === 'resolved' ? ' selected' : '') +
+                '>Reviewed</option>';
+
+              const notesValue =
+                typeof fact.reviewNotes === 'string' && fact.reviewNotes.trim().length ? fact.reviewNotes.trim() : '';
+
+              const flaggedSection =
+                reasonItems || notedDays
+                  ? '<ul class="attendance-review-dialog__list">' + reasonItems + notedDays + '</ul>'
+                  : '<p class="muted">No flagged days this month.</p>';
+
+              const timesheetLink =
+                '/dashboard/timesheets?view=monthly&month=' + encodeURIComponent(fact.monthKey);
+
+              const reviewContent = [
+                '<div class="attendance-review-dialog__field">',
+                '  <label for="attendance-review-status">Review Status</label>',
+                '  <select id="attendance-review-status" data-attendance-review-status>',
+                statusOptions,
+                '  </select>',
+                '</div>',
+                '<div class="attendance-review-dialog__field">',
+                '  <label for="attendance-review-notes">Review Notes</label>',
+                '  <textarea id="attendance-review-notes" data-attendance-review-notes placeholder="Add context or next steps…">' +
+                  escapeHtmlClient(notesValue) +
+                  '</textarea>',
+                '</div>',
+                '<div class="attendance-review-dialog__field">',
+                '  <label>Attendance Totals</label>',
+                '  <div class="attendance-review-dialog__list">',
+                '    <li><strong>Assigned:</strong> ' + formatHoursDisplay(fact.assignedHours) + '</li>',
+                '    <li><strong>Worked:</strong> ' + formatHoursDisplay(fact.workedHours) + '</li>',
+                '    <li><strong>PTO:</strong> ' + formatHoursDisplay(fact.ptoHours) + '</li>',
+                '    <li><strong>UTO:</strong> ' + formatHoursDisplay(fact.utoAbsenceHours) + '</li>',
+                '    <li><strong>Make-Up:</strong> ' + formatHoursDisplay(fact.matchedMakeUpHours) + '</li>',
+                '    <li><strong>Tardy:</strong> ' + fact.tardyMinutes + ' minutes</li>',
+                '  </div>',
+                '</div>',
+                '<div class="attendance-review-dialog__field">',
+                '  <label>Flagged Days</label>',
+                flaggedSection,
+                '</div>',
+                '<div class="attendance-review-dialog__field">',
+                '  <a href="' + timesheetLink + '" target="_blank" rel="noopener">Open Timesheet Review in new tab</a>',
+                '</div>'
+              ];
+
+              attendanceReviewBody.innerHTML = reviewContent.join('');
+            };
+
+            const openAttendanceReview = async (month, userId, employeeName) => {
+              if (!attendanceReviewDialog || !attendanceReviewBody) {
+                window.alert('Review dialog unavailable.');
+                return;
+              }
+              attendanceReviewBody.innerHTML = '<p class="muted">Loading attendance details…</p>';
+              try {
+                const response = await fetch(
+                  \`/api/payroll/attendance/\${encodeURIComponent(month)}/users/\${encodeURIComponent(userId)}\`
+                );
+                if (!response.ok) {
+                  throw new Error('Unable to load attendance fact.');
+                }
+                const payload = await response.json();
+                const fact = payload?.fact;
+                if (!fact) {
+                  throw new Error('Attendance fact not found.');
+                }
+                activeAttendanceReview = { month, userId, employeeName, fact };
+                renderAttendanceReview(fact, employeeName);
+                if (typeof attendanceReviewDialog.showModal === 'function') {
+                  attendanceReviewDialog.showModal();
+                } else {
+                  attendanceReviewDialog.setAttribute('open', '');
+                }
+              } catch (error) {
+                window.alert(error instanceof Error ? error.message : 'Unable to load attendance fact.');
+                activeAttendanceReview = null;
+              }
+            };
+
+            if (attendanceReviewCancel) {
+              attendanceReviewCancel.addEventListener('click', () => {
+                if (!attendanceReviewDialog) return;
+                if (typeof attendanceReviewDialog.close === 'function') {
+                  attendanceReviewDialog.close();
+                } else {
+                  attendanceReviewDialog.removeAttribute('open');
+                }
+                activeAttendanceReview = null;
+              });
+            }
+
+            if (attendanceReviewSave) {
+              attendanceReviewSave.addEventListener('click', async () => {
+                if (!attendanceReviewDialog || !activeAttendanceReview) {
+                  return;
+                }
+                const statusField = attendanceReviewDialog.querySelector('[data-attendance-review-status]');
+                const notesField = attendanceReviewDialog.querySelector('[data-attendance-review-notes]');
+                const reviewStatus = statusField ? statusField.value : 'pending';
+                const reviewNotes =
+                  notesField && typeof notesField.value === 'string' ? notesField.value.trim() : '';
+                try {
+                  const response = await fetch(
+                    \`/api/payroll/attendance/\${encodeURIComponent(activeAttendanceReview.month)}/users/\${encodeURIComponent(activeAttendanceReview.userId)}/review\`,
+                    {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        reviewStatus,
+                        reviewNotes: reviewNotes.length ? reviewNotes : null
+                      })
+                    }
+                  );
+                  if (!response.ok) {
+                    let message = 'Unable to update attendance review.';
+                    try {
+                      const data = await response.json();
+                      if (data && typeof data.error === 'string') {
+                        message = data.error;
+                      }
+                    } catch (error) {
+                      /* ignore */
+                    }
+                    throw new Error(message);
+                  }
+                  if (typeof attendanceReviewDialog.close === 'function') {
+                    attendanceReviewDialog.close();
+                  } else {
+                    attendanceReviewDialog.removeAttribute('open');
+                  }
+                  reloadWithBanner('Attendance review updated.');
+                } catch (error) {
+                  window.alert(error instanceof Error ? error.message : 'Unable to update attendance review.');
+                }
+              });
+            }
+
+            document.addEventListener('click', (event) => {
+              const target = event.target instanceof HTMLElement ? event.target : null;
+              const reviewButton = target?.closest('[data-attendance-review-open]');
+              if (!reviewButton) return;
+              event.preventDefault();
+              const userId = Number.parseInt(reviewButton.getAttribute('data-user-id') || '', 10);
+              const month = reviewButton.getAttribute('data-month');
+              const employeeName = reviewButton.getAttribute('data-employee-name') || 'Employee';
+              if (!Number.isFinite(userId) || !month) {
+                window.alert('Attendance fact is missing required identifiers.');
+                return;
+              }
+              void openAttendanceReview(month, userId, employeeName);
+            });
 
             document.querySelectorAll('[data-payroll-action]').forEach((button) => {
               button.addEventListener('click', async () => {

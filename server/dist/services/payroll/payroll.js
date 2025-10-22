@@ -7,6 +7,8 @@ const date_fns_tz_1 = require("date-fns-tz");
 const prisma_1 = require("../../prisma");
 const constants_1 = require("./constants");
 const config_1 = require("./config");
+const attendance_1 = require("./attendance");
+const errors_1 = require("../../errors");
 const resolvePayPeriod = (payDate) => {
     const zoned = (0, date_fns_tz_1.utcToZonedTime)(payDate, constants_1.PAYROLL_TIME_ZONE);
     const endOfMonthDate = (0, date_fns_1.endOfMonth)(zoned);
@@ -244,6 +246,11 @@ const getPayrollPeriod = async (payDate) => {
 exports.getPayrollPeriod = getPayrollPeriod;
 const approvePayrollPeriod = async (payDate, actorId) => {
     const { periodKey } = resolvePayPeriod(payDate);
+    const monthKey = periodKey.slice(0, 7);
+    const pendingReviews = await (0, attendance_1.countPendingReviewsForMonth)(monthKey);
+    if (pendingReviews > 0) {
+        throw errors_1.HttpError.badRequest(`Attendance review required for ${pendingReviews} employee${pendingReviews === 1 ? '' : 's'} before approving payroll.`);
+    }
     const period = await prisma_1.prisma.payrollPeriod.update({
         where: { periodKey },
         data: { status: 'approved', approvedAt: new Date(), approvedById: actorId }
@@ -262,6 +269,11 @@ const approvePayrollPeriod = async (payDate, actorId) => {
 exports.approvePayrollPeriod = approvePayrollPeriod;
 const markPayrollPaid = async (payDate, actorId) => {
     const { periodKey } = resolvePayPeriod(payDate);
+    const monthKey = periodKey.slice(0, 7);
+    const pendingReviews = await (0, attendance_1.countPendingReviewsForMonth)(monthKey);
+    if (pendingReviews > 0) {
+        throw errors_1.HttpError.badRequest(`Attendance review required for ${pendingReviews} employee${pendingReviews === 1 ? '' : 's'} before marking payroll as paid.`);
+    }
     const period = await prisma_1.prisma.payrollPeriod.update({
         where: { periodKey },
         data: { status: 'paid', paidAt: new Date(), paidById: actorId }
